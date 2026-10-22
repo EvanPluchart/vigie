@@ -1,6 +1,7 @@
 //! Process model: CPU % from deltas, tree, grouping, history, diagnostics.
 //! No UI and no OS calls here. See docs/ARCHITECTURE.md.
 
+pub mod perf;
 mod tree;
 
 use std::collections::{HashMap, HashSet};
