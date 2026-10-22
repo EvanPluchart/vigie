@@ -1,9 +1,9 @@
 name: CI
 
+# Manual only during development, to save GitHub Actions minutes.
+# Push and pull request triggers come back once M0 is wrapped up.
 on:
-  push:
-    branches: [dev, main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
