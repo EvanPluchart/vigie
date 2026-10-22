@@ -73,8 +73,7 @@ fn parse_sort(value: &str) -> Result<Sort, String> {
         "pid" => SortKey::Pid,
         _ => return Err(format!("invalid sort `{value}`")),
     };
-    // Numbers read best largest first, names and PIDs in natural order.
-    let ascending = ascending.unwrap_or(matches!(key, SortKey::Name | SortKey::Pid));
+    let ascending = ascending.unwrap_or(key.default_ascending());
     Ok(Sort { key, ascending })
 }
 

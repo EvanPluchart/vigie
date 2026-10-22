@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use slint::{Model, SharedString, VecModel};
 use vigie_core::{Frame, Row};
 
-use crate::ProcRow;
+use crate::{AppWindow, ProcRow};
 
 /// A frame converted on the sampler thread, so the UI thread only patches models.
 pub struct UiFrame {
@@ -33,6 +33,20 @@ fn proc_row(row: &Row) -> ProcRow {
         cpu: format_cpu(row.cpu_percent),
         memory: format_memory(row.memory_bytes),
     }
+}
+
+/// Runs on the UI thread: patch the models, nothing else.
+pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
+    let Some(app) = window.upgrade() else {
+        return;
+    };
+    let rows = app.get_rows();
+    if let Some(model) = rows.as_any().downcast_ref::<VecModel<ProcRow>>() {
+        patch(model, frame.rows);
+    }
+    app.set_process_count(frame.process_count);
+    app.set_self_cpu(frame.self_cpu);
+    app.set_self_memory(frame.self_memory);
 }
 
 /// "—" when there is no value yet, never a misleading 0.

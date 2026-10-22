@@ -16,10 +16,35 @@ pub enum SortKey {
     Pid,
 }
 
+impl SortKey {
+    /// Numbers read best largest first, names and PIDs in natural order.
+    pub fn default_ascending(self) -> bool {
+        matches!(self, SortKey::Name | SortKey::Pid)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Sort {
     pub key: SortKey,
     pub ascending: bool,
+}
+
+impl Sort {
+    /// The sort after clicking `key`'s column header: the same column flips direction, another
+    /// column starts in its natural direction.
+    pub fn clicked(self, key: SortKey) -> Sort {
+        if key == self.key {
+            Sort {
+                key,
+                ascending: !self.ascending,
+            }
+        } else {
+            Sort {
+                key,
+                ascending: key.default_ascending(),
+            }
+        }
+    }
 }
 
 impl Default for Sort {
@@ -76,6 +101,18 @@ impl Core {
             filter: filter.into().to_lowercase(),
             ..Self::default()
         }
+    }
+
+    pub fn sort(&self) -> Sort {
+        self.sort
+    }
+
+    pub fn set_sort(&mut self, sort: Sort) {
+        self.sort = sort;
+    }
+
+    pub fn set_filter(&mut self, filter: &str) {
+        self.filter = filter.to_lowercase();
     }
 
     pub fn update(&mut self, sample: &Sample) -> Frame {
@@ -292,6 +329,16 @@ mod tests {
         let r = row(&frame, 5);
         assert_eq!(r.name, "new");
         assert_eq!(r.cpu_percent, None);
+    }
+
+    #[test]
+    fn header_clicks_flip_or_reset_the_direction() {
+        let cpu = Sort::default();
+        assert!(!cpu.ascending);
+        let flipped = cpu.clicked(SortKey::Cpu);
+        assert_eq!((flipped.key, flipped.ascending), (SortKey::Cpu, true));
+        let name = flipped.clicked(SortKey::Name);
+        assert_eq!((name.key, name.ascending), (SortKey::Name, true));
     }
 
     #[test]

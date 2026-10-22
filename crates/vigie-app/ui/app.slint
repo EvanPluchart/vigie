@@ -1,4 +1,4 @@
-import { AboutSlint, Button, ListView, Palette } from "std-widgets.slint";
+import { AboutSlint, Button, LineEdit, ListView, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 
 export struct ProcRow {
@@ -25,6 +25,30 @@ component Columns inherits HorizontalLayout {
     padding-left: Theme.space-4;
     padding-right: Theme.space-4;
     spacing: Theme.space-3;
+}
+
+// A clickable column header. The active column shows its direction.
+component SortHeader inherits Rectangle {
+    in property <string> label;
+    in property <int> column;
+    in property <int> sort-column;
+    in property <bool> sort-ascending;
+    in property <TextHorizontalAlignment> alignment: left;
+    callback clicked(int);
+    property <bool> active: column == sort-column;
+
+    HeaderCell {
+        width: 100%;
+        height: 100%;
+        horizontal-alignment: root.alignment;
+        text: root.active ? (root.sort-ascending ? root.label + " ↑" : root.label + " ↓") : root.label;
+        color: root.active || touch.has-hover ? Theme.text : Theme.text-muted;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(root.column); }
+    }
 }
 
 export component AboutWindow inherits Window {
@@ -63,7 +87,12 @@ export component AppWindow inherits Window {
     in property <string> process-count;
     in property <string> self-cpu: "—";
     in property <string> self-memory: "—";
+    in property <int> sort-column: 2;
+    in property <bool> sort-ascending;
+    in-out property <string> search-text;
     callback show-about();
+    callback sort-clicked(int);
+    callback search-edited(string);
 
     public function set-dark(dark: bool) {
         Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
@@ -76,13 +105,50 @@ export component AppWindow inherits Window {
     background: Theme.background;
 
     VerticalLayout {
+        HorizontalLayout {
+            padding: Theme.space-3;
+            padding-left: Theme.space-4;
+            padding-right: Theme.space-4;
+            spacing: Theme.space-3;
+            Text {
+                text: @tr("Processes");
+                color: Theme.text;
+                font-size: Theme.font-section;
+                font-weight: Theme.weight-strong;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            LineEdit {
+                width: 260px;
+                placeholder-text: @tr("Search name or PID");
+                text <=> root.search-text;
+                edited(text) => { root.search-edited(text); }
+            }
+        }
+
         Rectangle {
             height: Theme.bar-height;
             Columns {
-                HeaderCell { text: @tr("Name"); horizontal-stretch: 1; }
-                HeaderCell { text: @tr("PID"); width: 72px; horizontal-alignment: right; }
-                HeaderCell { text: @tr("CPU"); width: 72px; horizontal-alignment: right; }
-                HeaderCell { text: @tr("Memory"); width: 96px; horizontal-alignment: right; }
+                SortHeader {
+                    label: @tr("Name"); column: 0; horizontal-stretch: 1;
+                    sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                    clicked(c) => { root.sort-clicked(c); }
+                }
+                SortHeader {
+                    label: @tr("PID"); column: 1; width: 72px; alignment: right;
+                    sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                    clicked(c) => { root.sort-clicked(c); }
+                }
+                SortHeader {
+                    label: @tr("CPU"); column: 2; width: 72px; alignment: right;
+                    sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                    clicked(c) => { root.sort-clicked(c); }
+                }
+                SortHeader {
+                    label: @tr("Memory"); column: 3; width: 96px; alignment: right;
+                    sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                    clicked(c) => { root.sort-clicked(c); }
+                }
             }
             Rectangle {
                 y: parent.height - 1px;

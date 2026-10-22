@@ -5,18 +5,16 @@
 
 mod cli;
 mod model;
+mod sampler;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::thread;
 
 use anyhow::Context;
-use slint::{ComponentHandle, Model, ModelRc, VecModel};
-use vigie_core::Core;
-use vigie_probe::{Probe, Sample, SystemProbe};
+use slint::{ComponentHandle, ModelRc, VecModel};
+use vigie_core::{Sort, SortKey};
 
-use crate::cli::Options;
-use crate::model::UiFrame;
+use crate::sampler::{Command, Settings};
 
 slint::include_modules!();
 
@@ -34,6 +32,8 @@ fn main() -> anyhow::Result<()> {
         app.invoke_set_dark(dark);
     }
     app.set_rows(ModelRc::from(Rc::new(VecModel::<ProcRow>::default())));
+    app.set_search_text(options.filter.as_str().into());
+    show_sort(&app, options.sort);
 
     let about: Rc<RefCell<Option<AboutWindow>>> = Rc::default();
     app.on_show_about(move || {
@@ -49,65 +49,61 @@ fn main() -> anyhow::Result<()> {
         app.invoke_show_about();
     }
 
-    // Dropping the sender tells the sampler to stop.
-    let (stop_tx, stop_rx) = flume::bounded::<()>(1);
-    let sampler = spawn_sampler(app.as_weak(), options, stop_rx);
+    // The sampler stops once every sender is dropped.
+    let (commands, receiver) = flume::unbounded::<Command>();
+
+    let sort = Rc::new(Cell::new(options.sort));
+    let (weak, tx) = (app.as_weak(), commands.clone());
+    app.on_sort_clicked(move |column| {
+        let Some(key) = column_key(column) else {
+            return;
+        };
+        let next = sort.get().clicked(key);
+        sort.set(next);
+        if let Some(app) = weak.upgrade() {
+            show_sort(&app, next);
+        }
+        let _ = tx.send(Command::Sort(next));
+    });
+    let tx = commands.clone();
+    app.on_search_edited(move |text| {
+        let _ = tx.send(Command::Filter(text.to_string()));
+    });
+
+    let settings = Settings {
+        sort: options.sort,
+        filter: options.filter,
+        interval: options.interval,
+    };
+    let sampler = sampler::spawn(app.as_weak(), settings, receiver);
 
     app.run().context("running the event loop")?;
-    drop(stop_tx);
+    // The callbacks hold senders too: replace them so the sampler sees the channel close.
+    drop(commands);
+    app.on_sort_clicked(|_| {});
+    app.on_search_edited(|_| {});
     let _ = sampler.join();
     Ok(())
 }
 
-/// The sampler thread owns the probe: sample, update the core, send a frame, wait.
-fn spawn_sampler(
-    window: slint::Weak<AppWindow>,
-    options: Options,
-    stop: flume::Receiver<()>,
-) -> thread::JoinHandle<()> {
-    thread::Builder::new()
-        .name("vigie-sampler".into())
-        .spawn(move || {
-            let mut probe = match SystemProbe::new() {
-                Ok(probe) => probe,
-                Err(err) => {
-                    eprintln!("vigie: {err}");
-                    return;
-                }
-            };
-            let mut core = Core::new(options.sort, options.filter);
-            let mut sample = Sample::default();
-            loop {
-                match probe.sample(&mut sample) {
-                    Ok(()) => {
-                        let frame = UiFrame::from(core.update(&sample));
-                        let window = window.clone();
-                        // Fails once the event loop has quit: time to stop.
-                        if slint::invoke_from_event_loop(move || apply(&window, frame)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(err) => eprintln!("vigie: sampling failed: {err}"),
-                }
-                match stop.recv_timeout(options.interval) {
-                    Err(flume::RecvTimeoutError::Timeout) => {}
-                    _ => break,
-                }
-            }
-        })
-        .expect("spawning the sampler thread")
+/// Column indices used by the header in `ui/app.slint`.
+fn column_key(column: i32) -> Option<SortKey> {
+    match column {
+        0 => Some(SortKey::Name),
+        1 => Some(SortKey::Pid),
+        2 => Some(SortKey::Cpu),
+        3 => Some(SortKey::Memory),
+        _ => None,
+    }
 }
 
-/// Runs on the UI thread: patch the models, nothing else.
-fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
-    let Some(app) = window.upgrade() else {
-        return;
+fn show_sort(app: &AppWindow, sort: Sort) {
+    let column = match sort.key {
+        SortKey::Name => 0,
+        SortKey::Pid => 1,
+        SortKey::Cpu => 2,
+        SortKey::Memory => 3,
     };
-    let rows = app.get_rows();
-    if let Some(model) = rows.as_any().downcast_ref::<VecModel<ProcRow>>() {
-        model::patch(model, frame.rows);
-    }
-    app.set_process_count(frame.process_count);
-    app.set_self_cpu(frame.self_cpu);
-    app.set_self_memory(frame.self_memory);
+    app.set_sort_column(column);
+    app.set_sort_ascending(sort.ascending);
 }
