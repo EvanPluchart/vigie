@@ -13,7 +13,7 @@ use std::rc::Rc;
 use anyhow::Context;
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
-use vigie_core::{Sort, SortKey};
+use vigie_core::{Group, Sort, SortKey};
 
 use vigie_probe::{Action, Priority};
 
@@ -97,6 +97,16 @@ fn main() -> anyhow::Result<()> {
     // Adaptive refresh: tell the sampler when the window goes to the background or comes back.
     // Polled, because a window that never had focus gets no focus events, and minimising does
     // not always report occlusion.
+    let tx = commands.clone();
+    app.on_group_clicked(move |index| {
+        let group = match index {
+            0 => Group::Apps,
+            1 => Group::Background,
+            2 => Group::System,
+            _ => Group::All,
+        };
+        let _ = tx.send(Command::ToggleGroup(group));
+    });
     let tx = commands.clone();
     let weak = app.as_weak();
     let state = Cell::new((true, true));
@@ -190,6 +200,7 @@ fn main() -> anyhow::Result<()> {
     app.on_sort_clicked(|_| {});
     app.on_search_edited(|_| {});
     app.on_toggle_clicked(|_| {});
+    app.on_group_clicked(|_| {});
     app.on_request_action(|_, _, _| {});
     drop(pace_timer);
     let _ = sampler.join();

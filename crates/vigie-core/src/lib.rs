@@ -151,6 +151,8 @@ pub struct Core {
     /// Start time of each live PID, to resolve UI requests made by PID.
     starts: HashMap<Pid, u64>,
     details: HashMap<ProcKey, Details>,
+    /// Sections folded to their header.
+    collapsed_groups: HashSet<Group>,
     /// Real parent links of the last sample (start times checked), for ending a whole tree.
     children: HashMap<Pid, Vec<Pid>>,
 }
@@ -186,6 +188,12 @@ impl Core {
         }
     }
 
+    /// Folds or unfolds a section of the table. Searching shows every section.
+    pub fn toggle_group(&mut self, group: Group) {
+        if !self.collapsed_groups.remove(&group) {
+            self.collapsed_groups.insert(group);
+        }
+    }
     /// The live process with this PID, if its start time ends with these 31 bits (the UI keeps
     /// only that much). `None` if the PID is gone or now names another process.
     pub fn identify(&self, pid: Pid, start_low_bits: u32) -> Option<Target> {
@@ -301,6 +309,7 @@ impl Core {
             &|p| matches_filter(p, details.get(&(p.pid, p.start_time)), filter),
             self.sort,
             &self.expanded,
+            &self.collapsed_groups,
         );
         frame.matching_count = tree.matching;
         let total_memory = sample.memory_total_bytes;
@@ -343,7 +352,11 @@ impl Core {
             .entries
             .iter()
             .map(|entry| match *entry {
-                Entry::Group { group, count } => Row {
+                Entry::Group {
+                    group,
+                    count,
+                    collapsed,
+                } => Row {
                     kind: RowKind::Group(group),
                     pid: 0,
                     start_time: 0,
@@ -354,7 +367,7 @@ impl Core {
                     memory_heat: 0,
                     depth: 0,
                     count: count as u32,
-                    expanded: true,
+                    expanded: !collapsed,
                     icon: None,
                     publisher: None,
                     tree_size: 0,
@@ -691,6 +704,22 @@ mod tests {
             0,
             "the shell does not adopt the apps it starts"
         );
+    }
+
+    #[test]
+    fn folded_sections_keep_their_header_only() {
+        let mut core = by_memory();
+        core.toggle_group(Group::System);
+        let frame = core.update(&desktop_sample());
+        assert_eq!(pids(&frame), [20, 10, 30], "no system processes");
+        let header = frame.rows.last().expect("system header");
+        assert_eq!(
+            (header.kind, header.count, header.expanded),
+            (RowKind::Group(Group::System), 2, false)
+        );
+        // Searching shows matches even in a folded section.
+        core.set_filter("svc");
+        assert_eq!(pids(&core.update(&desktop_sample())), [41, 40]);
     }
 
     #[test]

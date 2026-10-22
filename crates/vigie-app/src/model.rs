@@ -193,8 +193,15 @@ pub fn format_cpu(percent: Option<f32>) -> SharedString {
     }
 }
 
+/// Megabytes up to 1 GB, then gigabytes, so large values stay short and readable.
 pub fn format_memory(bytes: u64) -> SharedString {
-    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)).into()
+    const MB: f64 = 1024.0 * 1024.0;
+    let mb = bytes as f64 / MB;
+    if mb < 1024.0 {
+        format!("{mb:.1} MB").into()
+    } else {
+        format!("{:.2} GB", mb / 1024.0).into()
+    }
 }
 
 /// What a patch did, for tests and diagnostics.
@@ -395,5 +402,6 @@ mod tests {
         assert_eq!(format_cpu(None), "—");
         assert_eq!(format_cpu(Some(12.345)), "12.3 %");
         assert_eq!(format_memory(3 * 1024 * 1024 / 2), "1.5 MB");
+        assert_eq!(format_memory(3_800_000_000), "3.54 GB");
     }
 }

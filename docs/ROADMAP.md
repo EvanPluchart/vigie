@@ -16,8 +16,8 @@ Each milestone ends with something you can run and show. Estimates are evenings 
 Vigie should look as good as it is light. Design work has its own deliverables, reviewed with screenshots.
 
 * **D1 — Identity (done, approved 2026-10-22):** logo and app icon (readable at 16 px in the taskbar and the tray), palette, typography, art direction, short brand guide in `docs/BRAND.md`, masters in `assets/brand/`.
-* **D2 — Interface art direction (before M1 ends):** design tokens as a Slint global (colours for dark and light, type scale, spacing, radii), table density, heat colours, status bar; applied over the native styles without fighting them.
-* **D3 — UX pass per milestone:** each milestone ends with a screenshot review of its views (empty, loading, error and privilege-limited states included) and a list of fixes.
+* **D2 — Interface art direction (done 2026-10-22, `ui/theme.slint`):** design tokens as a Slint global (colours for dark and light, type scale, spacing, radii), table density, heat colours, status bar; applied over the native styles without fighting them.
+* **D3 — UX pass per milestone (M1: `docs/ux/audit-m1.md`):** each milestone ends with a screenshot review of its views (empty, loading, error and privilege-limited states included) and a list of fixes.
 
 **Done when:** each item has its screenshots and its decision recorded; D2 lands before M1 is called done.
 
@@ -31,6 +31,8 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 * Performance budget enforced in CI.
 
 **Done when:** it replaces the Windows Task Manager "Processes" tab for daily use, within budget.
+
+**Status (2026-10-22):** features done on Windows and tried hands-on by the author; UX audit in `docs/ux/audit-m1.md`. Pending, at the end with CI: budget enforcement in CI. Open questions on the budget itself: CPU measured on an idle machine (~300 processes) or under real load, memory as working set or private bytes (see the audit, item 9).
 
 ## M2 — Performance (2 weeks)
 

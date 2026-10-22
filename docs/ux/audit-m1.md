@@ -18,10 +18,10 @@ user's first hands-on test. Severity: **P1** blocks daily use, **P2** costs time
 | 8 | P2 | The column chooser is a right click on the header: undiscoverable. | Also in the More menu of the command bar ("Columns"). | Fixed |
 | 9 | P2 | Memory reached 40.8 MB during the hands-on test (budget 30 MB), against 28 MB idle. | Measured: private memory stays at 9 MB; the extra working set is shared Windows pages (text input framework, UI Automation) that any focused window touches. `bench-overhead` now reports private memory too. Whether the budget counts the working set or private memory is a decision to take. | Explained, decision pending |
 | 10 | P2 | "About" sits in the status bar, the most valuable strip of the window. | Moves to the More menu. | Fixed |
-| 11 | P3 | Section headers cannot collapse. | Click a section header to collapse it. | Open (M5 with keyboard navigation polish) |
+| 11 | P3 | Section headers cannot collapse. | Click a section header to collapse it. | Fixed |
 | 12 | P3 | "—" (no value yet, or not readable without elevation) has no explanation. | Tooltip once Slint offers one; meanwhile documented in the About window. | Open |
-| 13 | P3 | Large memory values read poorly ("2240.2 MB"). | Group digits per locale, or switch to GB above 1 GB. | Open (with translations) |
-| 14 | P3 | Errors (access denied) appear in the status bar and are easy to miss. | Notice in the command bar, next to the action that failed. | Open |
+| 13 | P3 | Large memory values read poorly ("2240.2 MB"). | GB above 1 GB ("2.67 GB"). Digit grouping per locale comes with translations. | Fixed |
+| 14 | P3 | Errors (access denied) appear in the status bar and are easy to miss. | Failures show in the command bar, next to the buttons, in the danger colour. | Fixed |
 | 15 | P3 | The search field's focus line uses the Windows accent (orange here), not the brand lagoon. | Native style choice; keep unless it clashes in user tests. | Won't fix for now |
 
 ## Principles applied

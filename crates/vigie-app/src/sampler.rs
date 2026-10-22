@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use vigie_core::{Core, Details, Pid, Sort};
+use vigie_core::{Core, Details, Group, Pid, Sort};
 use vigie_probe::{Action, Icon, Probe, ProbeError, ProcDetails, Sample, SystemProbe};
 
 use crate::AppWindow;
@@ -23,6 +23,8 @@ pub enum Command {
         focused: bool,
         visible: bool,
     },
+    /// Fold or unfold a section of the table.
+    ToggleGroup(Group),
     /// Act on a process, named by its PID and the low 31 bits of its start time. The UI has
     /// already asked the user to confirm when the action is destructive.
     Act {
@@ -108,6 +110,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                         Command::Sort(sort) => core.set_sort(sort),
                         Command::Filter(filter) => core.set_filter(&filter),
                         Command::Toggle(pid) => core.toggle(pid),
+                        Command::ToggleGroup(group) => core.toggle_group(group),
                         Command::Window { focused, visible } => {
                             let woke = (focused && !pace.focused) || (visible && !pace.visible);
                             pace.focused = focused;

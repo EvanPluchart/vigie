@@ -99,24 +99,6 @@ component SortHeader inherits Rectangle {
     }
 }
 
-// A section of the table: apps, background processes, services and system.
-component GroupHeader inherits Rectangle {
-    in property <int> group;
-    in property <int> count;
-    Columns {
-        padding-top: Theme.space-2;
-        Cell {
-            text: root.group == 0 ? @tr("Apps ({})", root.count)
-                : root.group == 1 ? @tr("Background processes ({})", root.count)
-                : root.group == 2 ? @tr("Services and system ({})", root.count)
-                : @tr("Processes ({})", root.count);
-            color: Theme.text-muted;
-            font-size: Theme.font-caption;
-            font-weight: Theme.weight-strong;
-        }
-    }
-}
-
 // A right- or down-pointing chevron, drawn so it does not depend on a font having the glyph.
 component Chevron inherits Path {
     in property <bool> open;
@@ -127,6 +109,35 @@ component Chevron inherits Path {
     stroke: Theme.text-muted;
     stroke-width: 1.6px;
     commands: open ? "M 3.5 5.5 L 7 9 L 10.5 5.5" : "M 5.5 3.5 L 9 7 L 5.5 10.5";
+}
+// A section of the table: apps, background processes, services and system.
+component GroupHeader inherits Rectangle {
+    in property <int> group;
+    in property <int> count;
+    in property <bool> open: true;
+    callback toggle();
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggle(); }
+    }
+    Columns {
+        padding-top: Theme.space-2;
+        spacing: Theme.space-1;
+        Chevron {
+            open: root.open;
+            y: (parent.height - self.height) / 2 + Theme.space-1;
+        }
+        Cell {
+            horizontal-stretch: 1;
+            text: root.group == 0 ? @tr("Apps ({})", root.count)
+                : root.group == 1 ? @tr("Background processes ({})", root.count)
+                : root.group == 2 ? @tr("Services and system ({})", root.count)
+                : @tr("Processes ({})", root.count);
+            color: Theme.text-muted;
+            font-size: Theme.font-caption;
+            font-weight: Theme.weight-strong;
+        }
+    }
 }
 
 // One process line: indented by its depth, with a chevron when it has children.
@@ -242,6 +253,8 @@ export component AppWindow inherits Window {
     callback sort-clicked(int);
     callback search-edited(string);
     callback toggle-clicked(int);
+    // Fold or unfold a section (0 apps, 1 background, 2 system, 3 all).
+    callback group-clicked(int);
     // Keyboard navigation: move the selection by this many process rows (Rust skips headers).
     callback move-selection(int);
     // Last action's outcome, shown in the status bar (see src/model.rs for the codes).
@@ -432,9 +445,13 @@ export component AppWindow inherits Window {
                     padding-bottom: Theme.space-1;
                     spacing: Theme.space-2;
                     Cell {
-                        text: root.has-selection ? @tr("{} · PID {}", root.selected.name, root.selected.pid)
+                        // A failed action is said here, next to the buttons that started it.
+                        text: root.notice-kind >= 7 ? root.notice-text()
+                            : root.has-selection ? @tr("{} · PID {}", root.selected.name, root.selected.pid)
                             : @tr("Select a process to act on it");
-                        color: root.has-selection ? Theme.text : Theme.text-muted;
+                        color: root.notice-kind >= 7 ? Theme.danger
+                            : root.has-selection ? Theme.text : Theme.text-muted;
+                        wrap: word-wrap;
                         horizontal-stretch: 1;
                     }
                     Button {
@@ -530,6 +547,8 @@ export component AppWindow inherits Window {
                         if row.kind == 0: GroupHeader {
                             group: row.group;
                             count: row.count;
+                            open: row.expanded;
+                            toggle => { root.group-clicked(row.group); }
                         }
                         if row.kind != 0: ContextMenuArea {
                             Menu {
@@ -650,10 +669,10 @@ export component AppWindow inherits Window {
                         }
                     }
                     Cell {
-                        text: root.notice-kind != 0 ? root.notice-text()
+                        text: root.notice-kind != 0 && root.notice-kind < 7 ? root.notice-text()
                             : root.searching ? @tr("{} of {} processes", root.matching-count, root.process-count)
                             : @tr("{} processes", root.process-count);
-                        color: root.notice-kind >= 7 ? Theme.danger : Theme.text-muted;
+                        color: Theme.text-muted;
                         font-size: Theme.font-caption;
                         horizontal-stretch: 1;
                     }

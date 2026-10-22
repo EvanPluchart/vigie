@@ -45,9 +45,20 @@ impl Figures {
 /// its expanded subtree.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Entry {
-    Group { group: Group, count: usize },
-    Process { node: usize, depth: u8, total: bool },
-    Itself { node: usize, depth: u8 },
+    Group {
+        group: Group,
+        count: usize,
+        collapsed: bool,
+    },
+    Process {
+        node: usize,
+        depth: u8,
+        total: bool,
+    },
+    Itself {
+        node: usize,
+        depth: u8,
+    },
 }
 
 pub(crate) struct Tree {
@@ -71,6 +82,7 @@ pub(crate) fn build(
     filter: &dyn Fn(&ProcSample) -> bool,
     sort: Sort,
     expanded: &HashSet<ProcKey>,
+    collapsed: &HashSet<Group>,
 ) -> Tree {
     let index: HashMap<Pid, usize> = nodes
         .iter()
@@ -187,6 +199,7 @@ pub(crate) fn build(
             entries.push(Entry::Group {
                 group: section,
                 count: matches.len(),
+                collapsed: false,
             });
             entries.extend(matches.into_iter().map(|node| Entry::Process {
                 node,
@@ -202,10 +215,15 @@ pub(crate) fn build(
             continue;
         }
         let count = (0..nodes.len()).filter(|&i| group[i] == section).count();
+        let folded = collapsed.contains(&section);
         entries.push(Entry::Group {
             group: section,
             count,
+            collapsed: folded,
         });
+        if folded {
+            continue;
+        }
         roots.sort_by(|&a, &b| compare(a, b, &totals));
         for root in roots {
             emit(
