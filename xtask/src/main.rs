@@ -93,6 +93,10 @@ fn bench_overhead(duration: Duration, check: bool) -> Result<()> {
         mb(m.peak_memory),
         mb(m.last_memory)
     );
+    println!(
+        "  private {:.1} MB sampled peak (memory not shared with other processes)",
+        mb(m.peak_private)
+    );
     println!("  budget  < {CPU_BUDGET_PERCENT} % of one core, < {MEMORY_BUDGET_MB} MB");
     if check {
         let peak_mb = mb(m.peak_memory);
@@ -110,6 +114,7 @@ struct Measurement {
     cpu_ms_at_warm_up: u64,
     peak_memory: u64,
     last_memory: u64,
+    peak_private: u64,
     process_count: usize,
 }
 
@@ -129,6 +134,7 @@ fn measure(
         cpu_ms_at_warm_up: 0,
         peak_memory: 0,
         last_memory: 0,
+        peak_private: 0,
         process_count: 0,
     };
     let mut warmed_up = false;
@@ -142,6 +148,8 @@ fn measure(
         m.cpu_ms = process.accumulated_cpu_time();
         m.last_memory = process.memory();
         m.peak_memory = m.peak_memory.max(m.last_memory);
+        // On Windows, sysinfo reports private bytes (memory only Vigie uses) as virtual memory.
+        m.peak_private = m.peak_private.max(process.virtual_memory());
         if !warmed_up && m.elapsed >= warm_up {
             warmed_up = true;
             m.cpu_ms_at_warm_up = m.cpu_ms;

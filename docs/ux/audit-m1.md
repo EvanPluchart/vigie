@@ -16,7 +16,7 @@ user's first hands-on test. Severity: **P1** blocks daily use, **P2** costs time
 | 6 | P2 | While searching, the status bar still says "434 processes". | "1 of 434 processes" while a search is active. | Fixed |
 | 7 | P2 | Apps show their file name (Notepad.exe) where users know them by name (Bloc-notes, Brave). | Apps section shows the executable's description when it has one; the file name stays in the Name column for other sections and in search. | Fixed |
 | 8 | P2 | The column chooser is a right click on the header: undiscoverable. | Also in the More menu of the command bar ("Columns"). | Fixed |
-| 9 | P2 | Memory reached 40.8 MB during the hands-on test (budget 30 MB), against 28 MB idle. Likely text services loaded by typing in the search field and the context menu's popup windows. | Measure each interaction separately; keep popups few. | Open |
+| 9 | P2 | Memory reached 40.8 MB during the hands-on test (budget 30 MB), against 28 MB idle. | Measured: private memory stays at 9 MB; the extra working set is shared Windows pages (text input framework, UI Automation) that any focused window touches. `bench-overhead` now reports private memory too. Whether the budget counts the working set or private memory is a decision to take. | Explained, decision pending |
 | 10 | P2 | "About" sits in the status bar, the most valuable strip of the window. | Moves to the More menu. | Fixed |
 | 11 | P3 | Section headers cannot collapse. | Click a section header to collapse it. | Open (M5 with keyboard navigation polish) |
 | 12 | P3 | "—" (no value yet, or not readable without elevation) has no explanation. | Tooltip once Slint offers one; meanwhile documented in the About window. | Open |
