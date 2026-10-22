@@ -1,0 +1,7 @@
+target/
+dist/
+
+# Local AI tooling (third-party skills are installed locally, never committed)
+.agents/
+.claude/skills/
+.claude/settings.local.json

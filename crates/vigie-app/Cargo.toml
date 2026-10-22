@@ -1,0 +1,15 @@
+[package]
+name = "vigie"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Vigie: a fast cross-platform task manager"
+
+[[bin]]
+name = "vigie"
+path = "src/main.rs"
+
+[dependencies]
+vigie-probe.workspace = true
+vigie-core.workspace = true

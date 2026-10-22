@@ -1,0 +1,15 @@
+[workspace]
+resolver = "3"
+members = ["crates/vigie-probe", "crates/vigie-core", "crates/vigie-app"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+authors = ["Evan Pluchart"]
+repository = "https://github.com/EvanPluchart/vigie"
+
+# Pinned versions are added at M0 (see docs/PROMPT.md).
+[workspace.dependencies]
+vigie-probe = { path = "crates/vigie-probe" }
+vigie-core = { path = "crates/vigie-core" }
