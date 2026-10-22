@@ -1,10 +1,12 @@
 //! The sampler thread: owns the probe, runs the core, sends frames to the UI thread.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use vigie_core::{Core, Pid, Sort};
-use vigie_probe::{Probe, Sample, SystemProbe};
+use vigie_core::{Core, Details, Pid, Sort};
+use vigie_probe::{Icon, Probe, ProcDetails, Sample, SystemProbe};
 
 use crate::AppWindow;
 use crate::model::{self, UiFrame};
@@ -46,11 +48,13 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
     };
     let mut core = Core::new(settings.sort, settings.filter);
     let mut sample = Sample::default();
+    let mut exes = ExeCache::default();
     let mut next_tick = Instant::now();
     loop {
         match probe.sample(&mut sample) {
             Ok(()) => {
-                if !send(&window, &mut core, &sample) {
+                let icons = exes.fill(&mut probe, &mut core, &sample);
+                if !send(&window, &mut core, &sample, icons) {
                     return;
                 }
             }
@@ -71,7 +75,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                         Command::Filter(filter) => core.set_filter(&filter),
                         Command::Toggle(pid) => core.toggle(pid),
                     }
-                    if !send(&window, &mut core, &sample) {
+                    if !send(&window, &mut core, &sample, Vec::new()) {
                         return;
                     }
                 }
@@ -83,8 +87,75 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
 }
 
 /// Builds a frame and hands it to the UI thread. False once the event loop has quit.
-fn send(window: &slint::Weak<AppWindow>, core: &mut Core, sample: &Sample) -> bool {
-    let frame = UiFrame::from(core.update(sample));
+fn send(
+    window: &slint::Weak<AppWindow>,
+    core: &mut Core,
+    sample: &Sample,
+    icons: Vec<(u32, Icon)>,
+) -> bool {
+    let frame = UiFrame::new(core.update(sample), icons);
     let window = window.clone();
     slint::invoke_from_event_loop(move || model::apply(&window, frame)).is_ok()
+}
+
+/// What each executable says about itself, read once per path. Icons get sequential ids, the
+/// index of the image in the UI's icon model.
+#[derive(Default)]
+struct ExeCache {
+    by_path: HashMap<PathBuf, Details>,
+    next_icon: u32,
+    details: Vec<ProcDetails>,
+}
+
+impl ExeCache {
+    /// Gives the core the details of processes it has not seen yet. Returns the icons that are
+    /// new to the UI.
+    fn fill(
+        &mut self,
+        probe: &mut impl Probe,
+        core: &mut Core,
+        sample: &Sample,
+    ) -> Vec<(u32, Icon)> {
+        let missing = core.missing_details(sample);
+        if missing.is_empty() {
+            return Vec::new();
+        }
+        if let Err(err) = probe.details(&missing, &mut self.details) {
+            eprintln!("vigie: reading process details failed: {err}");
+            self.details.clear();
+        }
+        let starts: HashMap<Pid, u64> = sample
+            .processes
+            .iter()
+            .map(|p| (p.pid, p.start_time))
+            .collect();
+        let mut icons = Vec::new();
+        for found in &self.details {
+            let (Some(exe), Some(&start)) = (&found.exe, starts.get(&found.pid)) else {
+                continue;
+            };
+            let details = self.by_path.entry(exe.clone()).or_insert_with(|| {
+                let info = probe.exe_info(exe);
+                let icon = info.icon.map(|icon| {
+                    let id = self.next_icon;
+                    self.next_icon += 1;
+                    icons.push((id, icon));
+                    id
+                });
+                Details {
+                    icon,
+                    publisher: info.publisher.map(Into::into),
+                    description: info.description.map(Into::into),
+                }
+            });
+            core.set_details((found.pid, start), details.clone());
+        }
+        // Processes that could not be read get empty details, so they are not asked again.
+        for pid in core.missing_details(sample) {
+            if let Some(&start) = starts.get(&pid) {
+                core.set_details((pid, start), Details::default());
+            }
+        }
+        icons
+    }
 }

@@ -2,8 +2,9 @@
 
 use std::collections::HashSet;
 
-use slint::{Model, SharedString, VecModel};
+use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use vigie_core::{Frame, Group, Row, RowKind};
+use vigie_probe::Icon;
 
 use crate::{AppWindow, ProcRow};
 
@@ -18,15 +19,29 @@ pub struct UiFrame {
     pub process_count: SharedString,
     pub self_cpu: SharedString,
     pub self_memory: SharedString,
+    /// Icons the UI has not seen yet, with their index in its icon model. Pixel buffers cross
+    /// threads; `Image`s are made on the UI thread.
+    pub icons: Vec<(u32, SharedPixelBuffer<Rgba8Pixel>)>,
 }
 
-impl From<Frame> for UiFrame {
-    fn from(frame: Frame) -> Self {
+impl UiFrame {
+    pub fn new(frame: Frame, icons: Vec<(u32, Icon)>) -> Self {
         Self {
             rows: frame.rows.iter().map(proc_row).collect(),
             process_count: frame.process_count.to_string().into(),
             self_cpu: format_cpu(frame.self_cpu_percent),
             self_memory: format_memory(frame.self_memory_bytes),
+            icons: icons
+                .into_iter()
+                .map(|(id, icon)| {
+                    let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                        &icon.rgba,
+                        icon.width,
+                        icon.height,
+                    );
+                    (id, buffer)
+                })
+                .collect(),
         }
     }
 }
@@ -56,6 +71,7 @@ fn proc_row(row: &Row) -> ProcRow {
         count: i32::try_from(row.count).unwrap_or(i32::MAX),
         expandable: row.kind == RowKind::Process && row.count > 0,
         expanded: row.expanded,
+        icon: row.icon.and_then(|i| i32::try_from(i).ok()).unwrap_or(-1),
         name: row.name.as_str().into(),
         pid,
         cpu: if figures {
@@ -77,6 +93,15 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
     let Some(app) = window.upgrade() else {
         return;
     };
+    // Icons first, so rows never point past the end of the icon model.
+    let icons = app.get_icons();
+    if let Some(model) = icons.as_any().downcast_ref::<VecModel<Image>>() {
+        for (id, buffer) in frame.icons {
+            // Ids are handed out in order, once each.
+            debug_assert_eq!(id as usize, model.row_count());
+            model.push(Image::from_rgba8(buffer));
+        }
+    }
     let rows = app.get_rows();
     if let Some(model) = rows.as_any().downcast_ref::<VecModel<ProcRow>>() {
         patch(model, frame.rows);
@@ -179,6 +204,7 @@ mod tests {
             depth: 0,
             count: 2,
             expanded: true,
+            icon: None,
         };
         let group = proc_row(&process(RowKind::Group(Group::Apps)));
         let parent = proc_row(&process(RowKind::Process));

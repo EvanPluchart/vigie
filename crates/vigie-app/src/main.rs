@@ -32,6 +32,7 @@ fn main() -> anyhow::Result<()> {
         app.invoke_set_dark(dark);
     }
     app.set_rows(ModelRc::from(Rc::new(VecModel::<ProcRow>::default())));
+    app.set_icons(ModelRc::from(Rc::new(VecModel::<slint::Image>::default())));
     app.set_search_text(options.filter.as_str().into());
     show_sort(&app, options.sort);
 

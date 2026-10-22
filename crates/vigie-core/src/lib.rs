@@ -4,6 +4,7 @@
 mod tree;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 pub use tree::Group;
 use tree::{Entry, Figures, Node};
@@ -89,6 +90,17 @@ pub struct Row {
     /// Group: processes in it. Process: its descendants.
     pub count: u32,
     pub expanded: bool,
+    /// Icon of the process's executable, as an index chosen by the caller of `set_details`.
+    pub icon: Option<u32>,
+}
+
+/// Rarely changing facts about a process, read by the sampler from `Probe::details` and
+/// `Probe::exe_info`, kept until the process exits.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Details {
+    pub icon: Option<u32>,
+    pub publisher: Option<Arc<str>>,
+    pub description: Option<Arc<str>>,
 }
 
 /// Heat thresholds: CPU in percent of the whole machine, memory in percent of physical memory.
@@ -130,6 +142,7 @@ pub struct Core {
     expanded: HashSet<ProcKey>,
     /// Start time of each live PID, to resolve UI requests made by PID.
     starts: HashMap<Pid, u64>,
+    details: HashMap<ProcKey, Details>,
 }
 
 impl Core {
@@ -161,6 +174,22 @@ impl Core {
                 self.expanded.insert(key);
             }
         }
+    }
+
+    /// PIDs in `sample` whose details were never set: ask the probe for these.
+    pub fn missing_details(&self, sample: &Sample) -> Vec<Pid> {
+        sample
+            .processes
+            .iter()
+            .filter(|p| !self.details.contains_key(&(p.pid, p.start_time)))
+            .map(|p| p.pid)
+            .collect()
+    }
+
+    /// Records details for a process, including empty ones for processes that cannot be read,
+    /// so they are not asked for again.
+    pub fn set_details(&mut self, key: ProcKey, details: Details) {
+        self.details.insert(key, details);
     }
 
     pub fn update(&mut self, sample: &Sample) -> Frame {
@@ -204,16 +233,19 @@ impl Core {
             });
         }
         std::mem::swap(&mut self.prev, &mut self.next);
-        // Forget expanded processes that exited.
+        // Forget what belongs to processes that exited.
         let starts = &self.starts;
         self.expanded
             .retain(|(pid, start)| starts.get(pid) == Some(start));
+        self.details
+            .retain(|(pid, start), _| starts.get(pid) == Some(start));
 
         let filter = self.filter.as_str();
+        let details = &self.details;
         let tree = tree::build(
             &nodes,
             sample.shell_pid,
-            &|p| matches_filter(p, filter),
+            &|p| matches_filter(p, details.get(&(p.pid, p.start_time)), filter),
             self.sort,
             &self.expanded,
         );
@@ -221,6 +253,7 @@ impl Core {
         let row = |kind, node: usize, depth, figures: Figures, count, expanded| {
             let p = nodes[node].p;
             Row {
+                icon: details.get(&(p.pid, p.start_time)).and_then(|d| d.icon),
                 kind,
                 pid: p.pid,
                 start_time: p.start_time,
@@ -250,6 +283,7 @@ impl Core {
                     depth: 0,
                     count: count as u32,
                     expanded: true,
+                    icon: None,
                 },
                 Entry::Process { node, depth, total } => {
                     let p = nodes[node].p;
@@ -296,7 +330,8 @@ pub fn cpu_percent(prev_ns: u64, now_ns: u64, wall_ns: u64, logical_cores: u32) 
     Some((used / available * 100.0).clamp(0.0, 100.0) as f32)
 }
 
-fn matches_filter(p: &ProcSample, filter: &str) -> bool {
+/// Search by name, PID, publisher or description.
+fn matches_filter(p: &ProcSample, details: Option<&Details>, filter: &str) -> bool {
     if filter.is_empty() {
         return true;
     }
@@ -305,7 +340,14 @@ fn matches_filter(p: &ProcSample, filter: &str) -> bool {
     {
         return true;
     }
+    let in_details = |field: fn(&Details) -> &Option<Arc<str>>| {
+        details
+            .and_then(|d| field(d).as_deref())
+            .is_some_and(|text| contains_ignore_case(text, filter))
+    };
     contains_ignore_case(&p.name, filter)
+        || in_details(|d| &d.publisher)
+        || in_details(|d| &d.description)
 }
 
 /// Case-insensitive substring search without allocating. `needle` is already lowercase.
@@ -632,6 +674,43 @@ mod tests {
         core.toggle(1);
         let frame = core.update(&sample(SEC, vec![a, b]));
         assert_eq!(pids(&frame), [1, 1, 2]);
+    }
+
+    #[test]
+    fn details_feed_icons_and_search() {
+        let mut core = by_memory();
+        let s = desktop_sample();
+        assert_eq!(core.missing_details(&s).len(), 8);
+        core.set_details(
+            (20, 100),
+            Details {
+                icon: Some(3),
+                publisher: Some("Lagoon Labs".into()),
+                description: Some("App Deluxe".into()),
+            },
+        );
+        for pid in core.missing_details(&s) {
+            core.set_details((pid, 100), Details::default());
+        }
+        assert!(core.missing_details(&s).is_empty());
+        let frame = core.update(&s);
+        assert_eq!(row(&frame, 20).icon, Some(3));
+        assert_eq!(row(&frame, 30).icon, None);
+
+        core.set_filter("lagoon");
+        assert_eq!(pids(&core.update(&s)), [20]);
+        core.set_filter("deluxe");
+        assert_eq!(pids(&core.update(&s)), [20]);
+
+        // A process that exits loses its details; a new one with the same PID needs them again.
+        let mut next = desktop();
+        next[1].start_time = 300;
+        let next = Sample {
+            shell_pid: Some(10),
+            ..sample(2 * SEC, next)
+        };
+        core.update(&next);
+        assert_eq!(core.missing_details(&next), [20]);
     }
 
     #[test]

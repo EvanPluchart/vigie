@@ -13,6 +13,8 @@ export struct ProcRow {
     count: int,
     expandable: bool,
     expanded: bool,
+    // Index in AppWindow.icons, or -1 when the executable gives none (or cannot be read).
+    icon: int,
     name: string,
     pid: int,
     cpu: string,
@@ -115,6 +117,7 @@ component Chevron inherits Path {
 // One process line: indented by its depth, with a chevron when it has children.
 component ProcessLine inherits Rectangle {
     in property <ProcRow> item;
+    in property <image> icon;
     callback toggle(int);
     Columns {
         HorizontalLayout {
@@ -133,6 +136,27 @@ component ProcessLine inherits Rectangle {
                     clicked => { root.toggle(root.item.pid); }
                 }
             }
+            Rectangle {
+                width: 16px;
+                if root.item.icon >= 0: Image {
+                    source: root.icon;
+                    width: 16px;
+                    height: 16px;
+                    y: (parent.height - self.height) / 2;
+                    image-rendering: smooth;
+                }
+                // Generic process: an empty rounded square.
+                if root.item.icon < 0: Rectangle {
+                    width: 12px;
+                    height: 12px;
+                    x: 2px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 3px;
+                    border-width: 1px;
+                    border-color: Theme.text-muted.with-alpha(0.6);
+                }
+            }
+            Rectangle { width: Theme.space-1; }
             Cell {
                 text: root.item.name;
                 horizontal-stretch: 0;
@@ -183,6 +207,7 @@ export component AboutWindow inherits Window {
 
 export component AppWindow inherits Window {
     in property <[ProcRow]> rows;
+    in property <[image]> icons;
     in property <string> process-count;
     in property <string> self-cpu: "—";
     in property <string> self-memory: "—";
@@ -267,6 +292,7 @@ export component AppWindow inherits Window {
                 }
                 if row.kind != 0: ProcessLine {
                     item: row;
+                    icon: root.icons[row.icon];
                     toggle(pid) => { root.toggle-clicked(pid); }
                 }
             }
