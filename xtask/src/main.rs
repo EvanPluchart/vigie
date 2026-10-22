@@ -63,7 +63,7 @@ fn bench_overhead(duration: Duration, check: bool) -> Result<()> {
         .join("target/release/vigie")
         .with_extension(std::env::consts::EXE_EXTENSION);
     let mut child = Command::new(&exe)
-        .arg("--interval=1000")
+        .args(["--interval=1000", "--no-adaptive"])
         .spawn()
         .with_context(|| format!("starting {}", exe.display()))?;
     let result = measure(&child, duration, WARM_UP, POLL);

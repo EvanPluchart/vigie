@@ -5,7 +5,7 @@ use std::time::Duration;
 use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID]";
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive]";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
@@ -25,6 +25,8 @@ pub struct Options {
     pub columns: Option<Vec<String>>,
     /// Process to select at start, for screenshots.
     pub select: Option<u32>,
+    /// Keep the chosen interval in the background too (benchmarks measure the focused cost).
+    pub no_adaptive: bool,
 }
 
 impl Default for Options {
@@ -39,6 +41,7 @@ impl Default for Options {
             ask: None,
             columns: None,
             select: None,
+            no_adaptive: false,
         }
     }
 }
@@ -66,6 +69,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--dark", None) => options.dark = Some(true),
             ("--light", None) => options.dark = Some(false),
             ("--about", None) => options.about = true,
+            ("--no-adaptive", None) => options.no_adaptive = true,
             ("--ask", Some(value)) => {
                 let parsed = value
                     .split_once(':')
@@ -145,6 +149,7 @@ mod tests {
                 ask: None,
                 columns: None,
                 select: None,
+                no_adaptive: false,
             }
         );
     }

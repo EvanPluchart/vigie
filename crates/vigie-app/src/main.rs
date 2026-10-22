@@ -11,6 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use anyhow::Context;
+use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use vigie_core::{Sort, SortKey};
 
@@ -93,6 +94,27 @@ fn main() -> anyhow::Result<()> {
             app.invoke_scroll_to(index as i32);
         }
     });
+    // Adaptive refresh: tell the sampler when the window goes to the background or comes back.
+    // Polled, because a window that never had focus gets no focus events, and minimising does
+    // not always report occlusion.
+    let tx = commands.clone();
+    let weak = app.as_weak();
+    let state = Cell::new((true, true));
+    let pace_timer = slint::Timer::default();
+    pace_timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(500),
+        move || {
+            let Some(app) = weak.upgrade() else { return };
+            let window = app.window();
+            let focused = window.with_winit_window(|w| w.has_focus()).unwrap_or(true);
+            let visible = window.is_visible() && !window.is_minimized();
+            if (focused, visible) != state.get() {
+                state.set((focused, visible));
+                let _ = tx.send(Command::Window { focused, visible });
+            }
+        },
+    );
     let tx = commands.clone();
     app.on_request_action(move |pid, start, code| {
         let (Ok(pid), Ok(start_low_bits), Some(action)) =
@@ -126,6 +148,7 @@ fn main() -> anyhow::Result<()> {
         filter: options.filter,
         interval: options.interval,
         icon_size,
+        adaptive: !options.no_adaptive,
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
     if let Some(pid) = options.select {
@@ -168,6 +191,7 @@ fn main() -> anyhow::Result<()> {
     app.on_search_edited(|_| {});
     app.on_toggle_clicked(|_| {});
     app.on_request_action(|_, _, _| {});
+    drop(pace_timer);
     let _ = sampler.join();
     Ok(())
 }

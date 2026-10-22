@@ -15,7 +15,7 @@ vigie-core = { path = "crates/vigie-core" }
 
 # Slint is pinned to an exact version and upgraded only on purpose (decision 0001).
 # Software renderer on winit: about 26 MB of RSS against 136 MB with femtovg (decision 0003).
-slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility"] }
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "unstable-winit-030"] }
 slint-build = "=1.18.1"
 sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
 flume = "=0.12.0"

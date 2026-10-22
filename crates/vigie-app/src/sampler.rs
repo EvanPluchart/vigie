@@ -18,6 +18,11 @@ pub enum Command {
     Filter(String),
     /// Expand or collapse the subtree of this PID.
     Toggle(Pid),
+    /// The window gained or lost focus, or was minimised or covered (`visible: false`).
+    Window {
+        focused: bool,
+        visible: bool,
+    },
     /// Act on a process, named by its PID and the low 31 bits of its start time. The UI has
     /// already asked the user to confirm when the action is destructive.
     Act {
@@ -41,6 +46,8 @@ pub struct Settings {
     pub interval: Duration,
     /// Icon side in physical pixels.
     pub icon_size: u32,
+    /// Slow down when the window is in the background (see `Pace`).
+    pub adaptive: bool,
 }
 
 /// Starts the sampler. It stops when every `Command` sender is dropped or the event loop quits.
@@ -70,6 +77,11 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
         ..ExeCache::default()
     };
     let mut next_tick = Instant::now();
+    let mut pace = Pace {
+        adaptive: settings.adaptive,
+        focused: true,
+        visible: true,
+    };
     loop {
         match probe.sample(&mut sample) {
             Ok(()) => {
@@ -80,10 +92,10 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
             }
             Err(err) => eprintln!("vigie: sampling failed: {err}"),
         }
-        next_tick += settings.interval;
+        next_tick += pace.interval(settings.interval);
         // A late tick (machine asleep, debugger) starts a fresh schedule instead of catching up.
         if next_tick < Instant::now() {
-            next_tick = Instant::now() + settings.interval;
+            next_tick = Instant::now() + pace.interval(settings.interval);
         }
         // Between ticks, answer commands right away by reusing the last sample.
         loop {
@@ -96,6 +108,15 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                         Command::Sort(sort) => core.set_sort(sort),
                         Command::Filter(filter) => core.set_filter(&filter),
                         Command::Toggle(pid) => core.toggle(pid),
+                        Command::Window { focused, visible } => {
+                            let woke = (focused && !pace.focused) || (visible && !pace.visible);
+                            pace.focused = focused;
+                            pace.visible = visible;
+                            // Back in front: refresh now rather than at the end of a slow interval.
+                            if woke {
+                                resample = true;
+                            }
+                        }
                         Command::Act {
                             pid,
                             start_low_bits,
@@ -348,6 +369,26 @@ mod tests {
     }
 
     #[test]
+    fn background_and_hidden_windows_sample_less() {
+        let second = Duration::from_secs(1);
+        let pace = |adaptive, focused, visible| {
+            Pace {
+                adaptive,
+                focused,
+                visible,
+            }
+            .interval(second)
+        };
+        assert_eq!(pace(true, true, true), second);
+        assert_eq!(pace(true, false, true), second * 4);
+        assert_eq!(pace(true, false, false), Duration::from_secs(10));
+        assert_eq!(
+            pace(false, false, false),
+            second,
+            "benchmarks keep the chosen interval"
+        );
+    }
+    #[test]
     fn failures_are_reported() {
         let (mut probe, core, sample) = setup();
         probe.refuse = Some(21);
@@ -356,5 +397,25 @@ mod tests {
         assert_eq!(notice.kind, Notice::DENIED);
         let reveal = UserAction::Probe(Action::RevealFile);
         assert!(execute(&mut probe, &core, &sample, 20, 1_000, reveal).is_none());
+    }
+}
+
+/// Adaptive refresh (docs/ARCHITECTURE.md): the chosen interval while the window has focus,
+/// four times slower in the background, one sample every 10 s while minimised or hidden.
+struct Pace {
+    adaptive: bool,
+    focused: bool,
+    visible: bool,
+}
+
+impl Pace {
+    const HIDDEN: Duration = Duration::from_secs(10);
+
+    fn interval(&self, chosen: Duration) -> Duration {
+        match (self.adaptive, self.visible, self.focused) {
+            (false, _, _) | (true, true, true) => chosen,
+            (true, true, false) => chosen * 4,
+            (true, false, _) => Self::HIDDEN.max(chosen),
+        }
     }
 }
