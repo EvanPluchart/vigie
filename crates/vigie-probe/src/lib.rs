@@ -46,6 +46,8 @@ pub struct Sample {
     /// Monotonic timestamp of the tick, in nanoseconds.
     pub at_ns: u64,
     pub logical_cores: u32,
+    /// Physical memory of the machine, in bytes.
+    pub memory_total_bytes: u64,
     /// Vigie's own PID, so the app can show its cost without asking the OS.
     pub self_pid: Pid,
     pub processes: Vec<ProcSample>,

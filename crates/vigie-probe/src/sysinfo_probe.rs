@@ -10,6 +10,7 @@ pub struct SysinfoProbe {
     system: System,
     epoch: Instant,
     logical_cores: u32,
+    memory_total_bytes: u64,
     self_pid: Pid,
 }
 
@@ -21,10 +22,13 @@ impl SysinfoProbe {
         let mut system = System::new();
         system.refresh_cpu_list(CpuRefreshKind::nothing());
         let logical_cores = system.cpus().len().max(1) as u32;
+        system.refresh_memory();
+        let memory_total_bytes = system.total_memory();
         Ok(Self {
             system,
             epoch: Instant::now(),
             logical_cores,
+            memory_total_bytes,
             self_pid,
         })
     }
@@ -40,6 +44,7 @@ impl Probe for SysinfoProbe {
         let at_ns = self.epoch.elapsed().as_nanos() as u64;
         out.at_ns = at_ns;
         out.logical_cores = self.logical_cores;
+        out.memory_total_bytes = self.memory_total_bytes;
         out.self_pid = self.self_pid;
 
         // Overwrite existing entries in place so their `String` buffers are reused.
@@ -100,6 +105,7 @@ mod tests {
         let mut sample = Sample::default();
         probe.sample(&mut sample).expect("sample");
         assert!(sample.logical_cores >= 1);
+        assert!(sample.memory_total_bytes > 0);
         assert!(sample.processes.iter().any(|p| p.pid == sample.self_pid));
     }
 

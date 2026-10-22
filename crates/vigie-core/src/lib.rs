@@ -65,6 +65,19 @@ pub struct Row {
     /// Percentage of the whole machine (all logical cores). `None` on a process's first sample.
     pub cpu_percent: Option<f32>,
     pub memory_bytes: u64,
+    /// 0 (cool) to 3 (hot), for background tints.
+    pub cpu_heat: u8,
+    pub memory_heat: u8,
+}
+
+/// Heat thresholds: CPU in percent of the whole machine, memory in percent of physical memory.
+/// One busy core on a 16-thread machine is about 6 %, so it reads as warm, not hot.
+const CPU_HEAT: [f32; 3] = [2.0, 10.0, 30.0];
+const MEMORY_HEAT: [f32; 3] = [2.0, 5.0, 15.0];
+
+/// 0 below the first threshold, then 1, 2 or 3.
+pub fn heat(value: f32, thresholds: [f32; 3]) -> u8 {
+    thresholds.iter().filter(|&&t| value >= t).count() as u8
 }
 
 /// What the UI needs after one tick: the visible rows, sorted and filtered, and Vigie's own cost.
@@ -155,6 +168,11 @@ impl Core {
                     name: p.name.clone(),
                     cpu_percent,
                     memory_bytes: p.memory_bytes,
+                    cpu_heat: cpu_percent.map_or(0, |c| heat(c, CPU_HEAT)),
+                    memory_heat: heat(
+                        memory_share(p.memory_bytes, sample.memory_total_bytes),
+                        MEMORY_HEAT,
+                    ),
                 });
             }
         }
@@ -163,6 +181,14 @@ impl Core {
         sort_rows(&mut frame.rows, self.sort);
         frame
     }
+}
+
+/// Memory use as a percentage of physical memory; 0 when the total is unknown.
+fn memory_share(bytes: u64, total: u64) -> f32 {
+    if total == 0 {
+        return 0.0;
+    }
+    (bytes as f64 / total as f64 * 100.0) as f32
 }
 
 /// CPU time / wall time / logical cores, as a percentage clamped to 0..=100.
@@ -329,6 +355,24 @@ mod tests {
         let r = row(&frame, 5);
         assert_eq!(r.name, "new");
         assert_eq!(r.cpu_percent, None);
+    }
+
+    #[test]
+    fn heat_levels() {
+        assert_eq!(heat(0.0, CPU_HEAT), 0);
+        assert_eq!(heat(2.0, CPU_HEAT), 1);
+        assert_eq!(heat(29.9, CPU_HEAT), 2);
+        assert_eq!(heat(80.0, CPU_HEAT), 3);
+        let mut core = Core::default();
+        let mut s = sample(
+            SEC,
+            vec![proc(1, 0, "big", 0, 16), proc(2, 0, "small", 0, 1)],
+        );
+        s.memory_total_bytes = 100;
+        let frame = core.update(&s);
+        assert_eq!(row(&frame, 1).memory_heat, 3);
+        assert_eq!(row(&frame, 2).memory_heat, 0);
+        assert_eq!(row(&frame, 1).cpu_heat, 0, "no CPU % yet, no heat");
     }
 
     #[test]

@@ -18,6 +18,7 @@ use windows_sys::Wdk::System::SystemInformation::{
 };
 use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::{
     ALL_PROCESSOR_GROUPS, GetActiveProcessorCount, GetProcessTimes, OpenProcess,
     PROCESS_QUERY_LIMITED_INFORMATION,
@@ -107,8 +108,8 @@ impl InfoBuffer {
             match status {
                 0 => return Ok(()),
                 STATUS_INFO_LENGTH_MISMATCH => {
-                    // Processes may start between two calls: leave a quarter of headroom.
-                    let target = (needed as usize).max(bytes as usize) * 5 / 4;
+                    // Processes and threads come and go between calls: leave half again as much room.
+                    let target = (needed as usize).max(bytes as usize) * 3 / 2;
                     self.words.resize(target.div_ceil(8), 0);
                 }
                 other => return Err(other),
@@ -216,6 +217,7 @@ pub struct WindowsProbe {
     ticks_since_full: u32,
     epoch: Instant,
     logical_cores: u32,
+    memory_total_bytes: u64,
     self_pid: Pid,
     /// Expensive per-process details stay on `sysinfo` until they are measured.
     details: SysinfoProbe,
@@ -225,6 +227,11 @@ impl WindowsProbe {
     pub fn new() -> Result<Self> {
         // SAFETY: no pointers involved; returns 0 only on failure.
         let logical_cores = unsafe { GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) };
+        // SAFETY: an all-zero MEMORYSTATUSEX with its length set is a valid argument.
+        let mut memory: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        memory.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
+        // SAFETY: `memory` is valid for writes; on failure the total stays 0.
+        unsafe { GlobalMemoryStatusEx(&mut memory) };
         Ok(Self {
             basic: InfoBuffer::new(64 * 1024),
             full: InfoBuffer::new(1024 * 1024),
@@ -240,6 +247,7 @@ impl WindowsProbe {
             ticks_since_full: FULL_EVERY,
             epoch: Instant::now(),
             logical_cores: logical_cores.max(1),
+            memory_total_bytes: memory.ullTotalPhys,
             self_pid: std::process::id(),
             details: SysinfoProbe::new()?,
         })
@@ -390,6 +398,7 @@ fn unavailable(status: i32) -> ProbeError {
 impl Probe for WindowsProbe {
     fn sample(&mut self, out: &mut Sample) -> Result<()> {
         out.logical_cores = self.logical_cores;
+        out.memory_total_bytes = self.memory_total_bytes;
         out.self_pid = self.self_pid;
         if !self.basic_supported {
             return self.sample_full(out);
@@ -465,6 +474,8 @@ mod tests {
         assert_eq!(own.start_time, own_full.start_time);
         assert_eq!(own.parent, own_full.parent);
         assert!(own.memory_bytes > 0);
+        assert_eq!(a.memory_total_bytes, b.memory_total_bytes);
+        assert!(a.memory_total_bytes > own.memory_bytes);
         // System (PID 4) cannot be opened without elevation: it comes from the snapshot.
         assert_eq!(by_pid(&a, 4).name, "System");
         let diff = a.processes.len().abs_diff(b.processes.len());

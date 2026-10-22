@@ -32,6 +32,8 @@ fn proc_row(row: &Row) -> ProcRow {
         pid: i32::try_from(row.pid).unwrap_or(i32::MAX),
         cpu: format_cpu(row.cpu_percent),
         memory: format_memory(row.memory_bytes),
+        cpu_heat: i32::from(row.cpu_heat),
+        memory_heat: i32::from(row.memory_heat),
     }
 }
 
@@ -122,6 +124,8 @@ mod tests {
             pid,
             cpu: cpu.into(),
             memory: "1.0 MB".into(),
+            cpu_heat: 0,
+            memory_heat: 0,
         }
     }
 
