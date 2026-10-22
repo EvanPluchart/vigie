@@ -46,6 +46,37 @@ pub struct Sample {
     /// Vigie's own PID, so the app can show its cost without asking the OS.
     pub self_pid: Pid,
     pub processes: Vec<ProcSample>,
+    /// Slots of processes that exited, kept with their buffers for the next new process.
+    /// Not part of the sample.
+    #[doc(hidden)]
+    pub spare: Vec<ProcSample>,
+}
+
+impl Sample {
+    /// Next free slot: a spare one when available, so steady-state ticks do not allocate.
+    pub(crate) fn slot(&mut self, len: usize, name_capacity: usize) -> &mut ProcSample {
+        if len == self.processes.len() {
+            if self.processes.len() == self.processes.capacity() {
+                let more = self.processes.len() / 4 + 32;
+                self.processes.reserve(more);
+                self.spare
+                    .reserve(self.processes.capacity() - self.spare.len());
+            }
+            let slot = self.spare.pop().unwrap_or_else(|| ProcSample {
+                name: String::with_capacity(name_capacity),
+                ..ProcSample::default()
+            });
+            self.processes.push(slot);
+        }
+        &mut self.processes[len]
+    }
+
+    /// Drops the slots past `len` into the spare pool.
+    pub(crate) fn finish(&mut self, len: usize) {
+        if len < self.processes.len() {
+            self.spare.extend(self.processes.drain(len..));
+        }
+    }
 }
 
 /// Expensive, rarely changing fields of one process.

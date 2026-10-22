@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use sysinfo::{CpuRefreshKind, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
-use crate::{Pid, Probe, ProbeError, ProcDetails, ProcSample, Result, Sample};
+use crate::{Pid, Probe, ProbeError, ProcDetails, Result, Sample};
 
 pub struct SysinfoProbe {
     system: System,
@@ -44,10 +44,7 @@ impl Probe for SysinfoProbe {
         // Overwrite existing entries in place so their `String` buffers are reused.
         let mut len = 0;
         for (pid, process) in self.system.processes() {
-            if len == out.processes.len() {
-                out.processes.push(ProcSample::default());
-            }
-            let slot = &mut out.processes[len];
+            let slot = out.slot(len, 0);
             slot.pid = pid.as_u32();
             slot.parent = process.parent().map(|p| p.as_u32());
             slot.start_time = process.start_time();
@@ -57,7 +54,7 @@ impl Probe for SysinfoProbe {
             slot.memory_bytes = process.memory();
             len += 1;
         }
-        out.processes.truncate(len);
+        out.finish(len);
         Ok(())
     }
 

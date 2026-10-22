@@ -194,6 +194,7 @@ mod tests {
             logical_cores: 4,
             self_pid: 1,
             processes,
+            ..Sample::default()
         }
     }
 

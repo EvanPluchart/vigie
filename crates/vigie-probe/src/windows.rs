@@ -8,13 +8,13 @@ use windows_sys::Wdk::System::SystemInformation::{
 };
 use windows_sys::Win32::System::Threading::{ALL_PROCESSOR_GROUPS, GetActiveProcessorCount};
 
-use crate::{Pid, Probe, ProbeError, ProcDetails, ProcSample, Result, Sample, SysinfoProbe};
+use crate::{Pid, Probe, ProbeError, ProcDetails, Result, Sample, SysinfoProbe};
 
 const STATUS_INFO_LENGTH_MISMATCH: i32 = 0xC000_0004_u32 as i32;
 /// FILETIME epoch (1601-01-01) to Unix epoch, in seconds.
 const FILETIME_TO_UNIX_S: u64 = 11_644_473_600;
 /// Reserved for each new process name, so most names never reallocate.
-const NAME_CAPACITY: usize = 64;
+const NAME_CAPACITY: usize = 128;
 
 #[repr(C)]
 struct UnicodeString {
@@ -126,16 +126,7 @@ impl Probe for WindowsProbe {
             let pid = info.unique_process_id as Pid;
             // PID 0 is the System Idle Process: its "CPU time" is idle time.
             if pid != 0 {
-                if len == out.processes.len() {
-                    if out.processes.len() == out.processes.capacity() {
-                        out.processes.reserve(out.processes.len() / 4 + 32);
-                    }
-                    out.processes.push(ProcSample {
-                        name: String::with_capacity(NAME_CAPACITY),
-                        ..ProcSample::default()
-                    });
-                }
-                let slot = &mut out.processes[len];
+                let slot = out.slot(len, NAME_CAPACITY);
                 slot.pid = pid;
                 let parent = info.inherited_from_unique_process_id as Pid;
                 slot.parent = (parent != 0).then_some(parent);
@@ -163,7 +154,7 @@ impl Probe for WindowsProbe {
             }
             offset += info.next_entry_offset as usize;
         }
-        out.processes.truncate(len);
+        out.finish(len);
         Ok(())
     }
 
