@@ -287,6 +287,25 @@ impl ExeCache {
     }
 }
 
+/// Adaptive refresh (docs/ARCHITECTURE.md): the chosen interval while the window has focus,
+/// four times slower in the background, one sample every 10 s while minimised or hidden.
+struct Pace {
+    adaptive: bool,
+    focused: bool,
+    visible: bool,
+}
+
+impl Pace {
+    const HIDDEN: Duration = Duration::from_secs(10);
+
+    fn interval(&self, chosen: Duration) -> Duration {
+        match (self.adaptive, self.visible, self.focused) {
+            (false, _, _) | (true, true, true) => chosen,
+            (true, true, false) => chosen * 4,
+            (true, false, _) => Self::HIDDEN.max(chosen),
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use vigie_core::Sort;
@@ -397,25 +416,5 @@ mod tests {
         assert_eq!(notice.kind, Notice::DENIED);
         let reveal = UserAction::Probe(Action::RevealFile);
         assert!(execute(&mut probe, &core, &sample, 20, 1_000, reveal).is_none());
-    }
-}
-
-/// Adaptive refresh (docs/ARCHITECTURE.md): the chosen interval while the window has focus,
-/// four times slower in the background, one sample every 10 s while minimised or hidden.
-struct Pace {
-    adaptive: bool,
-    focused: bool,
-    visible: bool,
-}
-
-impl Pace {
-    const HIDDEN: Duration = Duration::from_secs(10);
-
-    fn interval(&self, chosen: Duration) -> Duration {
-        match (self.adaptive, self.visible, self.focused) {
-            (false, _, _) | (true, true, true) => chosen,
-            (true, true, false) => chosen * 4,
-            (true, false, _) => Self::HIDDEN.max(chosen),
-        }
     }
 }
