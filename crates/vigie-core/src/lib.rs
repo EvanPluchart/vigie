@@ -51,16 +51,22 @@ pub struct Frame {
     pub self_memory_bytes: u64,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct Measure {
+    cpu_ns: u64,
+    at_ns: u64,
+    percent: Option<f32>,
+}
+
 /// Turns successive samples into frames.
 #[derive(Debug, Default)]
 pub struct Core {
     sort: Sort,
     /// Lowercased once, so matching does not allocate per process.
     filter: String,
-    prev_at_ns: u64,
-    /// CPU time of each process at the previous tick.
-    prev_cpu: HashMap<ProcKey, u64>,
-    next_cpu: HashMap<ProcKey, u64>,
+    /// Last measurement of each process.
+    prev: HashMap<ProcKey, Measure>,
+    next: HashMap<ProcKey, Measure>,
 }
 
 impl Core {
@@ -73,20 +79,33 @@ impl Core {
     }
 
     pub fn update(&mut self, sample: &Sample) -> Frame {
-        let wall_ns = sample.at_ns.saturating_sub(self.prev_at_ns);
         let mut frame = Frame {
             process_count: sample.processes.len(),
             ..Frame::default()
         };
 
-        self.next_cpu.clear();
+        self.next.clear();
         for p in &sample.processes {
             let key = (p.pid, p.start_time);
-            let cpu_percent = match self.prev_cpu.get(&key) {
-                Some(&prev) => cpu_percent(prev, p.cpu_time_ns, wall_ns, sample.logical_cores),
-                _ => None,
+            let cpu_percent = match self.prev.get(&key) {
+                // Not measured again since last tick: keep the last value.
+                Some(prev) if prev.at_ns == p.measured_at_ns => prev.percent,
+                Some(prev) => cpu_percent(
+                    prev.cpu_ns,
+                    p.cpu_time_ns,
+                    p.measured_at_ns.saturating_sub(prev.at_ns),
+                    sample.logical_cores,
+                ),
+                None => None,
             };
-            self.next_cpu.insert(key, p.cpu_time_ns);
+            self.next.insert(
+                key,
+                Measure {
+                    cpu_ns: p.cpu_time_ns,
+                    at_ns: p.measured_at_ns,
+                    percent: cpu_percent,
+                },
+            );
 
             if p.pid == sample.self_pid {
                 frame.self_cpu_percent = cpu_percent;
@@ -102,8 +121,7 @@ impl Core {
                 });
             }
         }
-        std::mem::swap(&mut self.prev_cpu, &mut self.next_cpu);
-        self.prev_at_ns = sample.at_ns;
+        std::mem::swap(&mut self.prev, &mut self.next);
 
         sort_rows(&mut frame.rows, self.sort);
         frame
@@ -185,10 +203,17 @@ mod tests {
             name: name.into(),
             cpu_time_ns,
             memory_bytes,
+            measured_at_ns: 0,
         }
     }
 
-    fn sample(at_ns: u64, processes: Vec<ProcSample>) -> Sample {
+    /// Processes without a measurement time are measured at the tick.
+    fn sample(at_ns: u64, mut processes: Vec<ProcSample>) -> Sample {
+        for p in &mut processes {
+            if p.measured_at_ns == 0 {
+                p.measured_at_ns = at_ns;
+            }
+        }
         Sample {
             at_ns,
             logical_cores: 4,
@@ -240,6 +265,22 @@ mod tests {
         ));
         assert_eq!(row(&frame, 1).cpu_percent, Some(0.0));
         assert_eq!(row(&frame, 7).cpu_percent, None);
+    }
+
+    #[test]
+    fn slow_measurements_keep_their_value_between_refreshes() {
+        let mut core = Core::default();
+        let stale = |cpu, at| ProcSample {
+            measured_at_ns: at,
+            ..proc(9, 10, "service", cpu, 1)
+        };
+        core.update(&sample(SEC, vec![stale(0, SEC)]));
+        // Refreshed at 3 s: 2 s of CPU over 2 s on 4 cores is 25 %.
+        let frame = core.update(&sample(3 * SEC, vec![stale(2 * SEC, 3 * SEC)]));
+        assert_eq!(row(&frame, 9).cpu_percent, Some(25.0));
+        // Not measured again at 4 s: the value is kept, not dropped to 0.
+        let frame = core.update(&sample(4 * SEC, vec![stale(2 * SEC, 3 * SEC)]));
+        assert_eq!(row(&frame, 9).cpu_percent, Some(25.0));
     }
 
     #[test]

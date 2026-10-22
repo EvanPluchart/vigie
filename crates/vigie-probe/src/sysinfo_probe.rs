@@ -37,7 +37,8 @@ impl Probe for SysinfoProbe {
             true,
             ProcessRefreshKind::nothing().with_cpu().with_memory(),
         );
-        out.at_ns = self.epoch.elapsed().as_nanos() as u64;
+        let at_ns = self.epoch.elapsed().as_nanos() as u64;
+        out.at_ns = at_ns;
         out.logical_cores = self.logical_cores;
         out.self_pid = self.self_pid;
 
@@ -52,6 +53,7 @@ impl Probe for SysinfoProbe {
             slot.name.push_str(&process.name().to_string_lossy());
             slot.cpu_time_ns = process.accumulated_cpu_time().saturating_mul(1_000_000);
             slot.memory_bytes = process.memory();
+            slot.measured_at_ns = at_ns;
             len += 1;
         }
         out.finish(len);

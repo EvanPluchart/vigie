@@ -1,19 +1,39 @@
-//! Native Windows probe: one `NtQuerySystemInformation(SystemProcessInformation)` call per tick
-//! returns every process with its times and memory, without opening any process (decision 0002).
+//! Native Windows probe, hybrid (decision 0004):
+//!
+//! * Every tick, `SystemBasicProcessInformation` lists every process (PID, parent, sequence
+//!   number, name) without describing threads, which keeps the kernel call cheap.
+//! * Processes we may open get a handle once; each tick reads their times and working set from it.
+//! * Processes we may not open (services, protected processes, without elevation) are read from
+//!   the full `SystemProcessInformation` snapshot, every `FULL_EVERY` ticks and whenever one
+//!   appears. Their `measured_at_ns` tells the core when the value was taken.
+//!
+//! On Windows versions without the basic class, every tick takes the full snapshot.
 
+use std::collections::HashMap;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::time::Instant;
 
 use windows_sys::Wdk::System::SystemInformation::{
-    NtQuerySystemInformation, SystemProcessInformation,
+    NtQuerySystemInformation, SYSTEM_INFORMATION_CLASS, SystemProcessInformation,
 };
-use windows_sys::Win32::System::Threading::{ALL_PROCESSOR_GROUPS, GetActiveProcessorCount};
+use windows_sys::Win32::Foundation::FILETIME;
+use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+use windows_sys::Win32::System::Threading::{
+    ALL_PROCESSOR_GROUPS, GetActiveProcessorCount, GetProcessTimes, OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 use crate::{Pid, Probe, ProbeError, ProcDetails, Result, Sample, SysinfoProbe};
 
+/// Not in the public headers: lists processes without their threads (recent Windows 11).
+const SYSTEM_BASIC_PROCESS_INFORMATION: SYSTEM_INFORMATION_CLASS = 252;
 const STATUS_INFO_LENGTH_MISMATCH: i32 = 0xC000_0004_u32 as i32;
+const STATUS_INVALID_INFO_CLASS: i32 = 0xC000_0003_u32 as i32;
+/// Ticks between two full snapshots for the processes we cannot open.
+const FULL_EVERY: u32 = 5;
 /// FILETIME epoch (1601-01-01) to Unix epoch, in seconds.
 const FILETIME_TO_UNIX_S: u64 = 11_644_473_600;
-/// Reserved for each new process name, so most names never reallocate.
+/// Reserved for each process name, so names almost never reallocate.
 const NAME_CAPACITY: usize = 128;
 
 #[repr(C)]
@@ -50,9 +70,150 @@ struct SystemProcessInfo {
     working_set_size: usize,
 }
 
+/// `SYSTEM_BASICPROCESS_INFORMATION`, from the reverse-engineered NT headers (phnt).
+#[repr(C)]
+struct SystemBasicProcessInfo {
+    next_entry_offset: u32,
+    unique_process_id: usize,
+    inherited_from_unique_process_id: usize,
+    /// Increases for every process the system creates: identifies a process across PID reuse.
+    sequence_number: u64,
+    image_name: UnicodeString,
+}
+
+/// A raw buffer for one system information class, kept between ticks.
+struct InfoBuffer {
+    /// `u64` keeps the buffer 8-byte aligned, as the entries require.
+    words: Vec<u64>,
+}
+
+impl InfoBuffer {
+    fn new(bytes: usize) -> Self {
+        Self {
+            words: vec![0; bytes / 8],
+        }
+    }
+
+    /// Fills the buffer, growing it when too small. Returns the raw status on other failures.
+    fn query(&mut self, class: SYSTEM_INFORMATION_CLASS) -> std::result::Result<(), i32> {
+        loop {
+            let bytes = (self.words.len() * 8) as u32;
+            let mut needed = 0u32;
+            // SAFETY: the buffer is valid for `bytes` bytes and outlives the call; `needed` is a
+            // valid out pointer.
+            let status = unsafe {
+                NtQuerySystemInformation(class, self.words.as_mut_ptr().cast(), bytes, &mut needed)
+            };
+            match status {
+                0 => return Ok(()),
+                STATUS_INFO_LENGTH_MISMATCH => {
+                    // Processes may start between two calls: leave a quarter of headroom.
+                    let target = (needed as usize).max(bytes as usize) * 5 / 4;
+                    self.words.resize(target.div_ceil(8), 0);
+                }
+                other => return Err(other),
+            }
+        }
+    }
+
+    /// Calls `f` on each entry of the chain the kernel wrote. `T` must be the entry type of the
+    /// class last queried.
+    fn for_each<T>(&self, mut f: impl FnMut(&T)) {
+        let base = self.words.as_ptr().cast::<u8>();
+        let end = self.words.len() * 8;
+        let mut offset = 0usize;
+        while offset + size_of::<T>() <= end {
+            // SAFETY: the kernel wrote a chain of `T` entries into the buffer; `offset` stays
+            // inside it (checked by the loop) and entries are 8-byte aligned.
+            let entry = unsafe { &*base.add(offset).cast::<T>() };
+            f(entry);
+            // SAFETY: every entry type starts with a `u32` next-entry offset.
+            let next = unsafe { *base.add(offset).cast::<u32>() };
+            if next == 0 {
+                break;
+            }
+            offset += next as usize;
+        }
+    }
+}
+
+fn set_name(out: &mut String, name: &UnicodeString) {
+    out.clear();
+    if !name.buffer.is_null() && name.length > 0 {
+        // SAFETY: the kernel points `buffer` at `length` bytes of UTF-16 inside the snapshot
+        // buffer, which outlives this call.
+        let units =
+            unsafe { std::slice::from_raw_parts(name.buffer, usize::from(name.length) / 2) };
+        out.extend(
+            char::decode_utf16(units.iter().copied())
+                .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER)),
+        );
+    }
+}
+
+fn filetime_100ns(t: FILETIME) -> u64 {
+    (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime)
+}
+
+fn unix_seconds(filetime_100ns: u64) -> u64 {
+    (filetime_100ns / 10_000_000).saturating_sub(FILETIME_TO_UNIX_S)
+}
+
+/// Creation time (100 ns units), CPU time (ns) and working set (bytes) read from a handle.
+fn read_handle(handle: &OwnedHandle) -> Option<(u64, u64, u64)> {
+    let h = handle.as_raw_handle();
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: `h` is a live process handle with query rights; the out pointers are valid.
+    if unsafe { GetProcessTimes(h, &mut created, &mut exited, &mut kernel, &mut user) } == 0 {
+        return None;
+    }
+    // SAFETY: an all-zero PROCESS_MEMORY_COUNTERS is a valid value.
+    let mut memory: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+    memory.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    // SAFETY: same handle; `memory` is valid for `cb` bytes.
+    if unsafe { K32GetProcessMemoryInfo(h, &mut memory, memory.cb) } == 0 {
+        return None;
+    }
+    let cpu_ns = (filetime_100ns(kernel) + filetime_100ns(user)) * 100;
+    Some((
+        filetime_100ns(created),
+        cpu_ns,
+        memory.WorkingSetSize as u64,
+    ))
+}
+
+/// What the probe knows about one live process.
+#[derive(Default)]
+struct Entry {
+    sequence: u64,
+    /// `None` when the process cannot be opened: its values come from the full snapshot.
+    handle: Option<OwnedHandle>,
+    parent: Option<Pid>,
+    start_time: u64,
+    name: String,
+    cpu_time_ns: u64,
+    memory_bytes: u64,
+    measured_at_ns: u64,
+    /// False until a first measurement exists.
+    measured: bool,
+    /// Tick counter value when last listed; older entries belong to exited processes.
+    seen: u64,
+}
+
 pub struct WindowsProbe {
-    /// Raw buffer for the system call, kept between ticks. `u64` keeps it 8-byte aligned.
-    buffer: Vec<u64>,
+    basic: InfoBuffer,
+    full: InfoBuffer,
+    /// False on Windows versions without `SystemBasicProcessInformation`.
+    basic_supported: bool,
+    entries: HashMap<Pid, Entry>,
+    /// Names of exited processes, reused for new ones so steady-state ticks do not allocate.
+    spare_names: Vec<String>,
+    tick: u64,
+    ticks_since_full: u32,
     epoch: Instant,
     logical_cores: u32,
     self_pid: Pid,
@@ -65,7 +226,18 @@ impl WindowsProbe {
         // SAFETY: no pointers involved; returns 0 only on failure.
         let logical_cores = unsafe { GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) };
         Ok(Self {
-            buffer: vec![0; 256 * 1024 / 8],
+            basic: InfoBuffer::new(64 * 1024),
+            full: InfoBuffer::new(1024 * 1024),
+            basic_supported: true,
+            entries: HashMap::with_capacity(1024),
+            // A few ready names absorb processes that start before any has exited.
+            spare_names: {
+                let mut names = Vec::with_capacity(1024);
+                names.resize_with(64, || String::with_capacity(NAME_CAPACITY));
+                names
+            },
+            tick: 0,
+            ticks_since_full: FULL_EVERY,
             epoch: Instant::now(),
             logical_cores: logical_cores.max(1),
             self_pid: std::process::id(),
@@ -73,86 +245,185 @@ impl WindowsProbe {
         })
     }
 
-    /// Fills `self.buffer` with one snapshot of every process, growing it when too small.
-    fn query(&mut self) -> Result<()> {
-        loop {
-            let bytes = (self.buffer.len() * 8) as u32;
-            let mut needed = 0u32;
-            // SAFETY: the buffer is valid for `bytes` bytes and outlives the call; `needed` is a
-            // valid out pointer.
-            let status = unsafe {
-                NtQuerySystemInformation(
-                    SystemProcessInformation,
-                    self.buffer.as_mut_ptr().cast(),
-                    bytes,
-                    &mut needed,
-                )
-            };
-            match status {
-                0 => return Ok(()),
-                STATUS_INFO_LENGTH_MISMATCH => {
-                    // Processes may start between two calls: leave a quarter of headroom.
-                    let target = (needed as usize).max(bytes as usize) * 5 / 4;
-                    self.buffer.resize(target.div_ceil(8), 0);
+    fn now_ns(&self) -> u64 {
+        self.epoch.elapsed().as_nanos() as u64
+    }
+
+    /// Lists processes with the basic class. Returns false if this Windows lacks it.
+    fn list(&mut self, now_ns: u64) -> Result<bool> {
+        match self.basic.query(SYSTEM_BASIC_PROCESS_INFORMATION) {
+            Ok(()) => {}
+            Err(STATUS_INVALID_INFO_CLASS) => return Ok(false),
+            Err(status) => return Err(unavailable(status)),
+        }
+        let tick = self.tick;
+        let mut need_full = false;
+        let entries = &mut self.entries;
+        let spare_names = &mut self.spare_names;
+        self.basic.for_each(|info: &SystemBasicProcessInfo| {
+            let pid = info.unique_process_id as Pid;
+            // PID 0 is the System Idle Process: its "CPU time" is idle time.
+            if pid == 0 {
+                return;
+            }
+            if entries.len() == entries.capacity() {
+                entries.reserve(entries.len() / 4 + 64);
+                spare_names.reserve(entries.capacity().saturating_sub(spare_names.len()));
+            }
+            let entry = entries.entry(pid).or_default();
+            if entry.seen == 0 || entry.sequence != info.sequence_number {
+                // A new process, or a reused PID: start over.
+                let mut name = std::mem::take(&mut entry.name);
+                if name.capacity() == 0 {
+                    name = spare_names
+                        .pop()
+                        .unwrap_or_else(|| String::with_capacity(NAME_CAPACITY));
                 }
-                other => {
-                    return Err(ProbeError::Unavailable(format!(
-                        "NtQuerySystemInformation failed: {other:#x}"
-                    )));
+                set_name(&mut name, &info.image_name);
+                let parent = info.inherited_from_unique_process_id as Pid;
+                *entry = Entry {
+                    sequence: info.sequence_number,
+                    handle: open(pid),
+                    parent: (parent != 0).then_some(parent),
+                    name,
+                    ..Entry::default()
+                };
+            }
+            entry.seen = tick;
+            match entry.handle.as_ref().and_then(read_handle) {
+                Some((created, cpu_ns, memory)) => {
+                    entry.start_time = unix_seconds(created);
+                    entry.cpu_time_ns = cpu_ns;
+                    entry.memory_bytes = memory;
+                    entry.measured_at_ns = now_ns;
+                    entry.measured = true;
+                }
+                // Could not be opened, or exited since it was listed: the snapshot decides.
+                None => {
+                    entry.handle = None;
+                    need_full |= !entry.measured;
                 }
             }
+        });
+        if need_full || self.ticks_since_full >= FULL_EVERY {
+            self.refresh_unopened(now_ns)?;
+        } else {
+            self.ticks_since_full += 1;
         }
+        Ok(true)
     }
+
+    /// Reads the processes without a handle from one full snapshot.
+    fn refresh_unopened(&mut self, now_ns: u64) -> Result<()> {
+        self.full
+            .query(SystemProcessInformation)
+            .map_err(unavailable)?;
+        let tick = self.tick;
+        let entries = &mut self.entries;
+        self.full.for_each(|info: &SystemProcessInfo| {
+            let pid = info.unique_process_id as Pid;
+            let Some(entry) = entries.get_mut(&pid) else {
+                return;
+            };
+            if entry.handle.is_some() || entry.seen != tick {
+                return;
+            }
+            entry.start_time = unix_seconds(info.create_time as u64);
+            entry.cpu_time_ns = (info.user_time as u64 + info.kernel_time as u64) * 100;
+            entry.memory_bytes = info.working_set_size as u64;
+            entry.measured_at_ns = now_ns;
+            entry.measured = true;
+        });
+        self.ticks_since_full = 0;
+        Ok(())
+    }
+
+    /// Fallback without the basic class: everything from one full snapshot per tick.
+    fn sample_full(&mut self, out: &mut Sample) -> Result<()> {
+        self.full
+            .query(SystemProcessInformation)
+            .map_err(unavailable)?;
+        let now_ns = self.now_ns();
+        let mut len = 0usize;
+        self.full.for_each(|info: &SystemProcessInfo| {
+            let pid = info.unique_process_id as Pid;
+            if pid == 0 {
+                return;
+            }
+            let slot = out.slot(len, NAME_CAPACITY);
+            slot.pid = pid;
+            let parent = info.inherited_from_unique_process_id as Pid;
+            slot.parent = (parent != 0).then_some(parent);
+            slot.start_time = unix_seconds(info.create_time as u64);
+            slot.cpu_time_ns = (info.user_time as u64 + info.kernel_time as u64) * 100;
+            slot.memory_bytes = info.working_set_size as u64;
+            slot.measured_at_ns = now_ns;
+            set_name(&mut slot.name, &info.image_name);
+            len += 1;
+        });
+        out.at_ns = now_ns;
+        out.finish(len);
+        Ok(())
+    }
+}
+
+/// Opens a process for queries only. Fails for services and protected processes without
+/// elevation, which is expected.
+fn open(pid: Pid) -> Option<OwnedHandle> {
+    // SAFETY: plain call; a null return means failure and owns nothing.
+    let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if raw.is_null() {
+        return None;
+    }
+    // SAFETY: `raw` is a fresh handle that nothing else owns; OwnedHandle closes it on drop.
+    Some(unsafe { OwnedHandle::from_raw_handle(raw) })
+}
+
+fn unavailable(status: i32) -> ProbeError {
+    ProbeError::Unavailable(format!("NtQuerySystemInformation failed: {status:#x}"))
 }
 
 impl Probe for WindowsProbe {
     fn sample(&mut self, out: &mut Sample) -> Result<()> {
-        self.query()?;
-        out.at_ns = self.epoch.elapsed().as_nanos() as u64;
         out.logical_cores = self.logical_cores;
         out.self_pid = self.self_pid;
+        if !self.basic_supported {
+            return self.sample_full(out);
+        }
+        self.tick += 1;
+        let now_ns = self.now_ns();
+        if !self.list(now_ns)? {
+            self.basic_supported = false;
+            return self.sample_full(out);
+        }
 
-        let base = self.buffer.as_ptr().cast::<u8>();
-        let end = self.buffer.len() * 8;
-        let mut offset = 0usize;
+        // Forget exited processes, keeping their name buffers.
+        let tick = self.tick;
+        let spare_names = &mut self.spare_names;
+        self.entries.retain(|_, entry| {
+            let alive = entry.seen == tick;
+            if !alive && entry.name.capacity() > 0 {
+                spare_names.push(std::mem::take(&mut entry.name));
+            }
+            alive
+        });
+
+        out.at_ns = now_ns;
         let mut len = 0usize;
-        loop {
-            if offset + size_of::<SystemProcessInfo>() > end {
-                break;
+        for (&pid, entry) in &self.entries {
+            if !entry.measured {
+                continue;
             }
-            // SAFETY: the kernel wrote a chain of entries into the buffer; `offset` stays inside
-            // it (checked above) and every entry is 8-byte aligned.
-            let info = unsafe { &*base.add(offset).cast::<SystemProcessInfo>() };
-            let pid = info.unique_process_id as Pid;
-            // PID 0 is the System Idle Process: its "CPU time" is idle time.
-            if pid != 0 {
-                let slot = out.slot(len, NAME_CAPACITY);
-                slot.pid = pid;
-                let parent = info.inherited_from_unique_process_id as Pid;
-                slot.parent = (parent != 0).then_some(parent);
-                slot.start_time =
-                    (info.create_time as u64 / 10_000_000).saturating_sub(FILETIME_TO_UNIX_S);
-                slot.cpu_time_ns = (info.user_time as u64 + info.kernel_time as u64) * 100;
-                slot.memory_bytes = info.working_set_size as u64;
-                slot.name.clear();
-                let name = &info.image_name;
-                if !name.buffer.is_null() && name.length > 0 {
-                    // SAFETY: the kernel points `buffer` at `length` bytes of UTF-16 inside the
-                    // snapshot buffer, which is alive for this whole loop.
-                    let units = unsafe {
-                        std::slice::from_raw_parts(name.buffer, usize::from(name.length) / 2)
-                    };
-                    slot.name.extend(
-                        char::decode_utf16(units.iter().copied())
-                            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER)),
-                    );
-                }
-                len += 1;
-            }
-            if info.next_entry_offset == 0 {
-                break;
-            }
-            offset += info.next_entry_offset as usize;
+            let slot = out.slot(len, NAME_CAPACITY);
+            slot.pid = pid;
+            slot.parent = entry.parent;
+            slot.start_time = entry.start_time;
+            slot.cpu_time_ns = entry.cpu_time_ns;
+            slot.memory_bytes = entry.memory_bytes;
+            slot.measured_at_ns = entry.measured_at_ns;
+            slot.name.clear();
+            slot.name.push_str(&entry.name);
+            len += 1;
         }
         out.finish(len);
         Ok(())
@@ -167,6 +438,35 @@ impl Probe for WindowsProbe {
 mod tests {
     use super::*;
 
+    fn by_pid(sample: &Sample, pid: Pid) -> &crate::ProcSample {
+        sample
+            .processes
+            .iter()
+            .find(|p| p.pid == pid)
+            .expect("process")
+    }
+
+    #[test]
+    fn hybrid_matches_full_snapshot() {
+        let mut hybrid = WindowsProbe::new().expect("probe");
+        let mut full = WindowsProbe::new().expect("probe");
+        full.basic_supported = false;
+        let (mut a, mut b) = (Sample::default(), Sample::default());
+        hybrid.sample(&mut a).expect("sample");
+        full.sample(&mut b).expect("sample");
+
+        assert!(!a.processes.iter().any(|p| p.pid == 0));
+        let (own, own_full) = (by_pid(&a, a.self_pid), by_pid(&b, b.self_pid));
+        assert_eq!(own.name, own_full.name);
+        assert_eq!(own.start_time, own_full.start_time);
+        assert_eq!(own.parent, own_full.parent);
+        assert!(own.memory_bytes > 0);
+        // System (PID 4) cannot be opened without elevation: it comes from the snapshot.
+        assert_eq!(by_pid(&a, 4).name, "System");
+        let diff = a.processes.len().abs_diff(b.processes.len());
+        assert!(diff < 10, "{} vs {}", a.processes.len(), b.processes.len());
+    }
+
     #[test]
     fn matches_sysinfo() {
         let mut native = WindowsProbe::new().expect("probe");
@@ -174,24 +474,24 @@ mod tests {
         let (mut a, mut b) = (Sample::default(), Sample::default());
         native.sample(&mut a).expect("sample");
         reference.sample(&mut b).expect("sample");
-
         assert_eq!(a.self_pid, b.self_pid);
-        assert!(!a.processes.iter().any(|p| p.pid == 0));
-        let own = a
-            .processes
-            .iter()
-            .find(|p| p.pid == a.self_pid)
-            .expect("own process");
-        let own_ref = b
-            .processes
-            .iter()
-            .find(|p| p.pid == b.self_pid)
-            .expect("own process");
+        let (own, own_ref) = (by_pid(&a, a.self_pid), by_pid(&b, b.self_pid));
         assert_eq!(own.name, own_ref.name);
         assert_eq!(own.start_time, own_ref.start_time);
-        assert_eq!(own.parent, own_ref.parent);
-        // Process churn between the two calls is small.
-        let diff = a.processes.len().abs_diff(b.processes.len());
-        assert!(diff < 10, "{} vs {}", a.processes.len(), b.processes.len());
+    }
+
+    #[test]
+    fn unopened_processes_refresh_every_few_ticks() {
+        let mut probe = WindowsProbe::new().expect("probe");
+        let mut sample = Sample::default();
+        probe.sample(&mut sample).expect("sample");
+        let first = by_pid(&sample, 4).measured_at_ns;
+        probe.sample(&mut sample).expect("sample");
+        // Opened processes are measured every tick, System only on full snapshots.
+        assert_eq!(
+            by_pid(&sample, sample.self_pid).measured_at_ns,
+            sample.at_ns
+        );
+        assert_eq!(by_pid(&sample, 4).measured_at_ns, first);
     }
 }

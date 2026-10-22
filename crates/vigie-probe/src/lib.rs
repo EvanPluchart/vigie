@@ -35,6 +35,9 @@ pub struct ProcSample {
     /// Total CPU time used so far, in nanoseconds.
     pub cpu_time_ns: u64,
     pub memory_bytes: u64,
+    /// Monotonic time (same clock as `Sample::at_ns`) at which `cpu_time_ns` and `memory_bytes`
+    /// were read. Usually the tick itself; older for processes that are refreshed less often.
+    pub measured_at_ns: u64,
 }
 
 /// Filled in place by `Probe::sample`, so buffers are reused between ticks.

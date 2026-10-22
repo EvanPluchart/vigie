@@ -30,7 +30,7 @@ pub trait Probe: Send {
 * `sample` fills a caller-owned `Sample` so buffers are reused between ticks: **no allocation in the steady state.**
 * Cheap vs expensive split: `sample` returns PID, parent PID, name, CPU time, memory, I/O counters, start time. `details` is only called for PIDs that are new or currently visible, and its results are cached by `(pid, start_time)` (a PID can be reused, a pair cannot).
 * Backends:
-  * **Windows:** one `NtQuerySystemInformation(SystemProcessInformation)` call per tick returns every process with its times and memory. No `OpenProcess` per process in the hot path.
+  * **Windows** (decision 0004): `NtQuerySystemInformation(SystemBasicProcessInformation)` lists processes every tick without their threads; times and memory come from a handle opened once per process, or, for processes that cannot be opened, from a full `SystemProcessInformation` snapshot every 5 ticks. Each sample says when it was measured.
   * **Linux:** `/proc/<pid>/stat` and `statm`, read with reused buffers. `/proc/stat`, `/proc/meminfo` for the system.
   * **macOS:** `proc_listallpids` + `proc_pid_rusage`, `host_statistics64` for the system.
 * Start with `sysinfo` behind the trait where a native backend is not written yet (decision 0002). Replace a path with native code only when `cargo xtask bench-overhead` shows it matters.
