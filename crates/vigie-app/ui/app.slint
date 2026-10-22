@@ -1,0 +1,98 @@
+import { AboutSlint, Button, ListView, Palette, VerticalBox } from "std-widgets.slint";
+
+export struct ProcRow {
+    name: string,
+    pid: int,
+    cpu: string,
+    memory: string,
+}
+
+component Cell inherits Text {
+    vertical-alignment: center;
+    overflow: elide;
+    color: Palette.foreground;
+}
+
+component Columns inherits HorizontalLayout {
+    padding-left: 12px;
+    padding-right: 12px;
+    spacing: 12px;
+}
+
+export component AboutWindow inherits Window {
+    title: @tr("About Vigie");
+    VerticalBox {
+        alignment: start;
+        Text {
+            text: "Vigie";
+            font-size: 22px;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: @tr("A fast cross-platform task manager.");
+            horizontal-alignment: center;
+        }
+        AboutSlint { }
+    }
+}
+
+export component AppWindow inherits Window {
+    in property <[ProcRow]> rows;
+    in property <string> process-count;
+    in property <string> self-cpu: "—";
+    in property <string> self-memory: "—";
+    callback show-about();
+
+    public function set-dark(dark: bool) {
+        Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    title: "Vigie";
+    preferred-width: 760px;
+    preferred-height: 560px;
+    background: Palette.background;
+
+    VerticalLayout {
+        Rectangle {
+            height: 32px;
+            background: Palette.alternate-background;
+            Columns {
+                Cell { text: @tr("Name"); font-weight: 600; horizontal-stretch: 1; }
+                Cell { text: @tr("PID"); font-weight: 600; width: 72px; horizontal-alignment: right; }
+                Cell { text: @tr("CPU"); font-weight: 600; width: 72px; horizontal-alignment: right; }
+                Cell { text: @tr("Memory"); font-weight: 600; width: 96px; horizontal-alignment: right; }
+            }
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for row[i] in root.rows: Rectangle {
+                height: 26px;
+                background: mod(i, 2) == 0 ? transparent : Palette.alternate-background.with-alpha(0.4);
+                Columns {
+                    Cell { text: row.name; horizontal-stretch: 1; }
+                    Cell { text: row.pid; width: 72px; horizontal-alignment: right; }
+                    Cell { text: row.cpu; width: 72px; horizontal-alignment: right; }
+                    Cell { text: row.memory; width: 96px; horizontal-alignment: right; }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Palette.border;
+        }
+
+        Columns {
+            padding-top: 4px;
+            padding-bottom: 4px;
+            Cell { text: @tr("{} processes", root.process-count); horizontal-stretch: 1; }
+            Cell { text: @tr("Vigie: {} CPU · {}", root.self-cpu, root.self-memory); }
+            Button {
+                text: @tr("About");
+                clicked => { root.show-about(); }
+            }
+        }
+    }
+}
