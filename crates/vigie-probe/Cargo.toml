@@ -10,7 +10,7 @@ sysinfo.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Wdk_System_SystemInformation", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_SystemInformation"] }
+windows-sys = { workspace = true, features = ["Wdk_System_SystemInformation", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_RemoteDesktop", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm"] }
 
 [dev-dependencies]
 criterion.workspace = true

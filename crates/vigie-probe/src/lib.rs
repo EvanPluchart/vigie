@@ -38,6 +38,10 @@ pub struct ProcSample {
     /// Monotonic time (same clock as `Sample::at_ns`) at which `cpu_time_ns` and `memory_bytes`
     /// were read. Usually the tick itself; older for processes that are refreshed less often.
     pub measured_at_ns: u64,
+    /// Login session (Windows): 0 holds services and the system. `None` where unknown.
+    pub session: Option<u32>,
+    /// Owns a visible top-level window: an app the user sees.
+    pub has_window: bool,
 }
 
 /// Filled in place by `Probe::sample`, so buffers are reused between ticks.
@@ -50,6 +54,8 @@ pub struct Sample {
     pub memory_total_bytes: u64,
     /// Vigie's own PID, so the app can show its cost without asking the OS.
     pub self_pid: Pid,
+    /// The desktop shell (explorer.exe on Windows). Programs it starts are not nested under it.
+    pub shell_pid: Option<Pid>,
     pub processes: Vec<ProcSample>,
     /// Slots of processes that exited, kept with their buffers for the next new process.
     /// Not part of the sample.

@@ -9,20 +9,27 @@
 //!
 //! On Windows versions without the basic class, every tick takes the full snapshot.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::time::Instant;
 
 use windows_sys::Wdk::System::SystemInformation::{
     NtQuerySystemInformation, SYSTEM_INFORMATION_CLASS, SystemProcessInformation,
 };
-use windows_sys::Win32::Foundation::FILETIME;
+use windows_sys::Win32::Foundation::{FILETIME, HWND, LPARAM};
+use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::{
     ALL_PROCESSOR_GROUPS, GetActiveProcessorCount, GetProcessTimes, OpenProcess,
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GW_OWNER, GWL_EXSTYLE, GetShellWindow, GetWindow, GetWindowLongW,
+    GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible, WS_EX_TOOLWINDOW,
+};
+use windows_sys::core::BOOL;
 
 use crate::{Pid, Probe, ProbeError, ProcDetails, Result, Sample, SysinfoProbe};
 
@@ -199,6 +206,7 @@ struct Entry {
     cpu_time_ns: u64,
     memory_bytes: u64,
     measured_at_ns: u64,
+    session: Option<u32>,
     /// False until a first measurement exists.
     measured: bool,
     /// Tick counter value when last listed; older entries belong to exited processes.
@@ -219,6 +227,8 @@ pub struct WindowsProbe {
     logical_cores: u32,
     memory_total_bytes: u64,
     self_pid: Pid,
+    /// PIDs owning a visible top-level window, refreshed every tick.
+    windowed: HashSet<Pid>,
     /// Expensive per-process details stay on `sysinfo` until they are measured.
     details: SysinfoProbe,
 }
@@ -249,6 +259,7 @@ impl WindowsProbe {
             logical_cores: logical_cores.max(1),
             memory_total_bytes: memory.ullTotalPhys,
             self_pid: std::process::id(),
+            windowed: HashSet::with_capacity(512),
             details: SysinfoProbe::new()?,
         })
     }
@@ -292,6 +303,7 @@ impl WindowsProbe {
                 *entry = Entry {
                     sequence: info.sequence_number,
                     handle: open(pid),
+                    session: session_of(pid),
                     parent: (parent != 0).then_some(parent),
                     name,
                     ..Entry::default()
@@ -334,6 +346,9 @@ impl WindowsProbe {
             let Some(entry) = entries.get_mut(&pid) else {
                 return;
             };
+            if entry.seen == tick && entry.session.is_none() {
+                entry.session = Some(info.session_id);
+            }
             if entry.handle.is_some() || entry.seen != tick {
                 return;
             }
@@ -352,6 +367,7 @@ impl WindowsProbe {
 
     /// Fallback without the basic class: everything from one full snapshot per tick.
     fn sample_full(&mut self, out: &mut Sample) -> Result<()> {
+        let windowed = &self.windowed;
         self.full
             .query(SystemProcessInformation)
             .map_err(unavailable)?;
@@ -370,6 +386,8 @@ impl WindowsProbe {
             slot.cpu_time_ns = (info.user_time as u64 + info.kernel_time as u64) * 100;
             slot.memory_bytes = info.working_set_size as u64;
             slot.measured_at_ns = now_ns;
+            slot.session = Some(info.session_id);
+            slot.has_window = windowed.contains(&pid);
             set_name(&mut slot.name, &info.image_name);
             len += 1;
         });
@@ -391,6 +409,67 @@ fn open(pid: Pid) -> Option<OwnedHandle> {
     Some(unsafe { OwnedHandle::from_raw_handle(raw) })
 }
 
+/// Login session of a process; `None` when Windows refuses (the full snapshot fills it in).
+fn session_of(pid: Pid) -> Option<u32> {
+    let mut session = 0u32;
+    // SAFETY: `session` is a valid out pointer.
+    (unsafe { ProcessIdToSessionId(pid, &mut session) } != 0).then_some(session)
+}
+
+/// Fills `windowed` with the PIDs that own a window the user can see, as the taskbar would
+/// show it: visible, top-level, not owned, not a tool window, not cloaked, with a title.
+/// Returns the shell's PID.
+fn find_windows(windowed: &mut HashSet<Pid>) -> Option<Pid> {
+    unsafe extern "system" fn visit(hwnd: HWND, param: LPARAM) -> BOOL {
+        // SAFETY: `param` is the `&mut HashSet<Pid>` passed to EnumWindows below, alive and
+        // not otherwise borrowed for the duration of the enumeration.
+        let windowed = unsafe { &mut *(param as *mut HashSet<Pid>) };
+        // SAFETY: `hwnd` comes from EnumWindows; these calls only read window state.
+        unsafe {
+            if IsWindowVisible(hwnd) == 0
+                || !GetWindow(hwnd, GW_OWNER).is_null()
+                || GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW != 0
+                || GetWindowTextLengthW(hwnd) == 0
+            {
+                return 1;
+            }
+            let mut cloaked = 0u32;
+            let attribute = DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED as u32,
+                (&mut cloaked as *mut u32).cast(),
+                size_of::<u32>() as u32,
+            );
+            if attribute == 0 && cloaked != 0 {
+                return 1;
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid != 0 {
+                if windowed.len() == windowed.capacity() {
+                    windowed.reserve(64);
+                }
+                windowed.insert(pid);
+            }
+        }
+        1
+    }
+
+    windowed.clear();
+    // SAFETY: `visit` matches WNDENUMPROC and only uses `param` as documented above.
+    unsafe { EnumWindows(Some(visit), windowed as *mut HashSet<Pid> as LPARAM) };
+    // SAFETY: plain calls; a null shell window yields no PID.
+    unsafe {
+        let shell = GetShellWindow();
+        if shell.is_null() {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(shell, &mut pid);
+        (pid != 0).then_some(pid)
+    }
+}
+
 fn unavailable(status: i32) -> ProbeError {
     ProbeError::Unavailable(format!("NtQuerySystemInformation failed: {status:#x}"))
 }
@@ -400,6 +479,7 @@ impl Probe for WindowsProbe {
         out.logical_cores = self.logical_cores;
         out.memory_total_bytes = self.memory_total_bytes;
         out.self_pid = self.self_pid;
+        out.shell_pid = find_windows(&mut self.windowed);
         if !self.basic_supported {
             return self.sample_full(out);
         }
@@ -434,6 +514,8 @@ impl Probe for WindowsProbe {
             slot.cpu_time_ns = entry.cpu_time_ns;
             slot.memory_bytes = entry.memory_bytes;
             slot.measured_at_ns = entry.measured_at_ns;
+            slot.session = entry.session;
+            slot.has_window = self.windowed.contains(&pid);
             slot.name.clear();
             slot.name.push_str(&entry.name);
             len += 1;
@@ -511,5 +593,32 @@ mod tests {
             sample.at_ns
         );
         assert_eq!(by_pid(&sample, 4).measured_at_ns, second);
+    }
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+
+    #[test]
+    fn sessions_windows_and_shell() {
+        let mut probe = WindowsProbe::new().expect("probe");
+        let mut sample = Sample::default();
+        probe.sample(&mut sample).expect("sample");
+        let system = sample.processes.iter().find(|p| p.pid == 4).expect("System");
+        assert_eq!(system.session, Some(0));
+        let own = sample
+            .processes
+            .iter()
+            .find(|p| p.pid == sample.self_pid)
+            .expect("own process");
+        assert!(own.session.is_some());
+        // On an interactive desktop the shell runs and owns no taskbar window of its own
+        // process necessarily, but some process does.
+        if let Some(shell) = sample.shell_pid {
+            let shell = sample.processes.iter().find(|p| p.pid == shell).expect("shell");
+            assert_eq!(shell.name.to_lowercase(), "explorer.exe");
+            assert!(sample.processes.iter().any(|p| p.has_window));
+        }
     }
 }

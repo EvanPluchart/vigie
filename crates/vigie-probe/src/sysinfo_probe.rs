@@ -59,6 +59,8 @@ impl Probe for SysinfoProbe {
             slot.cpu_time_ns = process.accumulated_cpu_time().saturating_mul(1_000_000);
             slot.memory_bytes = process.memory();
             slot.measured_at_ns = at_ns;
+            slot.session = None;
+            slot.has_window = false;
             len += 1;
         }
         out.finish(len);
