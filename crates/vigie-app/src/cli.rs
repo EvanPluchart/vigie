@@ -5,7 +5,7 @@ use std::time::Duration;
 use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light] [--about]";
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]...";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
@@ -16,6 +16,8 @@ pub struct Options {
     pub dark: Option<bool>,
     /// Opens the About window at start, for screenshots.
     pub about: bool,
+    /// Processes to show expanded at start, for screenshots.
+    pub expand: Vec<u32>,
 }
 
 impl Default for Options {
@@ -26,6 +28,7 @@ impl Default for Options {
             interval: Duration::from_secs(1),
             dark: None,
             about: false,
+            expand: Vec::new(),
         }
     }
 }
@@ -53,6 +56,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--dark", None) => options.dark = Some(true),
             ("--light", None) => options.dark = Some(false),
             ("--about", None) => options.about = true,
+            ("--expand", Some(pid)) => options
+                .expand
+                .push(pid.parse().map_err(|_| format!("invalid PID `{pid}`"))?),
             _ => return Err(format!("unknown argument `{arg}`")),
         }
     }
@@ -106,6 +112,7 @@ mod tests {
                 interval: Duration::from_millis(500),
                 dark: Some(true),
                 about: false,
+                expand: Vec::new(),
             }
         );
     }

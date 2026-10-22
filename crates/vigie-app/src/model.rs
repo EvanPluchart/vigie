@@ -3,9 +3,14 @@
 use std::collections::HashSet;
 
 use slint::{Model, SharedString, VecModel};
-use vigie_core::{Frame, Row};
+use vigie_core::{Frame, Group, Row, RowKind};
 
 use crate::{AppWindow, ProcRow};
+
+/// Row kinds as `ui/app.slint` reads them.
+const KIND_GROUP: i32 = 0;
+const KIND_PROCESS: i32 = 1;
+const KIND_ITSELF: i32 = 2;
 
 /// A frame converted on the sampler thread, so the UI thread only patches models.
 pub struct UiFrame {
@@ -27,16 +32,46 @@ impl From<Frame> for UiFrame {
 }
 
 fn proc_row(row: &Row) -> ProcRow {
+    let pid = i32::try_from(row.pid).unwrap_or(i32::MAX);
+    // A stable identity per row, so patching moves rows instead of rewriting them.
+    let (kind, group, key) = match row.kind {
+        RowKind::Group(group) => {
+            let index = match group {
+                Group::Apps => 0,
+                Group::Background => 1,
+                Group::System => 2,
+                Group::All => 3,
+            };
+            (KIND_GROUP, index, -1 - index)
+        }
+        RowKind::Process => (KIND_PROCESS, 0, pid.wrapping_mul(2)),
+        RowKind::Itself => (KIND_ITSELF, 0, pid.wrapping_mul(2) + 1),
+    };
+    let figures = kind != KIND_GROUP;
     ProcRow {
+        key,
+        kind,
+        group,
+        depth: i32::from(row.depth),
+        count: i32::try_from(row.count).unwrap_or(i32::MAX),
+        expandable: row.kind == RowKind::Process && row.count > 0,
+        expanded: row.expanded,
         name: row.name.as_str().into(),
-        pid: i32::try_from(row.pid).unwrap_or(i32::MAX),
-        cpu: format_cpu(row.cpu_percent),
-        memory: format_memory(row.memory_bytes),
+        pid,
+        cpu: if figures {
+            format_cpu(row.cpu_percent)
+        } else {
+            SharedString::new()
+        },
+        memory: if figures {
+            format_memory(row.memory_bytes)
+        } else {
+            SharedString::new()
+        },
         cpu_heat: i32::from(row.cpu_heat),
         memory_heat: i32::from(row.memory_heat),
     }
 }
-
 /// Runs on the UI thread: patch the models, nothing else.
 pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
     let Some(app) = window.upgrade() else {
@@ -71,26 +106,26 @@ pub struct PatchStats {
     pub removed: usize,
 }
 
-/// Makes `model` equal to `rows` with targeted edits, keyed by PID: rows that vanished are
+/// Makes `model` equal to `rows` with targeted edits, keyed by `key`: rows that vanished are
 /// removed, new rows are inserted, changed rows get `set_row_data`, unchanged rows are untouched.
 pub fn patch(model: &VecModel<ProcRow>, rows: Vec<ProcRow>) -> PatchStats {
     let mut stats = PatchStats::default();
-    let new_pids: HashSet<i32> = rows.iter().map(|r| r.pid).collect();
-    let mut old_pids: HashSet<i32> = model.iter().map(|r| r.pid).collect();
+    let new_keys: HashSet<i32> = rows.iter().map(|r| r.key).collect();
+    let mut old_keys: HashSet<i32> = model.iter().map(|r| r.key).collect();
 
     let mut i = 0;
     for row in rows {
-        // Drop old rows at this position whose process is gone.
+        // Drop old rows at this position that are gone.
         while let Some(old) = model.row_data(i) {
-            if new_pids.contains(&old.pid) {
+            if new_keys.contains(&old.key) {
                 break;
             }
             model.remove(i);
-            old_pids.remove(&old.pid);
+            old_keys.remove(&old.key);
             stats.removed += 1;
         }
         match model.row_data(i) {
-            Some(old) if old.pid != row.pid && !old_pids.contains(&row.pid) => {
+            Some(old) if old.key != row.key && !old_keys.contains(&row.key) => {
                 model.insert(i, row);
                 stats.inserted += 1;
             }
@@ -120,13 +155,38 @@ mod tests {
 
     fn row(pid: i32, cpu: &str) -> ProcRow {
         ProcRow {
+            key: pid * 2,
+            kind: KIND_PROCESS,
             name: format!("p{pid}").into(),
             pid,
             cpu: cpu.into(),
             memory: "1.0 MB".into(),
+            ..ProcRow::default()
+        }
+    }
+
+    #[test]
+    fn rows_have_distinct_keys() {
+        let process = |kind| Row {
+            kind,
+            pid: 7,
+            start_time: 0,
+            name: "p".into(),
+            cpu_percent: Some(1.0),
+            memory_bytes: 1,
             cpu_heat: 0,
             memory_heat: 0,
-        }
+            depth: 0,
+            count: 2,
+            expanded: true,
+        };
+        let group = proc_row(&process(RowKind::Group(Group::Apps)));
+        let parent = proc_row(&process(RowKind::Process));
+        let itself = proc_row(&process(RowKind::Itself));
+        assert_eq!((group.kind, group.key), (KIND_GROUP, -1));
+        assert_eq!(group.cpu, "", "group headers show no figures");
+        assert!(parent.expandable && !itself.expandable);
+        assert_ne!(parent.key, itself.key);
     }
 
     fn rows(model: &VecModel<ProcRow>) -> Vec<ProcRow> {

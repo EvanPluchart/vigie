@@ -3,7 +3,7 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use vigie_core::{Core, Sort};
+use vigie_core::{Core, Pid, Sort};
 use vigie_probe::{Probe, Sample, SystemProbe};
 
 use crate::AppWindow;
@@ -14,6 +14,8 @@ use crate::model::{self, UiFrame};
 pub enum Command {
     Sort(Sort),
     Filter(String),
+    /// Expand or collapse the subtree of this PID.
+    Toggle(Pid),
 }
 
 pub struct Settings {
@@ -67,6 +69,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                     match command {
                         Command::Sort(sort) => core.set_sort(sort),
                         Command::Filter(filter) => core.set_filter(&filter),
+                        Command::Toggle(pid) => core.toggle(pid),
                     }
                     if !send(&window, &mut core, &sample) {
                         return;

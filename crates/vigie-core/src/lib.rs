@@ -1,8 +1,12 @@
 //! Process model: CPU % from deltas, tree, grouping, history, diagnostics.
 //! No UI and no OS calls here. See docs/ARCHITECTURE.md.
 
-use std::collections::HashMap;
+mod tree;
 
+use std::collections::{HashMap, HashSet};
+
+pub use tree::Group;
+use tree::{Entry, Figures, Node};
 pub use vigie_probe::{Pid, ProcSample, Sample};
 
 /// Identifies a process across ticks. A PID can be reused, a `(pid, start_time)` pair cannot.
@@ -56,9 +60,21 @@ impl Default for Sort {
     }
 }
 
+/// What a row of the process table is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowKind {
+    /// A section header; `count` is the number of processes in it.
+    Group(Group),
+    /// A process. With descendants, its figures are the total of its subtree.
+    Process,
+    /// The first line under an expanded process: that process alone.
+    Itself,
+}
+
 /// One row of the process table, ready for the UI.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
+    pub kind: RowKind,
     pub pid: Pid,
     pub start_time: u64,
     pub name: String,
@@ -68,6 +84,11 @@ pub struct Row {
     /// 0 (cool) to 3 (hot), for background tints.
     pub cpu_heat: u8,
     pub memory_heat: u8,
+    /// Indentation level in the tree.
+    pub depth: u8,
+    /// Group: processes in it. Process: its descendants.
+    pub count: u32,
+    pub expanded: bool,
 }
 
 /// Heat thresholds: CPU in percent of the whole machine, memory in percent of physical memory.
@@ -105,6 +126,10 @@ pub struct Core {
     /// Last measurement of each process.
     prev: HashMap<ProcKey, Measure>,
     next: HashMap<ProcKey, Measure>,
+    /// Processes whose subtree is shown.
+    expanded: HashSet<ProcKey>,
+    /// Start time of each live PID, to resolve UI requests made by PID.
+    starts: HashMap<Pid, u64>,
 }
 
 impl Core {
@@ -128,6 +153,16 @@ impl Core {
         self.filter = filter.to_lowercase();
     }
 
+    /// Expands or collapses a process's subtree. Unknown PIDs are ignored.
+    pub fn toggle(&mut self, pid: Pid) {
+        if let Some(&start) = self.starts.get(&pid) {
+            let key = (pid, start);
+            if !self.expanded.remove(&key) {
+                self.expanded.insert(key);
+            }
+        }
+    }
+
     pub fn update(&mut self, sample: &Sample) -> Frame {
         let mut frame = Frame {
             process_count: sample.processes.len(),
@@ -135,6 +170,8 @@ impl Core {
         };
 
         self.next.clear();
+        self.starts.clear();
+        let mut nodes = Vec::with_capacity(sample.processes.len());
         for p in &sample.processes {
             let key = (p.pid, p.start_time);
             let cpu_percent = match self.prev.get(&key) {
@@ -156,29 +193,87 @@ impl Core {
                     percent: cpu_percent,
                 },
             );
-
+            self.starts.insert(p.pid, p.start_time);
             if p.pid == sample.self_pid {
                 frame.self_cpu_percent = cpu_percent;
                 frame.self_memory_bytes = p.memory_bytes;
             }
-            if matches_filter(p, &self.filter) {
-                frame.rows.push(Row {
-                    pid: p.pid,
-                    start_time: p.start_time,
-                    name: p.name.clone(),
-                    cpu_percent,
-                    memory_bytes: p.memory_bytes,
-                    cpu_heat: cpu_percent.map_or(0, |c| heat(c, CPU_HEAT)),
-                    memory_heat: heat(
-                        memory_share(p.memory_bytes, sample.memory_total_bytes),
-                        MEMORY_HEAT,
-                    ),
-                });
-            }
+            nodes.push(Node {
+                p,
+                cpu: cpu_percent,
+            });
         }
         std::mem::swap(&mut self.prev, &mut self.next);
+        // Forget expanded processes that exited.
+        let starts = &self.starts;
+        self.expanded
+            .retain(|(pid, start)| starts.get(pid) == Some(start));
 
-        sort_rows(&mut frame.rows, self.sort);
+        let filter = self.filter.as_str();
+        let tree = tree::build(
+            &nodes,
+            sample.shell_pid,
+            &|p| matches_filter(p, filter),
+            self.sort,
+            &self.expanded,
+        );
+        let total_memory = sample.memory_total_bytes;
+        let row = |kind, node: usize, depth, figures: Figures, count, expanded| {
+            let p = nodes[node].p;
+            Row {
+                kind,
+                pid: p.pid,
+                start_time: p.start_time,
+                name: p.name.clone(),
+                cpu_percent: figures.cpu,
+                memory_bytes: figures.memory,
+                cpu_heat: figures.cpu.map_or(0, |c| heat(c, CPU_HEAT)),
+                memory_heat: heat(memory_share(figures.memory, total_memory), MEMORY_HEAT),
+                depth,
+                count,
+                expanded,
+            }
+        };
+        frame.rows = tree
+            .entries
+            .iter()
+            .map(|entry| match *entry {
+                Entry::Group { group, count } => Row {
+                    kind: RowKind::Group(group),
+                    pid: 0,
+                    start_time: 0,
+                    name: String::new(),
+                    cpu_percent: None,
+                    memory_bytes: 0,
+                    cpu_heat: 0,
+                    memory_heat: 0,
+                    depth: 0,
+                    count: count as u32,
+                    expanded: true,
+                },
+                Entry::Process { node, depth, total } => {
+                    let p = nodes[node].p;
+                    let figures = if total {
+                        tree.totals[node]
+                    } else {
+                        Figures {
+                            cpu: nodes[node].cpu,
+                            memory: p.memory_bytes,
+                        }
+                    };
+                    let expanded = self.expanded.contains(&(p.pid, p.start_time));
+                    let count = if total { tree.descendants[node] } else { 0 };
+                    row(RowKind::Process, node, depth, figures, count, expanded)
+                }
+                Entry::Itself { node, depth } => {
+                    let figures = Figures {
+                        cpu: nodes[node].cpu,
+                        memory: nodes[node].p.memory_bytes,
+                    };
+                    row(RowKind::Itself, node, depth, figures, 0, false)
+                }
+            })
+            .collect();
         frame
     }
 }
@@ -225,27 +320,6 @@ fn lowercase(s: &str) -> impl Iterator<Item = char> + '_ {
     s.chars().flat_map(char::to_lowercase)
 }
 
-fn sort_rows(rows: &mut [Row], sort: Sort) {
-    rows.sort_by(|a, b| {
-        let primary = match sort.key {
-            SortKey::Cpu => a
-                .cpu_percent
-                .unwrap_or(-1.0)
-                .total_cmp(&b.cpu_percent.unwrap_or(-1.0)),
-            SortKey::Memory => a.memory_bytes.cmp(&b.memory_bytes),
-            SortKey::Name => lowercase(&a.name).cmp(lowercase(&b.name)),
-            SortKey::Pid => a.pid.cmp(&b.pid),
-        };
-        let primary = if sort.ascending {
-            primary
-        } else {
-            primary.reverse()
-        };
-        // Stable tie-break so rows do not jump between ticks.
-        primary.then_with(|| a.pid.cmp(&b.pid))
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +341,8 @@ mod tests {
             cpu_time_ns,
             memory_bytes,
             measured_at_ns: 0,
+            session: None,
+            has_window: false,
         }
     }
 
@@ -286,8 +362,23 @@ mod tests {
         }
     }
 
+    /// The process row of `pid` (not a group header, not an "itself" line).
     fn row(frame: &Frame, pid: Pid) -> &Row {
-        frame.rows.iter().find(|r| r.pid == pid).expect("row")
+        frame
+            .rows
+            .iter()
+            .find(|r| r.kind == RowKind::Process && r.pid == pid)
+            .expect("row")
+    }
+
+    /// PIDs of the process rows, in display order.
+    fn pids(frame: &Frame) -> Vec<Pid> {
+        frame
+            .rows
+            .iter()
+            .filter(|r| !matches!(r.kind, RowKind::Group(_)))
+            .map(|r| r.pid)
+            .collect()
     }
 
     #[test]
@@ -399,13 +490,10 @@ mod tests {
             },
             "",
         );
-        let pids: Vec<Pid> = core
-            .update(&sample(SEC, processes.clone()))
-            .rows
-            .iter()
-            .map(|r| r.pid)
-            .collect();
-        assert_eq!(pids, [1, 3, 2]);
+        assert_eq!(
+            pids(&core.update(&sample(SEC, processes.clone()))),
+            [1, 3, 2]
+        );
 
         let mut core = Core::new(
             Sort {
@@ -415,17 +503,145 @@ mod tests {
             "CODE",
         );
         let frame = core.update(&sample(SEC, processes.clone()));
-        let pids: Vec<Pid> = frame.rows.iter().map(|r| r.pid).collect();
-        assert_eq!(pids, [2, 3]);
+        assert_eq!(pids(&frame), [2, 3]);
         assert_eq!(frame.process_count, 3);
 
         let mut core = Core::new(Sort::default(), "3");
-        let pids: Vec<Pid> = core
-            .update(&sample(SEC, processes))
+        assert_eq!(pids(&core.update(&sample(SEC, processes))), [3]);
+    }
+
+    /// shell(10) starts app(20, window) which starts helper(21) and worker(22); worker starts
+    /// grandchild(23). shell also starts tool(30, no window). svc(40) and svchost(41) are in
+    /// session 0, svchost started by svc.
+    fn desktop() -> Vec<ProcSample> {
+        let p = |pid, parent, name: &str, session, window, mem| ProcSample {
+            parent,
+            session: Some(session),
+            has_window: window,
+            ..proc(pid, 100, name, 0, mem)
+        };
+        vec![
+            p(10, None, "explorer", 1, true, 50),
+            p(20, Some(10), "app", 1, true, 100),
+            p(21, Some(20), "helper", 1, false, 10),
+            p(22, Some(20), "worker", 1, false, 20),
+            p(23, Some(22), "grandchild", 1, false, 5),
+            p(30, Some(10), "tool", 1, false, 7),
+            p(40, None, "svc", 0, false, 3),
+            p(41, Some(40), "svchost", 0, false, 4),
+        ]
+    }
+
+    fn desktop_sample() -> Sample {
+        Sample {
+            shell_pid: Some(10),
+            ..sample(SEC, desktop())
+        }
+    }
+
+    fn by_memory() -> Core {
+        Core::new(
+            Sort {
+                key: SortKey::Memory,
+                ascending: false,
+            },
+            "",
+        )
+    }
+
+    #[test]
+    fn groups_apps_background_and_system() {
+        let frame = by_memory().update(&desktop_sample());
+        let groups: Vec<(Group, u32)> = frame
             .rows
             .iter()
-            .map(|r| r.pid)
+            .filter_map(|r| match r.kind {
+                RowKind::Group(g) => Some((g, r.count)),
+                _ => None,
+            })
             .collect();
-        assert_eq!(pids, [3]);
+        // The app's helpers belong to the app; the tool started by the shell does not.
+        assert_eq!(
+            groups,
+            [(Group::Apps, 5), (Group::Background, 1), (Group::System, 2)]
+        );
+        // Collapsed: apps and their subtree totals, then background, then flat system.
+        assert_eq!(pids(&frame), [20, 10, 30, 41, 40]);
+        let app = row(&frame, 20);
+        assert_eq!((app.memory_bytes, app.count), (135, 3));
+        assert_eq!(
+            row(&frame, 10).count,
+            0,
+            "the shell does not adopt the apps it starts"
+        );
+    }
+
+    #[test]
+    fn expanding_shows_the_process_itself_then_its_children() {
+        let mut core = by_memory();
+        core.update(&desktop_sample());
+        core.toggle(20);
+        let frame = core.update(&desktop_sample());
+        let apps: Vec<(Pid, RowKind, u8)> = frame
+            .rows
+            .iter()
+            .take_while(|r| r.kind != RowKind::Group(Group::Background))
+            .skip(1)
+            .map(|r| (r.pid, r.kind, r.depth))
+            .collect();
+        assert_eq!(
+            apps,
+            [
+                (20, RowKind::Process, 0),
+                (20, RowKind::Itself, 1),
+                (22, RowKind::Process, 1),
+                (21, RowKind::Process, 1),
+                (10, RowKind::Process, 0),
+            ]
+        );
+        assert!(row(&frame, 20).expanded);
+        // The worker's subtree total includes its child; collapsing hides it again.
+        assert_eq!(row(&frame, 22).memory_bytes, 25);
+        core.toggle(20);
+        assert_eq!(pids(&core.update(&desktop_sample()))[..2], [20, 10]);
+    }
+
+    #[test]
+    fn stale_parent_is_ignored() {
+        // PID 22's parent 20 started after it: 20 is a reused PID, not its parent.
+        let mut processes = desktop();
+        processes[1].start_time = 200;
+        let frame = by_memory().update(&Sample {
+            shell_pid: Some(10),
+            ..sample(SEC, processes)
+        });
+        assert_eq!(row(&frame, 20).count, 0);
+    }
+
+    #[test]
+    fn parent_loops_still_show_every_process() {
+        let mut a = proc(1, 100, "a", 0, 1);
+        let mut b = proc(2, 100, "b", 0, 1);
+        a.parent = Some(2);
+        b.parent = Some(1);
+        // The loop is cut: one of them becomes the root, the other its child.
+        let mut core = Core::default();
+        let frame = core.update(&sample(SEC, vec![a.clone(), b.clone()]));
+        assert_eq!(pids(&frame), [1]);
+        assert_eq!(row(&frame, 1).count, 1);
+        core.toggle(1);
+        let frame = core.update(&sample(SEC, vec![a, b]));
+        assert_eq!(pids(&frame), [1, 1, 2]);
+    }
+
+    #[test]
+    fn search_shows_matches_flat() {
+        let mut core = by_memory();
+        core.set_filter("er");
+        let frame = core.update(&desktop_sample());
+        // helper, worker (apps), explorer (app); flat with their own figures.
+        assert_eq!(pids(&frame), [10, 22, 21]);
+        assert_eq!(row(&frame, 22).memory_bytes, 20);
+        assert!(frame.rows.iter().all(|r| r.depth == 0));
     }
 }

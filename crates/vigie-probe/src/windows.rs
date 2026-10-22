@@ -605,7 +605,11 @@ mod desktop_tests {
         let mut probe = WindowsProbe::new().expect("probe");
         let mut sample = Sample::default();
         probe.sample(&mut sample).expect("sample");
-        let system = sample.processes.iter().find(|p| p.pid == 4).expect("System");
+        let system = sample
+            .processes
+            .iter()
+            .find(|p| p.pid == 4)
+            .expect("System");
         assert_eq!(system.session, Some(0));
         let own = sample
             .processes
@@ -616,7 +620,11 @@ mod desktop_tests {
         // On an interactive desktop the shell runs and owns no taskbar window of its own
         // process necessarily, but some process does.
         if let Some(shell) = sample.shell_pid {
-            let shell = sample.processes.iter().find(|p| p.pid == shell).expect("shell");
+            let shell = sample
+                .processes
+                .iter()
+                .find(|p| p.pid == shell)
+                .expect("shell");
             assert_eq!(shell.name.to_lowercase(), "explorer.exe");
             assert!(sample.processes.iter().any(|p| p.has_window));
         }

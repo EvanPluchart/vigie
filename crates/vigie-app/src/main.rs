@@ -66,6 +66,12 @@ fn main() -> anyhow::Result<()> {
         let _ = tx.send(Command::Sort(next));
     });
     let tx = commands.clone();
+    app.on_toggle_clicked(move |pid| {
+        if let Ok(pid) = u32::try_from(pid) {
+            let _ = tx.send(Command::Toggle(pid));
+        }
+    });
+    let tx = commands.clone();
     app.on_search_edited(move |text| {
         let _ = tx.send(Command::Filter(text.to_string()));
     });
@@ -76,12 +82,16 @@ fn main() -> anyhow::Result<()> {
         interval: options.interval,
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
+    for pid in options.expand {
+        let _ = commands.send(Command::Toggle(pid));
+    }
 
     app.run().context("running the event loop")?;
     // The callbacks hold senders too: replace them so the sampler sees the channel close.
     drop(commands);
     app.on_sort_clicked(|_| {});
     app.on_search_edited(|_| {});
+    app.on_toggle_clicked(|_| {});
     let _ = sampler.join();
     Ok(())
 }
