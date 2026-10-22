@@ -552,6 +552,10 @@ impl Probe for WindowsProbe {
     fn exe_info(&mut self, exe: &std::path::Path, icon_size: u32) -> ExeInfo {
         windows_exe::exe_info(exe, icon_size)
     }
+
+    fn act(&mut self, target: crate::Target, action: crate::Action) -> Result<()> {
+        crate::windows_actions::act(target, action)
+    }
 }
 
 #[cfg(test)]

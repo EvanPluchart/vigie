@@ -4,6 +4,8 @@ mod sysinfo_probe;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
+mod windows_actions;
+#[cfg(windows)]
 mod windows_exe;
 
 use std::path::PathBuf;
@@ -21,6 +23,15 @@ pub type Pid = u32;
 pub enum ProbeError {
     #[error("system probe unavailable: {0}")]
     Unavailable(String),
+    /// The process exited, or its PID now belongs to another process.
+    #[error("the process is gone")]
+    Gone,
+    #[error("access denied")]
+    Denied,
+    #[error("not supported on this system")]
+    Unsupported,
+    #[error("{0}")]
+    Failed(String),
 }
 
 pub type Result<T> = std::result::Result<T, ProbeError>;
@@ -129,4 +140,38 @@ pub trait Probe: Send {
     fn exe_info(&mut self, _exe: &std::path::Path, _icon_size: u32) -> ExeInfo {
         ExeInfo::default()
     }
+    /// Acts on one process, after checking it is still the process `target` names.
+    fn act(&mut self, _target: Target, _action: Action) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+}
+
+/// A process as the user saw it. An action applies only if the PID still belongs to the process
+/// that started at `start_time`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Target {
+    pub pid: Pid,
+    pub start_time: u64,
+}
+
+/// Scheduling priority. Real-time is left out on purpose: it can starve the whole system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Priority {
+    Idle,
+    BelowNormal,
+    Normal,
+    AboveNormal,
+    High,
+}
+
+/// What the user can do to a process. Callers confirm destructive actions first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    End,
+    Suspend,
+    Resume,
+    SetPriority(Priority),
+    /// Show the executable in the file manager.
+    RevealFile,
+    CopyCommandLine,
 }
