@@ -10,7 +10,12 @@ use windows_sys::Win32::System::SystemInformation::{
 };
 use windows_sys::Win32::System::WindowsProgramming::SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION;
 
-use crate::{CoreTimes, MemoryInfo, ProbeError, Result};
+use windows_sys::Win32::NetworkManagement::IpHelper::{
+    FreeMibTable, GetIfEntry2, GetIfTable2, MIB_IF_ROW2, MIB_IF_TABLE2,
+};
+use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+
+use crate::{CoreTimes, MemoryInfo, NetCounters, ProbeError, Result};
 
 /// Per-core times, read into a buffer kept between ticks.
 #[derive(Default)]
@@ -89,6 +94,69 @@ pub(crate) fn memory(out: &mut MemoryInfo) {
     }
 }
 
+/// Bytes received and sent by the physical network interfaces that are up. Filter drivers and
+/// virtual adapters (VPN, Hyper-V, WSL) report the same traffic again, so they are left out.
+///
+/// Listing every interface (`GetIfTable2`) costs about 1 ms, mostly for virtual ones, so the
+/// list of physical interfaces is refreshed every `RELIST_EVERY` reads and only those are
+/// queried in between (`GetIfEntry2`).
+#[derive(Default)]
+pub(crate) struct Network {
+    interfaces: Vec<u32>,
+    reads_since_list: u32,
+}
+
+impl Network {
+    const RELIST_EVERY: u32 = 30;
+
+    pub(crate) fn read(&mut self) -> Option<NetCounters> {
+        if self.reads_since_list == 0 && !self.list() {
+            return None;
+        }
+        self.reads_since_list = (self.reads_since_list + 1) % Self::RELIST_EVERY;
+        let mut counters = NetCounters::default();
+        for &index in &self.interfaces {
+            // SAFETY: an all-zero row with its index set is a valid query.
+            let mut row: MIB_IF_ROW2 = unsafe { std::mem::zeroed() };
+            row.InterfaceIndex = index;
+            // SAFETY: `row` is valid for writes. An interface that vanished just fails.
+            if unsafe { GetIfEntry2(&mut row) } == 0 && row.OperStatus == IfOperStatusUp {
+                counters.received += row.InOctets;
+                counters.sent += row.OutOctets;
+            }
+        }
+        Some(counters)
+    }
+
+    /// Finds the physical interfaces. False if the system refuses to list them.
+    fn list(&mut self) -> bool {
+        // Bits of MIB_IF_ROW2.InterfaceAndOperStatusFlags, in header order.
+        const HARDWARE_INTERFACE: u8 = 1 << 0;
+        const FILTER_INTERFACE: u8 = 1 << 1;
+        let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
+        // SAFETY: GetIfTable2 allocates the table; it is freed with FreeMibTable below.
+        if unsafe { GetIfTable2(&mut table) } != 0 || table.is_null() {
+            return false;
+        }
+        // SAFETY: on success `table` points at NumEntries rows laid out after the count.
+        let rows = unsafe {
+            std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize)
+        };
+        self.interfaces.clear();
+        self.interfaces.extend(
+            rows.iter()
+                .filter(|row| {
+                    let flags = row.InterfaceAndOperStatusFlags._bitfield;
+                    flags & HARDWARE_INTERFACE != 0 && flags & FILTER_INTERFACE == 0
+                })
+                .map(|row| row.InterfaceIndex),
+        );
+        // SAFETY: allocated by GetIfTable2 above, freed once.
+        unsafe { FreeMibTable(table.cast()) };
+        true
+    }
+}
+
 pub(crate) fn uptime_s() -> u64 {
     // SAFETY: plain call.
     unsafe { GetTickCount64() / 1000 }
@@ -164,5 +232,11 @@ mod tests {
         assert!(info.committed > 0 && info.committed <= info.commit_limit);
         assert!(uptime_s() > 0);
         assert!(!cpu_model().is_empty());
+        // A machine running these tests has a network interface up (or none at all).
+        let mut network = Network::default();
+        if let Some(net) = network.read() {
+            let later = network.read().expect("still readable");
+            assert!(later.received >= net.received && later.sent >= net.sent);
+        }
     }
 }

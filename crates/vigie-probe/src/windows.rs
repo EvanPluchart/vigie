@@ -232,6 +232,7 @@ pub struct WindowsProbe {
     windowed: HashSet<Pid>,
     /// Per-core times for the Performance view.
     cores: crate::windows_system::Cores,
+    network: crate::windows_system::Network,
 }
 
 impl WindowsProbe {
@@ -262,6 +263,7 @@ impl WindowsProbe {
             self_pid: std::process::id(),
             windowed: HashSet::with_capacity(512),
             cores: crate::windows_system::Cores::new(logical_cores.max(1)),
+            network: crate::windows_system::Network::default(),
         })
     }
 
@@ -574,6 +576,7 @@ impl Probe for WindowsProbe {
             .find(|e| e.parent == Some(4) && e.name == "Memory Compression")
             .map_or(0, |e| e.memory_bytes);
         out.uptime_s = crate::windows_system::uptime_s();
+        out.network = self.network.read();
         Ok(())
     }
 

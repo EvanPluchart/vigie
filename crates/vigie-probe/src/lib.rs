@@ -88,10 +88,17 @@ impl Sample {
                 self.spare
                     .reserve(self.processes.capacity() - self.spare.len());
             }
-            let slot = self.spare.pop().unwrap_or_else(|| ProcSample {
-                name: String::with_capacity(name_capacity),
-                ..ProcSample::default()
-            });
+            // Out of spare slots: make a batch at once, so a burst of new processes on later
+            // ticks finds them ready instead of allocating one by one.
+            if self.spare.is_empty() {
+                const BATCH: usize = 32;
+                self.spare.reserve(BATCH);
+                self.spare.resize_with(BATCH, || ProcSample {
+                    name: String::with_capacity(name_capacity),
+                    ..ProcSample::default()
+                });
+            }
+            let slot = self.spare.pop().unwrap_or_default();
             self.processes.push(slot);
         }
         &mut self.processes[len]
