@@ -98,6 +98,8 @@ fn proc_row(row: &Row) -> ProcRow {
         pid,
         start: (row.start_time & 0x7fff_ffff) as i32,
         publisher: row.publisher.as_deref().unwrap_or_default().into(),
+        tree_size: i32::try_from(row.tree_size).unwrap_or(i32::MAX),
+        own: row.own,
         cpu: if figures {
             format_cpu(row.cpu_percent)
         } else {
@@ -236,6 +238,8 @@ mod tests {
             expanded: true,
             icon: None,
             publisher: None,
+            tree_size: 1,
+            own: false,
         };
         let group = proc_row(&process(RowKind::Group(Group::Apps)));
         let parent = proc_row(&process(RowKind::Process));

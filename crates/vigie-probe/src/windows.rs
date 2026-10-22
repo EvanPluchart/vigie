@@ -323,7 +323,9 @@ impl WindowsProbe {
                 }
             }
         });
-        if need_full || self.ticks_since_full >= FULL_EVERY {
+        // `ticks_since_full` counts the light ticks since the last snapshot: one snapshot every
+        // `FULL_EVERY` ticks.
+        if need_full || self.ticks_since_full + 1 >= FULL_EVERY {
             self.refresh_unopened(now_ns)?;
         } else {
             self.ticks_since_full += 1;

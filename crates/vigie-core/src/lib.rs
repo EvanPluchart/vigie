@@ -93,6 +93,11 @@ pub struct Row {
     /// Icon of the process's executable, as an index chosen by the caller of `set_details`.
     pub icon: Option<u32>,
     pub publisher: Option<Arc<str>>,
+    /// Processes "end process tree" would end besides this one: all real descendants, which
+    /// may include processes the display tree shows elsewhere (another app, say).
+    pub tree_size: u32,
+    /// Vigie itself.
+    pub own: bool,
 }
 
 /// Rarely changing facts about a process, read by the sampler from `Probe::details` and
@@ -300,6 +305,14 @@ impl Core {
             let p = nodes[node].p;
             Row {
                 icon: details.get(&(p.pid, p.start_time)).and_then(|d| d.icon),
+                tree_size: (self
+                    .subtree(Target {
+                        pid: p.pid,
+                        start_time: p.start_time,
+                    })
+                    .len() as u32)
+                    .saturating_sub(1),
+                own: p.pid == sample.self_pid,
                 publisher: details
                     .get(&(p.pid, p.start_time))
                     .and_then(|d| d.publisher.clone()),
@@ -334,6 +347,8 @@ impl Core {
                     expanded: true,
                     icon: None,
                     publisher: None,
+                    tree_size: 0,
+                    own: false,
                 },
                 Entry::Process { node, depth, total } => {
                     let p = nodes[node].p;
@@ -761,6 +776,41 @@ mod tests {
         };
         core.update(&next);
         assert_eq!(core.missing_details(&next), [20]);
+    }
+
+    #[test]
+    fn tree_size_counts_what_end_tree_ends() {
+        // The app starts another windowed app (24): the display tree shows it apart, but ending
+        // the app's tree ends it too, so the confirmation must count it.
+        let mut processes = desktop();
+        processes.push(ProcSample {
+            parent: Some(20),
+            session: Some(1),
+            has_window: true,
+            ..proc(24, 100, "child-app", 0, 1)
+        });
+        let s = Sample {
+            shell_pid: Some(10),
+            self_pid: 21,
+            ..sample(SEC, processes)
+        };
+        let mut core = by_memory();
+        let frame = core.update(&s);
+        let app = row(&frame, 20);
+        let real = core
+            .subtree(Target {
+                pid: 20,
+                start_time: 100,
+            })
+            .len() as u32
+            - 1;
+        assert_eq!(app.count, 3, "display tree: helper, worker, grandchild");
+        assert_eq!(app.tree_size, real);
+        assert_eq!(real, 4);
+        core.toggle(20);
+        let frame = core.update(&s);
+        assert!(row(&frame, 21).own);
+        assert!(!row(&frame, 20).own);
     }
 
     #[test]

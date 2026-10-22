@@ -20,6 +20,10 @@ export struct ProcRow {
     // Start time (low 31 bits): with the PID, names this process for actions.
     start: int,
     publisher: string,
+    // Processes "end process tree" ends besides this one (real descendants).
+    tree-size: int,
+    // Vigie itself: it must not suspend itself.
+    own: bool,
     cpu: string,
     memory: string,
     cpu-heat: int,
@@ -258,7 +262,7 @@ export component AppWindow inherits Window {
         root.confirm-name = item.name;
         root.confirm-pid = item.pid;
         root.confirm-start = item.start;
-        root.confirm-count = item.count;
+        root.confirm-count = item.tree-size;
         root.confirm-open = true;
     }
 
@@ -397,12 +401,13 @@ export component AppWindow inherits Window {
                         }
                         MenuItem {
                             title: @tr("End process tree");
-                            enabled: row.expandable;
+                            enabled: row.tree-size > 0;
                             activated => { root.ask(row, 1); }
                         }
                         MenuSeparator { }
                         MenuItem {
                             title: @tr("Suspend");
+                            enabled: !row.own;
                             activated => { root.ask(row, 2); }
                         }
                         MenuItem {
