@@ -4,7 +4,7 @@ A fast, good-looking task manager for Windows, macOS and Linux, written in Rust 
 
 *Vigie* is the lookout post at the top of a ship's mast (*vigía* in Spanish, *vigia* in Portuguese): the one who watches everything. Vigie watches your machine and tells you what is going on, while using as little of it as possible.
 
-> **Status:** architecture stage. Nothing is usable yet. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** milestone M0 (skeleton): a live process table with Vigie's own cost in the status bar. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Goals
 
@@ -18,8 +18,11 @@ The full feature matrix is in [docs/FEATURES.md](docs/FEATURES.md).
 ## Building
 
 ```sh
-cargo run -p vigie
+cargo run -p vigie -- --sort=cpu          # also --filter=TEXT, --interval=MS, --dark|--light
+cargo xtask bench-overhead              # Vigie's own CPU and memory over 60 s
 ```
+
+On Linux, Slint needs the system packages listed in `.github/workflows/ci.yml`.
 
 ## Documentation
 
