@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
     app.set_icons(ModelRc::from(Rc::new(VecModel::<slint::Image>::default())));
     app.set_perf_cores(ModelRc::from(Rc::new(VecModel::<f32>::default())));
     app.set_perf_disks(ModelRc::from(Rc::new(VecModel::<DiskCard>::default())));
+    app.set_perf_gpus(ModelRc::from(Rc::new(VecModel::<GpuCard>::default())));
     app.set_tab(options.tab);
     app.set_search_text(options.filter.as_str().into());
     show_sort(&app, options.sort);

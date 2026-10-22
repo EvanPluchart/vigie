@@ -12,6 +12,14 @@ export struct DiskCard {
     area: string,
 }
 
+export struct GpuCard {
+    title: string,
+    value: string,
+    memory: string,
+    line: string,
+    area: string,
+}
+
 // Everything the view shows, formatted by Rust (src/model.rs). Graph paths use a 300 × 100 box.
 export struct PerfView {
     ready: bool,
@@ -142,6 +150,7 @@ export component PerformanceView inherits Rectangle {
     in property <PerfView> view;
     in property <[float]> cores;
     in property <[DiskCard]> disks;
+    in property <[GpuCard]> gpus;
 
     if !root.view.ready || !root.view.available: Text {
         text: root.view.ready ? @tr("Performance figures are not available on this system yet.") : @tr("Measuring…");
@@ -233,6 +242,18 @@ export component PerformanceView inherits Rectangle {
                         value: "—";
                         Label { text: @tr("No disk counters are readable on this system."); wrap: word-wrap; }
                     }
+                }
+            }
+
+            // GPUs, side by side.
+            HorizontalLayout {
+                spacing: Theme.space-4;
+                for gpu in root.gpus: Card {
+                    title: gpu.title;
+                    value: gpu.value;
+                    horizontal-stretch: 1;
+                    Graph { line: gpu.line; area: gpu.area; }
+                    Stat { label: @tr("Dedicated memory"); value: gpu.memory; }
                 }
             }
         }

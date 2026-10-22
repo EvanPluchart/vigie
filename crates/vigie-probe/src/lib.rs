@@ -8,6 +8,8 @@ mod windows_actions;
 #[cfg(windows)]
 mod windows_exe;
 #[cfg(windows)]
+mod windows_gpu;
+#[cfg(windows)]
 mod windows_system;
 
 use std::path::PathBuf;
@@ -163,6 +165,19 @@ pub struct DiskCounters {
     pub clock_ns: u64,
 }
 
+/// Monotonic counters of one GPU.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GpuCounters {
+    /// Position in `SystemInfo::gpus`.
+    pub index: u32,
+    /// Running time of each engine (3D, copy, video…) since boot, in nanoseconds. A wrapping
+    /// counter: some drivers report nonsense, so deltas larger than the elapsed time are noise.
+    pub engines_ns: Vec<u64>,
+    /// Dedicated video memory in use and available, in bytes.
+    pub dedicated_used: u64,
+    pub dedicated_total: u64,
+}
+
 /// Machine-wide figures for the Performance view. Filled in place, like `Sample`.
 #[derive(Clone, Debug, Default)]
 pub struct SystemSample {
@@ -173,6 +188,10 @@ pub struct SystemSample {
     /// `None` where the system does not say.
     pub network: Option<NetCounters>,
     pub disks: Vec<DiskCounters>,
+    /// Filled by `Probe::gpus`, which is costlier and called less often.
+    pub gpus: Vec<GpuCounters>,
+    /// When `gpus` was last read, same clock as `at_ns`.
+    pub gpus_at_ns: u64,
     pub uptime_s: u64,
 }
 
@@ -181,6 +200,8 @@ pub struct SystemSample {
 pub struct SystemInfo {
     pub cpu_model: String,
     pub logical_cores: u32,
+    /// Hardware GPUs, by `GpuCounters::index`.
+    pub gpus: Vec<String>,
 }
 
 /// An icon as straight (not premultiplied) RGBA pixels, row by row from the top.
@@ -213,6 +234,11 @@ pub trait Probe: Send {
     }
     /// Machine-wide figures. Called every tick while the Performance view is shown.
     fn system(&mut self, _out: &mut SystemSample) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+    /// GPU engines and memory into `out.gpus`. Costlier than `system` (driver round trips):
+    /// call it only while GPU figures are shown, and not necessarily every tick.
+    fn gpus(&mut self, _out: &mut SystemSample) -> Result<()> {
         Err(ProbeError::Unsupported)
     }
     /// Facts that do not change while Vigie runs. Call once.

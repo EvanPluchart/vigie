@@ -234,6 +234,7 @@ pub struct WindowsProbe {
     cores: crate::windows_system::Cores,
     network: crate::windows_system::Network,
     disks: crate::windows_system::Disks,
+    gpus: crate::windows_gpu::Gpus,
 }
 
 impl WindowsProbe {
@@ -266,6 +267,7 @@ impl WindowsProbe {
             cores: crate::windows_system::Cores::new(logical_cores.max(1)),
             network: crate::windows_system::Network::default(),
             disks: crate::windows_system::Disks::default(),
+            gpus: crate::windows_gpu::Gpus::discover(),
         })
     }
 
@@ -583,10 +585,17 @@ impl Probe for WindowsProbe {
         Ok(())
     }
 
+    fn gpus(&mut self, out: &mut crate::SystemSample) -> Result<()> {
+        self.gpus.read(&mut out.gpus);
+        out.gpus_at_ns = self.now_ns();
+        Ok(())
+    }
+
     fn system_info(&mut self) -> crate::SystemInfo {
         crate::SystemInfo {
             cpu_model: crate::windows_system::cpu_model(),
             logical_cores: self.logical_cores,
+            gpus: self.gpus.names(),
         }
     }
 }

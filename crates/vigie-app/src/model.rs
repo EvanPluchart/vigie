@@ -7,7 +7,7 @@ use vigie_core::perf::{HISTORY, PerfFrame, Performance, Pressure, graph_paths};
 use vigie_core::{Frame, Group, Row, RowKind};
 use vigie_probe::{Icon, SystemInfo};
 
-use crate::{AppWindow, DiskCard, PerfView, ProcRow};
+use crate::{AppWindow, DiskCard, GpuCard, PerfView, ProcRow};
 
 /// Row kinds as `ui/app.slint` reads them.
 const KIND_GROUP: i32 = 0;
@@ -35,6 +35,7 @@ pub struct PerfUi {
     pub view: PerfView,
     pub cores: Vec<f32>,
     pub disks: Vec<DiskCard>,
+    pub gpus: Vec<GpuCard>,
 }
 
 impl PerfUi {
@@ -48,6 +49,7 @@ impl PerfUi {
             },
             cores: Vec::new(),
             disks: Vec::new(),
+            gpus: Vec::new(),
         }
     }
 }
@@ -175,6 +177,7 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
         app.set_perf(perf.view);
         patch_values(&app.get_perf_cores(), perf.cores);
         patch_values(&app.get_perf_disks(), perf.disks);
+        patch_values(&app.get_perf_gpus(), perf.gpus);
     }
     app.set_process_count(frame.process_count);
     app.set_matching_count(frame.matching_count);
@@ -272,10 +275,41 @@ pub fn perf_ui(frame: &PerfFrame, perf: &Performance, info: &SystemInfo) -> Perf
             }
         })
         .collect();
+    let gpus = frame
+        .gpus
+        .iter()
+        .map(|gpu| {
+            let history = perf.gpus.get(gpu.index as usize);
+            let (line, area) = history.map_or_else(Default::default, |h| {
+                graph_paths(h.iter(), HISTORY, 100.0, W, H)
+            });
+            let title = info
+                .gpus
+                .get(gpu.index as usize)
+                .map_or_else(|| format!("GPU {}", gpu.index), Clone::clone);
+            GpuCard {
+                title: title.into(),
+                value: format_percent(gpu.percent),
+                memory: if gpu.dedicated_total > 0 {
+                    format!(
+                        "{} of {}",
+                        format_memory(gpu.dedicated_used),
+                        format_memory(gpu.dedicated_total)
+                    )
+                    .into()
+                } else {
+                    "—".into()
+                },
+                line: line.into(),
+                area: area.into(),
+            }
+        })
+        .collect();
     PerfUi {
         view,
         cores: frame.core_percents.clone(),
         disks,
+        gpus,
     }
 }
 

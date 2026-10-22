@@ -1,7 +1,7 @@
 //! Machine-wide figures for the Performance view: rates from counter deltas, short histories
 //! for the graphs, and the memory pressure definition the diagnostics (M3) will reuse.
 
-use vigie_probe::{CoreTimes, DiskCounters, MemoryInfo, NetCounters, SystemSample};
+use vigie_probe::{CoreTimes, DiskCounters, GpuCounters, MemoryInfo, NetCounters, SystemSample};
 
 /// Points kept per graph: one minute at the default interval. M3 adds longer tiers.
 pub const HISTORY: usize = 60;
@@ -112,6 +112,16 @@ pub struct DiskView {
     pub write_per_s: Option<f64>,
 }
 
+/// One GPU as the Performance view shows it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GpuView {
+    pub index: u32,
+    /// Share of the busiest engine over the last interval, 0 to 100, as Task Manager shows it.
+    pub percent: Option<f32>,
+    pub dedicated_used: u64,
+    pub dedicated_total: u64,
+}
+
 /// What the Performance view shows after one tick.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PerfFrame {
@@ -123,6 +133,8 @@ pub struct PerfFrame {
     pub received_per_s: Option<f64>,
     pub sent_per_s: Option<f64>,
     pub disks: Vec<DiskView>,
+    /// Empty until GPU figures have been read twice.
+    pub gpus: Vec<GpuView>,
     pub uptime_s: u64,
 }
 
@@ -140,6 +152,11 @@ pub struct Performance {
     pub sent: Ring,
     /// Active share per disk, by position in the last sample.
     pub disks: Vec<Ring>,
+    /// Busiest-engine share per GPU, by index.
+    pub gpus: Vec<Ring>,
+    prev_gpus: Vec<GpuCounters>,
+    prev_gpus_at_ns: u64,
+    gpu_views: Vec<GpuView>,
 }
 
 impl Performance {
@@ -220,7 +237,53 @@ impl Performance {
         self.prev_cores.clone_from(&sample.cores);
         self.prev_net = sample.network;
         self.prev_disks.clone_from(&sample.disks);
+        self.update_gpus(sample);
+        frame.gpus.clone_from(&self.gpu_views);
         frame
+    }
+}
+
+impl Performance {
+    /// GPU figures change only when the sampler read them again (`gpus_at_ns`), which it does
+    /// less often than every tick. Between reads, the last views are kept.
+    fn update_gpus(&mut self, sample: &SystemSample) {
+        if sample.gpus_at_ns == self.prev_gpus_at_ns {
+            return;
+        }
+        let wall_ns = sample.gpus_at_ns.saturating_sub(self.prev_gpus_at_ns);
+        let first = self.prev_gpus_at_ns == 0;
+        self.gpus.resize_with(sample.gpus.len(), Ring::default);
+        self.gpu_views.clear();
+        for (i, now) in sample.gpus.iter().enumerate() {
+            let before = self.prev_gpus.iter().find(|g| g.index == now.index);
+            let percent = before.filter(|_| !first && wall_ns > 0).map(|before| {
+                now.engines_ns
+                    .iter()
+                    .zip(&before.engines_ns)
+                    .map(|(&n, &b)| {
+                        let delta = n.wrapping_sub(b);
+                        // Some drivers report nonsense; a delta longer than the interval (with
+                        // a little slack for timing) cannot be real.
+                        if delta > wall_ns + wall_ns / 2 {
+                            0.0
+                        } else {
+                            share(delta, wall_ns)
+                        }
+                    })
+                    .fold(0.0, f32::max)
+            });
+            if let Some(p) = percent {
+                self.gpus[i].push(p);
+            }
+            self.gpu_views.push(GpuView {
+                index: now.index,
+                percent,
+                dedicated_used: now.dedicated_used,
+                dedicated_total: now.dedicated_total,
+            });
+        }
+        self.prev_gpus.clone_from(&sample.gpus);
+        self.prev_gpus_at_ns = sample.gpus_at_ns;
     }
 }
 
@@ -310,6 +373,7 @@ mod tests {
                 clock_ns: at,
             }],
             uptime_s: 1,
+            ..SystemSample::default()
         }
     }
 
@@ -336,6 +400,38 @@ mod tests {
             (Some(50.0), Some(4096.0))
         );
         assert_eq!(perf.cpu.last(), Some(50.0));
+    }
+
+    #[test]
+    fn gpu_is_the_busiest_engine_and_ignores_driver_noise() {
+        let gpu = |at, engines: Vec<u64>| SystemSample {
+            at_ns: at,
+            gpus: vec![GpuCounters {
+                index: 0,
+                engines_ns: engines,
+                dedicated_used: 1,
+                dedicated_total: 4,
+            }],
+            gpus_at_ns: at,
+            ..SystemSample::default()
+        };
+        let mut perf = Performance::default();
+        assert_eq!(
+            perf.update(&gpu(SEC, vec![0, 0, u64::MAX])).gpus[0].percent,
+            None
+        );
+        // Over 1 s: engine 0 busy 25 %, engine 1 busy 60 %, engine 2 jumps by nonsense.
+        let frame = perf.update(&gpu(2 * SEC, vec![SEC / 4, SEC * 6 / 10, 123 * SEC]));
+        assert_eq!(frame.gpus[0].percent, Some(60.0));
+        assert_eq!(frame.gpus[0].dedicated_total, 4);
+        // A tick without a new GPU read keeps the last figures.
+        let quiet = SystemSample {
+            at_ns: 3 * SEC,
+            gpus_at_ns: 2 * SEC,
+            ..gpu(3 * SEC, vec![0, 0, 0])
+        };
+        assert_eq!(perf.update(&quiet).gpus[0].percent, Some(60.0));
+        assert_eq!(perf.gpus[0].len(), 1);
     }
 
     #[test]

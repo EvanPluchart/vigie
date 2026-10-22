@@ -1,8 +1,8 @@
 import { AboutSlint, Button, LineEdit, ListView, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { DiskCard, PerfView, PerformanceView } from "performance.slint";
+import { DiskCard, GpuCard, PerfView, PerformanceView } from "performance.slint";
 
-export { DiskCard, PerfView }
+export { DiskCard, GpuCard, PerfView }
 
 export struct ProcRow {
     // Identity for model patching (see src/model.rs).
@@ -321,6 +321,7 @@ export component AppWindow inherits Window {
     in property <PerfView> perf;
     in property <[float]> perf-cores;
     in property <[DiskCard]> perf-disks;
+    in property <[GpuCard]> perf-gpus;
     in-out property <ProcRow> selected;
     callback show-about();
     callback sort-clicked(int);
@@ -734,6 +735,7 @@ export component AppWindow inherits Window {
                 view: root.perf;
                 cores: root.perf-cores;
                 disks: root.perf-disks;
+                gpus: root.perf-gpus;
             }
             }
             }

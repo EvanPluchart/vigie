@@ -102,6 +102,12 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                 let icons = exes.fill(&mut probe, &mut core, &sample);
                 // Machine-wide figures every tick (about 0.25 ms), so the graphs are full when
                 // the Performance view opens.
+                // GPU counters cost driver round trips: only while the Performance view is
+                // shown, every other tick (decision 0005).
+                views.ticks = views.ticks.wrapping_add(1);
+                if views.tab == 1 && views.ticks % 2 == 1 {
+                    let _ = probe.gpus(&mut views.system);
+                }
                 views.last = match probe.system(&mut views.system) {
                     Ok(()) => Some(views.perf.update(&views.system)),
                     Err(_) => None,
@@ -243,6 +249,7 @@ struct Views {
     info: SystemInfo,
     /// The last tick's machine-wide figures; `None` where the probe has none.
     last: Option<PerfFrame>,
+    ticks: u32,
 }
 
 /// Builds a frame with what the shown view needs and hands it to the UI thread. False once the

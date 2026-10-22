@@ -29,6 +29,15 @@ fn system(c: &mut Criterion) {
     c.bench_function("machine-wide figures", |b| {
         b.iter(|| probe.system(&mut system).expect("system"))
     });
+    // Steady state: after warm-up, idle engines are skipped between rechecks.
+    if probe.gpus(&mut system).is_ok() {
+        for _ in 0..40 {
+            probe.gpus(&mut system).expect("gpus");
+        }
+        c.bench_function("gpus", |b| {
+            b.iter(|| probe.gpus(&mut system).expect("gpus"))
+        });
+    }
 }
 
 criterion_group!(benches, sample, system);
