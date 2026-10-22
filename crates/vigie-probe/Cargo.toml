@@ -6,3 +6,5 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+sysinfo.workspace = true
+thiserror.workspace = true
