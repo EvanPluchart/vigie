@@ -15,7 +15,16 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
 };
 use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusUp;
 
-use crate::{CoreTimes, MemoryInfo, NetCounters, ProbeError, Result};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
+use windows_sys::Win32::System::IO::DeviceIoControl;
+use windows_sys::Win32::System::Ioctl::{DISK_PERFORMANCE, IOCTL_DISK_PERFORMANCE};
+
+use crate::{CoreTimes, DiskCounters, MemoryInfo, NetCounters, ProbeError, Result};
 
 /// Per-core times, read into a buffer kept between ticks.
 #[derive(Default)]
@@ -154,6 +163,84 @@ impl Network {
         // SAFETY: allocated by GetIfTable2 above, freed once.
         unsafe { FreeMibTable(table.cast()) };
         true
+    }
+}
+
+/// Physical disks (`\\.\PhysicalDriveN`), opened once with no access rights: enough for the
+/// performance counters, and allowed without elevation. Reopened every `RESCAN_EVERY` reads so
+/// plugged and unplugged disks show up.
+#[derive(Default)]
+pub(crate) struct Disks {
+    open: Vec<(u32, OwnedHandle)>,
+    reads_since_scan: u32,
+}
+
+impl Disks {
+    const RESCAN_EVERY: u32 = 60;
+    /// Highest disk number tried; numbers can have gaps.
+    const MAX_INDEX: u32 = 32;
+
+    pub(crate) fn read(&mut self, out: &mut Vec<DiskCounters>) {
+        if self.reads_since_scan == 0 {
+            self.scan();
+        }
+        self.reads_since_scan = (self.reads_since_scan + 1) % Self::RESCAN_EVERY;
+        out.clear();
+        for (index, handle) in &self.open {
+            let mut perf = DISK_PERFORMANCE::default();
+            let mut returned = 0u32;
+            // SAFETY: live device handle; `perf` is valid for its size; no overlapped I/O.
+            let ok = unsafe {
+                DeviceIoControl(
+                    handle.as_raw_handle(),
+                    IOCTL_DISK_PERFORMANCE,
+                    std::ptr::null(),
+                    0,
+                    (&mut perf as *mut DISK_PERFORMANCE).cast(),
+                    size_of::<DISK_PERFORMANCE>() as u32,
+                    &mut returned,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ok == 0 {
+                continue;
+            }
+            let query = perf.QueryTime as u64;
+            out.push(DiskCounters {
+                index: *index,
+                read_bytes: perf.BytesRead as u64,
+                written_bytes: perf.BytesWritten as u64,
+                active_ns: query.saturating_sub(perf.IdleTime as u64) * 100,
+                clock_ns: query * 100,
+            });
+        }
+    }
+
+    fn scan(&mut self) {
+        self.open.clear();
+        for index in 0..Self::MAX_INDEX {
+            let path: Vec<u16> = format!("\\\\.\\PhysicalDrive{index}\0")
+                .encode_utf16()
+                .collect();
+            // SAFETY: NUL-terminated path; no access rights asked, so no I/O can happen.
+            let raw = unsafe {
+                CreateFileW(
+                    path.as_ptr(),
+                    0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    0,
+                    std::ptr::null_mut(),
+                )
+            };
+            if raw == INVALID_HANDLE_VALUE || raw.is_null() {
+                continue;
+            }
+            // SAFETY: a fresh handle nothing else owns.
+            self.open
+                .push((index, unsafe { OwnedHandle::from_raw_handle(raw) }));
+        }
     }
 }
 

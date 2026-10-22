@@ -233,6 +233,7 @@ pub struct WindowsProbe {
     /// Per-core times for the Performance view.
     cores: crate::windows_system::Cores,
     network: crate::windows_system::Network,
+    disks: crate::windows_system::Disks,
 }
 
 impl WindowsProbe {
@@ -264,6 +265,7 @@ impl WindowsProbe {
             windowed: HashSet::with_capacity(512),
             cores: crate::windows_system::Cores::new(logical_cores.max(1)),
             network: crate::windows_system::Network::default(),
+            disks: crate::windows_system::Disks::default(),
         })
     }
 
@@ -577,6 +579,7 @@ impl Probe for WindowsProbe {
             .map_or(0, |e| e.memory_bytes);
         out.uptime_s = crate::windows_system::uptime_s();
         out.network = self.network.read();
+        self.disks.read(&mut out.disks);
         Ok(())
     }
 
@@ -733,5 +736,8 @@ mod system_tests {
         let info = probe.system_info();
         assert_eq!(info.logical_cores, sample.logical_cores);
         assert!(!info.cpu_model.is_empty());
+        // The machine running the tests boots from a disk Windows can count.
+        assert!(!system.disks.is_empty(), "no physical disk readable");
+        assert!(system.disks.iter().all(|d| d.active_ns <= d.clock_ns));
     }
 }
