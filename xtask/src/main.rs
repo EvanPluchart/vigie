@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-const USAGE: &str = "usage: cargo xtask bench-overhead [--seconds=N] [--check]";
+const USAGE: &str =
+    "usage: cargo xtask bench-overhead [--seconds=N] [--check] [--tab=processes|performance]";
 /// Performance budget from docs/ARCHITECTURE.md.
 const CPU_BUDGET_PERCENT: f64 = 1.0;
 const MEMORY_BUDGET_MB: f64 = 30.0;
@@ -19,7 +20,12 @@ fn main() -> Result<()> {
         Some("bench-overhead") => {
             let mut seconds = 60;
             let mut check = false;
+            let mut tab = String::from("processes");
             for arg in args {
+                if let Some(name) = arg.strip_prefix("--tab=") {
+                    tab = name.to_owned();
+                    continue;
+                }
                 if arg == "--check" {
                     check = true;
                     continue;
@@ -29,7 +35,7 @@ fn main() -> Result<()> {
                     _ => bail!("invalid argument `{arg}`\n{USAGE}"),
                 }
             }
-            bench_overhead(Duration::from_secs(seconds), check)
+            bench_overhead(Duration::from_secs(seconds), check, &tab)
         }
         _ => bail!("{USAGE}"),
     }
@@ -44,7 +50,7 @@ fn workspace_root() -> PathBuf {
 
 /// Builds Vigie in release, runs it with a 1 s interval and reads its own CPU time and memory.
 /// With `check`, fails when the steady-state CPU or the peak memory is over budget.
-fn bench_overhead(duration: Duration, check: bool) -> Result<()> {
+fn bench_overhead(duration: Duration, check: bool, tab: &str) -> Result<()> {
     const WARM_UP: Duration = Duration::from_secs(5);
     const POLL: Duration = Duration::from_millis(250);
 
@@ -63,7 +69,7 @@ fn bench_overhead(duration: Duration, check: bool) -> Result<()> {
         .join("target/release/vigie")
         .with_extension(std::env::consts::EXE_EXTENSION);
     let mut child = Command::new(&exe)
-        .args(["--interval=1000", "--no-adaptive"])
+        .args(["--interval=1000", "--no-adaptive", &format!("--tab={tab}")])
         .spawn()
         .with_context(|| format!("starting {}", exe.display()))?;
     let result = measure(&child, duration, WARM_UP, POLL);
@@ -81,7 +87,7 @@ fn bench_overhead(duration: Duration, check: bool) -> Result<()> {
 
     println!();
     println!(
-        "vigie overhead, {run_s:.0} s at a 1 s interval, {} processes on this machine",
+        "vigie overhead, {tab} view, {run_s:.0} s at a 1 s interval, {} processes on this machine",
         m.process_count
     );
     println!(

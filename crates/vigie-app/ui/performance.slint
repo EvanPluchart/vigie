@@ -1,0 +1,240 @@
+// The Performance view: one card per resource, each with a one-minute graph.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct DiskCard {
+    title: string,
+    active: string,
+    read: string,
+    write: string,
+    line: string,
+    area: string,
+}
+
+// Everything the view shows, formatted by Rust (src/model.rs). Graph paths use a 300 × 100 box.
+export struct PerfView {
+    ready: bool,
+    // False where the probe has no machine-wide figures (not Windows yet).
+    available: bool,
+    cpu-value: string,
+    cpu-model: string,
+    cpu-detail: string,
+    cpu-line: string,
+    cpu-area: string,
+    memory-value: string,
+    memory-detail: string,
+    memory-cached: string,
+    memory-committed: string,
+    memory-compressed: string,
+    // 0 low, 1 medium, 2 high (see vigie_core::perf::Pressure).
+    pressure: int,
+    memory-line: string,
+    memory-area: string,
+    network-value: string,
+    network-received: string,
+    network-sent: string,
+    network-scale: string,
+    received-line: string,
+    received-area: string,
+    sent-line: string,
+    uptime: string,
+}
+
+component Label inherits Text {
+    color: Theme.text-muted;
+    font-size: Theme.font-caption;
+    vertical-alignment: center;
+}
+
+component Figure inherits Text {
+    color: Theme.text;
+    font-size: Theme.font-body;
+    vertical-alignment: center;
+}
+
+// A one-minute graph: a filled area under a line, newest value at the right.
+component Graph inherits Rectangle {
+    in property <string> line;
+    in property <string> area;
+    in property <string> second-line;
+    in property <color> tint: Theme.accent;
+    in property <color> second-tint: Theme.warning;
+    height: 120px;
+    border-radius: Theme.radius-small;
+    border-width: 1px;
+    border-color: Theme.border;
+    clip: true;
+    // Quarter grid lines, so levels read without numbers.
+    for i in 3: Rectangle {
+        y: parent.height * (i + 1) / 4;
+        height: 1px;
+        background: Theme.border.with-alpha(0.6);
+    }
+    if root.area != "": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 300;
+        viewbox-height: 100;
+        commands: root.area;
+        fill: root.tint.with-alpha(0.14);
+    }
+    if root.line != "": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 300;
+        viewbox-height: 100;
+        commands: root.line;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+    }
+    if root.second-line != "": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 300;
+        viewbox-height: 100;
+        commands: root.second-line;
+        stroke: root.second-tint;
+        stroke-width: 1.5px;
+    }
+}
+
+component Card inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+    background: Theme.surface;
+    border-radius: Theme.radius-panel;
+    border-width: 1px;
+    border-color: Theme.border;
+    VerticalLayout {
+        padding: Theme.space-4;
+        spacing: Theme.space-3;
+        HorizontalLayout {
+            Text {
+                text: root.title;
+                color: Theme.text;
+                font-size: Theme.font-section;
+                font-weight: Theme.weight-strong;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.value;
+                color: Theme.text;
+                font-size: Theme.font-title;
+                font-weight: Theme.weight-strong;
+            }
+        }
+        @children
+    }
+}
+
+// Two-column label/value line.
+component Stat inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <color> value-color: Theme.text;
+    spacing: Theme.space-2;
+    Label { text: root.label; horizontal-stretch: 1; }
+    Figure { text: root.value; color: root.value-color; horizontal-alignment: right; }
+}
+
+export component PerformanceView inherits Rectangle {
+    in property <PerfView> view;
+    in property <[float]> cores;
+    in property <[DiskCard]> disks;
+
+    if !root.view.ready || !root.view.available: Text {
+        text: root.view.ready ? @tr("Performance figures are not available on this system yet.") : @tr("Measuring…");
+        color: Theme.text-muted;
+        font-size: Theme.font-section;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if root.view.ready && root.view.available: ScrollView {
+        VerticalLayout {
+            padding: Theme.space-4;
+            spacing: Theme.space-4;
+
+            HorizontalLayout {
+                spacing: Theme.space-4;
+                Card {
+                    title: @tr("CPU");
+                    value: root.view.cpu-value;
+                    horizontal-stretch: 1;
+                    Graph { line: root.view.cpu-line; area: root.view.cpu-area; }
+                    // One bar per logical processor: rectangles stay cheap with many cores.
+                    HorizontalLayout {
+                        height: 36px;
+                        spacing: 2px;
+                        for value in root.cores: Rectangle {
+                            background: Theme.border.with-alpha(0.5);
+                            border-radius: 2px;
+                            Rectangle {
+                                y: parent.height - self.height;
+                                height: parent.height * clamp(value, 0, 100) / 100;
+                                border-radius: 2px;
+                                background: value >= 80 ? Theme.warning : Theme.accent;
+                            }
+                        }
+                    }
+                    Label { text: root.view.cpu-model; }
+                    Stat { label: root.view.cpu-detail; value: root.view.uptime; }
+                }
+                Card {
+                    title: @tr("Memory");
+                    value: root.view.memory-value;
+                    horizontal-stretch: 1;
+                    Graph {
+                        line: root.view.memory-line;
+                        area: root.view.memory-area;
+                        tint: root.view.pressure == 2 ? Theme.danger : root.view.pressure == 1 ? Theme.warning : Theme.accent;
+                    }
+                    Stat { label: @tr("In use"); value: root.view.memory-detail; }
+                    Stat { label: @tr("Cached"); value: root.view.memory-cached; }
+                    Stat { label: @tr("Committed"); value: root.view.memory-committed; }
+                    Stat { label: @tr("Compressed"); value: root.view.memory-compressed; }
+                    Stat {
+                        label: @tr("Pressure");
+                        value: root.view.pressure == 2 ? @tr("High") : root.view.pressure == 1 ? @tr("Medium") : @tr("Low");
+                        value-color: root.view.pressure == 2 ? Theme.danger : root.view.pressure == 1 ? Theme.warning : Theme.text;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Theme.space-4;
+                Card {
+                    title: @tr("Network");
+                    value: root.view.network-value;
+                    horizontal-stretch: 1;
+                    Graph {
+                        line: root.view.received-line;
+                        area: root.view.received-area;
+                        second-line: root.view.sent-line;
+                    }
+                    Stat { label: @tr("Received"); value: root.view.network-received; }
+                    Stat { label: @tr("Sent"); value: root.view.network-sent; value-color: Theme.warning; }
+                    Stat { label: @tr("Graph scale"); value: root.view.network-scale; }
+                }
+                // Disks follow, two per row.
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: Theme.space-4;
+                    for disk in root.disks: Card {
+                        title: disk.title;
+                        value: disk.active;
+                        Graph { line: disk.line; area: disk.area; }
+                        Stat { label: @tr("Read"); value: disk.read; }
+                        Stat { label: @tr("Write"); value: disk.write; }
+                    }
+                    if root.disks.length == 0: Card {
+                        title: @tr("Disks");
+                        value: "—";
+                        Label { text: @tr("No disk counters are readable on this system."); wrap: word-wrap; }
+                    }
+                }
+            }
+        }
+    }
+}

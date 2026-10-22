@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use vigie_core::{Sort, SortKey};
 
-pub const USAGE: &str = "usage: vigie [--tab=processes] [--sort=cpu|memory|name|pid[:asc]] \
+pub const USAGE: &str = "usage: vigie [--tab=processes|performance] [--sort=cpu|memory|name|pid[:asc]] \
 [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive]";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -12,6 +12,8 @@ pub struct Options {
     pub sort: Sort,
     pub filter: String,
     pub interval: Duration,
+    /// View at start: 0 processes, 1 performance.
+    pub tab: i32,
     /// `None` follows the system theme.
     pub dark: Option<bool>,
     /// Opens the About window at start, for screenshots.
@@ -35,6 +37,7 @@ impl Default for Options {
             sort: Sort::default(),
             filter: String::new(),
             interval: Duration::from_secs(1),
+            tab: 0,
             dark: None,
             about: false,
             expand: Vec::new(),
@@ -55,7 +58,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             None => (arg.as_str(), None),
         };
         match (flag, value) {
-            ("--tab", Some("processes")) => {}
+            ("--tab", Some("processes")) => options.tab = 0,
+            ("--tab", Some("performance")) => options.tab = 1,
             ("--tab", Some(tab)) => return Err(format!("tab `{tab}` is not available yet")),
             ("--sort", Some(sort)) => options.sort = parse_sort(sort)?,
             ("--filter", Some(filter)) => options.filter = filter.to_owned(),
@@ -143,6 +147,7 @@ mod tests {
                 },
                 filter: "code".into(),
                 interval: Duration::from_millis(500),
+                tab: 0,
                 dark: Some(true),
                 about: false,
                 expand: Vec::new(),

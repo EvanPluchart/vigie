@@ -3,10 +3,11 @@
 use std::collections::HashSet;
 
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use vigie_core::perf::{HISTORY, PerfFrame, Performance, Pressure, graph_paths};
 use vigie_core::{Frame, Group, Row, RowKind};
-use vigie_probe::Icon;
+use vigie_probe::{Icon, SystemInfo};
 
-use crate::{AppWindow, ProcRow};
+use crate::{AppWindow, DiskCard, PerfView, ProcRow};
 
 /// Row kinds as `ui/app.slint` reads them.
 const KIND_GROUP: i32 = 0;
@@ -15,7 +16,8 @@ const KIND_ITSELF: i32 = 2;
 
 /// A frame converted on the sampler thread, so the UI thread only patches models.
 pub struct UiFrame {
-    pub rows: Vec<ProcRow>,
+    /// `None` while the process table is hidden: its model is left as it is.
+    pub rows: Option<Vec<ProcRow>>,
     pub process_count: SharedString,
     pub matching_count: SharedString,
     pub self_cpu: SharedString,
@@ -24,12 +26,43 @@ pub struct UiFrame {
     /// threads; `Image`s are made on the UI thread.
     pub icons: Vec<(u32, SharedPixelBuffer<Rgba8Pixel>)>,
     pub notice: Option<Notice>,
+    /// `Some` only while the Performance view is shown.
+    pub perf: Option<PerfUi>,
+}
+
+/// The Performance view's data, ready for its models.
+pub struct PerfUi {
+    pub view: PerfView,
+    pub cores: Vec<f32>,
+    pub disks: Vec<DiskCard>,
+}
+
+impl PerfUi {
+    /// For systems whose probe has no machine-wide figures.
+    pub fn unavailable() -> Self {
+        Self {
+            view: PerfView {
+                ready: true,
+                available: false,
+                ..PerfView::default()
+            },
+            cores: Vec::new(),
+            disks: Vec::new(),
+        }
+    }
 }
 
 impl UiFrame {
-    pub fn new(frame: Frame, icons: Vec<(u32, Icon)>, notice: Option<Notice>) -> Self {
+    pub fn new(
+        frame: Frame,
+        with_rows: bool,
+        icons: Vec<(u32, Icon)>,
+        notice: Option<Notice>,
+        perf: Option<PerfUi>,
+    ) -> Self {
         Self {
-            rows: frame.rows.iter().map(proc_row).collect(),
+            perf,
+            rows: with_rows.then(|| frame.rows.iter().map(proc_row).collect()),
             process_count: frame.process_count.to_string().into(),
             matching_count: frame.matching_count.to_string().into(),
             self_cpu: format_cpu(frame.self_cpu_percent),
@@ -131,9 +164,17 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
         }
     }
     let rows = app.get_rows();
-    if let Some(model) = rows.as_any().downcast_ref::<VecModel<ProcRow>>() {
-        patch(model, frame.rows);
+    if let (Some(model), Some(new_rows)) = (
+        rows.as_any().downcast_ref::<VecModel<ProcRow>>(),
+        frame.rows,
+    ) {
+        patch(model, new_rows);
         refresh_selection(&app, model);
+    }
+    if let Some(perf) = frame.perf {
+        app.set_perf(perf.view);
+        patch_values(&app.get_perf_cores(), perf.cores);
+        patch_values(&app.get_perf_disks(), perf.disks);
     }
     app.set_process_count(frame.process_count);
     app.set_matching_count(frame.matching_count);
@@ -144,6 +185,142 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
         app.set_notice_pid(notice.pid);
         app.set_notice_count(notice.count);
         app.set_notice_kind(notice.kind);
+    }
+}
+
+/// Makes a small positional model equal to `values`, touching only what changed.
+fn patch_values<T: Clone + PartialEq + 'static>(model: &slint::ModelRc<T>, values: Vec<T>) {
+    let Some(model) = model.as_any().downcast_ref::<VecModel<T>>() else {
+        return;
+    };
+    for (i, value) in values.iter().enumerate() {
+        match model.row_data(i) {
+            Some(old) if old == *value => {}
+            Some(_) => model.set_row_data(i, value.clone()),
+            None => model.push(value.clone()),
+        }
+    }
+    while model.row_count() > values.len() {
+        model.remove(model.row_count() - 1);
+    }
+}
+
+/// Formats the Performance view. Graph paths fill a 300 × 100 box (see `ui/performance.slint`).
+pub fn perf_ui(frame: &PerfFrame, perf: &Performance, info: &SystemInfo) -> PerfUi {
+    const W: f32 = 300.0;
+    const H: f32 = 100.0;
+    let (cpu_line, cpu_area) = graph_paths(perf.cpu.iter(), HISTORY, 100.0, W, H);
+    let (memory_line, memory_area) = graph_paths(perf.memory.iter(), HISTORY, 100.0, W, H);
+    // Network: both directions share one scale, at least 1 Mbit/s so idle links stay flat.
+    let net_max = (perf.received.max().max(perf.sent.max()) * 1.15).max(125_000.0);
+    let (received_line, received_area) = graph_paths(perf.received.iter(), HISTORY, net_max, W, H);
+    let (sent_line, _) = graph_paths(perf.sent.iter(), HISTORY, net_max, W, H);
+    let memory = &frame.memory;
+    let used = memory.total.saturating_sub(memory.available);
+    let view = PerfView {
+        ready: true,
+        available: true,
+        cpu_value: format_percent(frame.cpu_percent),
+        cpu_model: info.cpu_model.as_str().into(),
+        cpu_detail: format!("{} logical processors", info.logical_cores).into(),
+        cpu_line: cpu_line.into(),
+        cpu_area: cpu_area.into(),
+        memory_value: format_percent((memory.total > 0).then_some(frame.memory_used_percent)),
+        memory_detail: format!("{} of {}", format_memory(used), format_memory(memory.total)).into(),
+        memory_cached: format_memory(memory.cached),
+        memory_committed: format!(
+            "{} of {}",
+            format_memory(memory.committed),
+            format_memory(memory.commit_limit)
+        )
+        .into(),
+        memory_compressed: format_memory(memory.compressed),
+        pressure: match frame.pressure {
+            Pressure::Low => 0,
+            Pressure::Medium => 1,
+            Pressure::High => 2,
+        },
+        memory_line: memory_line.into(),
+        memory_area: memory_area.into(),
+        network_value: format_bits(
+            frame
+                .received_per_s
+                .zip(frame.sent_per_s)
+                .map(|(r, s)| r + s),
+        ),
+        network_received: format_bits(frame.received_per_s),
+        network_sent: format_bits(frame.sent_per_s),
+        network_scale: format_bits(Some(f64::from(net_max))),
+        received_line: received_line.into(),
+        received_area: received_area.into(),
+        sent_line: sent_line.into(),
+        uptime: format_uptime(frame.uptime_s),
+    };
+    let disks = frame
+        .disks
+        .iter()
+        .zip(&perf.disks)
+        .map(|(disk, history)| {
+            let (line, area) = graph_paths(history.iter(), HISTORY, 100.0, W, H);
+            DiskCard {
+                title: format!("Disk {}", disk.index).into(),
+                active: format_percent(disk.active_percent),
+                read: format_bytes_per_s(disk.read_per_s),
+                write: format_bytes_per_s(disk.write_per_s),
+                line: line.into(),
+                area: area.into(),
+            }
+        })
+        .collect();
+    PerfUi {
+        view,
+        cores: frame.core_percents.clone(),
+        disks,
+    }
+}
+
+fn format_percent(value: Option<f32>) -> SharedString {
+    match value {
+        Some(v) => format!("{v:.0} %").into(),
+        None => "—".into(),
+    }
+}
+
+/// Network speeds read in bits per second, as link speeds are sold.
+fn format_bits(bytes_per_s: Option<f64>) -> SharedString {
+    let Some(bytes) = bytes_per_s else {
+        return "—".into();
+    };
+    let bits = bytes * 8.0;
+    if bits >= 1e9 {
+        format!("{:.1} Gbps", bits / 1e9).into()
+    } else if bits >= 1e6 {
+        format!("{:.1} Mbps", bits / 1e6).into()
+    } else {
+        format!("{:.0} kbps", bits / 1e3).into()
+    }
+}
+
+fn format_bytes_per_s(bytes_per_s: Option<f64>) -> SharedString {
+    let Some(bytes) = bytes_per_s else {
+        return "—".into();
+    };
+    const KB: f64 = 1024.0;
+    if bytes >= KB * KB {
+        format!("{:.1} MB/s", bytes / (KB * KB)).into()
+    } else {
+        format!("{:.0} KB/s", bytes / KB).into()
+    }
+}
+
+fn format_uptime(seconds: u64) -> SharedString {
+    let (days, hours, minutes) = (seconds / 86_400, seconds / 3600 % 24, seconds / 60 % 60);
+    if days > 0 {
+        format!("up {days} d {hours} h").into()
+    } else if hours > 0 {
+        format!("up {hours} h {minutes} min").into()
+    } else {
+        format!("up {minutes} min").into()
     }
 }
 

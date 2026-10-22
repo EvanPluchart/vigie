@@ -36,6 +36,9 @@ fn main() -> anyhow::Result<()> {
     }
     app.set_rows(ModelRc::from(Rc::new(VecModel::<ProcRow>::default())));
     app.set_icons(ModelRc::from(Rc::new(VecModel::<slint::Image>::default())));
+    app.set_perf_cores(ModelRc::from(Rc::new(VecModel::<f32>::default())));
+    app.set_perf_disks(ModelRc::from(Rc::new(VecModel::<DiskCard>::default())));
+    app.set_tab(options.tab);
     app.set_search_text(options.filter.as_str().into());
     show_sort(&app, options.sort);
     if let Some(columns) = &options.columns {
@@ -98,6 +101,10 @@ fn main() -> anyhow::Result<()> {
     // Polled, because a window that never had focus gets no focus events, and minimising does
     // not always report occlusion.
     let tx = commands.clone();
+    app.on_tab_changed(move |tab| {
+        let _ = tx.send(Command::Tab(tab));
+    });
+    let tx = commands.clone();
     app.on_group_clicked(move |index| {
         let group = match index {
             0 => Group::Apps,
@@ -159,6 +166,7 @@ fn main() -> anyhow::Result<()> {
         interval: options.interval,
         icon_size,
         adaptive: !options.no_adaptive,
+        tab: options.tab,
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
     if let Some(pid) = options.select {
@@ -201,6 +209,7 @@ fn main() -> anyhow::Result<()> {
     app.on_search_edited(|_| {});
     app.on_toggle_clicked(|_| {});
     app.on_group_clicked(|_| {});
+    app.on_tab_changed(|_| {});
     app.on_request_action(|_, _, _| {});
     drop(pace_timer);
     let _ = sampler.join();

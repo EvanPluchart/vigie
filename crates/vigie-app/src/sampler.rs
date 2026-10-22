@@ -5,8 +5,11 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use vigie_core::perf::{PerfFrame, Performance};
 use vigie_core::{Core, Details, Group, Pid, Sort};
-use vigie_probe::{Action, Icon, Probe, ProbeError, ProcDetails, Sample, SystemProbe};
+use vigie_probe::{
+    Action, Icon, Probe, ProbeError, ProcDetails, Sample, SystemInfo, SystemProbe, SystemSample,
+};
 
 use crate::AppWindow;
 use crate::model::{self, Notice, UiFrame};
@@ -25,6 +28,8 @@ pub enum Command {
     },
     /// Fold or unfold a section of the table.
     ToggleGroup(Group),
+    /// The shown view changed: 0 processes, 1 performance.
+    Tab(i32),
     /// Act on a process, named by its PID and the low 31 bits of its start time. The UI has
     /// already asked the user to confirm when the action is destructive.
     Act {
@@ -50,6 +55,8 @@ pub struct Settings {
     pub icon_size: u32,
     /// Slow down when the window is in the background (see `Pace`).
     pub adaptive: bool,
+    /// View at start: 0 processes, 1 performance.
+    pub tab: i32,
 }
 
 /// Starts the sampler. It stops when every `Command` sender is dropped or the event loop quits.
@@ -84,11 +91,22 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
         focused: true,
         visible: true,
     };
+    let mut views = Views {
+        tab: settings.tab,
+        info: probe.system_info(),
+        ..Views::default()
+    };
     loop {
         match probe.sample(&mut sample) {
             Ok(()) => {
                 let icons = exes.fill(&mut probe, &mut core, &sample);
-                if !send(&window, &mut core, &sample, icons, None) {
+                // Machine-wide figures every tick (about 0.25 ms), so the graphs are full when
+                // the Performance view opens.
+                views.last = match probe.system(&mut views.system) {
+                    Ok(()) => Some(views.perf.update(&views.system)),
+                    Err(_) => None,
+                };
+                if !send(&window, &mut core, &sample, &views, icons, None) {
                     return;
                 }
             }
@@ -111,6 +129,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                         Command::Filter(filter) => core.set_filter(&filter),
                         Command::Toggle(pid) => core.toggle(pid),
                         Command::ToggleGroup(group) => core.toggle_group(group),
+                        Command::Tab(tab) => views.tab = tab,
                         Command::Window { focused, visible } => {
                             let woke = (focused && !pace.focused) || (visible && !pace.visible);
                             pace.focused = focused;
@@ -131,7 +150,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                             resample = true;
                         }
                     }
-                    if !send(&window, &mut core, &sample, Vec::new(), notice) {
+                    if !send(&window, &mut core, &sample, &views, Vec::new(), notice) {
                         return;
                     }
                     if resample {
@@ -214,15 +233,33 @@ fn execute(
     }
 }
 
-/// Builds a frame and hands it to the UI thread. False once the event loop has quit.
+/// The views and what only the Performance view needs.
+#[derive(Default)]
+struct Views {
+    /// Shown view: 0 processes, 1 performance.
+    tab: i32,
+    perf: Performance,
+    system: SystemSample,
+    info: SystemInfo,
+    /// The last tick's machine-wide figures; `None` where the probe has none.
+    last: Option<PerfFrame>,
+}
+
+/// Builds a frame with what the shown view needs and hands it to the UI thread. False once the
+/// event loop has quit.
 fn send(
     window: &slint::Weak<AppWindow>,
     core: &mut Core,
     sample: &Sample,
+    views: &Views,
     icons: Vec<(u32, Icon)>,
     notice: Option<Notice>,
 ) -> bool {
-    let frame = UiFrame::new(core.update(sample), icons, notice);
+    let perf = (views.tab == 1).then(|| match &views.last {
+        Some(last) => model::perf_ui(last, &views.perf, &views.info),
+        None => model::PerfUi::unavailable(),
+    });
+    let frame = UiFrame::new(core.update(sample), views.tab == 0, icons, notice, perf);
     let window = window.clone();
     slint::invoke_from_event_loop(move || model::apply(&window, frame)).is_ok()
 }
