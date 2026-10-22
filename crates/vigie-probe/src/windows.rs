@@ -320,6 +320,7 @@ impl WindowsProbe {
             .map_err(unavailable)?;
         let tick = self.tick;
         let entries = &mut self.entries;
+        let mut first_values = false;
         self.full.for_each(|info: &SystemProcessInfo| {
             let pid = info.unique_process_id as Pid;
             let Some(entry) = entries.get_mut(&pid) else {
@@ -328,13 +329,16 @@ impl WindowsProbe {
             if entry.handle.is_some() || entry.seen != tick {
                 return;
             }
+            first_values |= !entry.measured;
             entry.start_time = unix_seconds(info.create_time as u64);
             entry.cpu_time_ns = (info.user_time as u64 + info.kernel_time as u64) * 100;
             entry.memory_bytes = info.working_set_size as u64;
             entry.measured_at_ns = now_ns;
             entry.measured = true;
         });
-        self.ticks_since_full = 0;
+        // A first value gives no CPU % yet: take the next snapshot on the next tick, so new
+        // services show a value after one second instead of five.
+        self.ticks_since_full = if first_values { FULL_EVERY } else { 0 };
         Ok(())
     }
 
@@ -485,13 +489,16 @@ mod tests {
         let mut probe = WindowsProbe::new().expect("probe");
         let mut sample = Sample::default();
         probe.sample(&mut sample).expect("sample");
-        let first = by_pid(&sample, 4).measured_at_ns;
+        // The second tick takes another snapshot, so new services get a CPU % quickly.
         probe.sample(&mut sample).expect("sample");
-        // Opened processes are measured every tick, System only on full snapshots.
+        let second = by_pid(&sample, 4).measured_at_ns;
+        assert_eq!(second, sample.at_ns);
+        probe.sample(&mut sample).expect("sample");
+        // Then opened processes are measured every tick, System only on full snapshots.
         assert_eq!(
             by_pid(&sample, sample.self_pid).measured_at_ns,
             sample.at_ns
         );
-        assert_eq!(by_pid(&sample, 4).measured_at_ns, first);
+        assert_eq!(by_pid(&sample, 4).measured_at_ns, second);
     }
 }
