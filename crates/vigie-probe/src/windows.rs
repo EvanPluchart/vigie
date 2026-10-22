@@ -230,6 +230,8 @@ pub struct WindowsProbe {
     self_pid: Pid,
     /// PIDs owning a visible top-level window, refreshed every tick.
     windowed: HashSet<Pid>,
+    /// Per-core times for the Performance view.
+    cores: crate::windows_system::Cores,
 }
 
 impl WindowsProbe {
@@ -259,6 +261,7 @@ impl WindowsProbe {
             memory_total_bytes: memory.ullTotalPhys,
             self_pid: std::process::id(),
             windowed: HashSet::with_capacity(512),
+            cores: crate::windows_system::Cores::new(logical_cores.max(1)),
         })
     }
 
@@ -558,6 +561,28 @@ impl Probe for WindowsProbe {
     fn act(&mut self, target: crate::Target, action: crate::Action) -> Result<()> {
         crate::windows_actions::act(target, action)
     }
+
+    fn system(&mut self, out: &mut crate::SystemSample) -> Result<()> {
+        out.at_ns = self.now_ns();
+        self.cores.read(&mut out.cores)?;
+        crate::windows_system::memory(&mut out.memory);
+        // Compressed pages live in the working set of the Memory Compression process, which the
+        // process sampling already follows (from the full snapshot: it cannot be opened).
+        out.memory.compressed = self
+            .entries
+            .values()
+            .find(|e| e.parent == Some(4) && e.name == "Memory Compression")
+            .map_or(0, |e| e.memory_bytes);
+        out.uptime_s = crate::windows_system::uptime_s();
+        Ok(())
+    }
+
+    fn system_info(&mut self) -> crate::SystemInfo {
+        crate::SystemInfo {
+            cpu_model: crate::windows_system::cpu_model(),
+            logical_cores: self.logical_cores,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -684,5 +709,26 @@ mod details_tests {
         assert_eq!(Some(exe.as_path()), std::env::current_exe().ok().as_deref());
         // Test binaries have no icon resource; the call must still answer.
         let _ = probe.exe_info(exe, 32);
+    }
+}
+
+#[cfg(test)]
+mod system_tests {
+    use super::*;
+    use crate::SystemSample;
+
+    #[test]
+    fn system_sample_after_process_sample() {
+        let mut probe = WindowsProbe::new().expect("probe");
+        let mut sample = Sample::default();
+        probe.sample(&mut sample).expect("sample");
+        let mut system = SystemSample::default();
+        probe.system(&mut system).expect("system");
+        assert_eq!(system.cores.len() as u32, sample.logical_cores);
+        assert_eq!(system.memory.total, sample.memory_total_bytes);
+        assert!(system.uptime_s > 0);
+        let info = probe.system_info();
+        assert_eq!(info.logical_cores, sample.logical_cores);
+        assert!(!info.cpu_model.is_empty());
     }
 }

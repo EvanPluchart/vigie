@@ -37,16 +37,19 @@ static GLOBAL: Counting = Counting;
 #[cfg(windows)]
 #[test]
 fn steady_state_sample_does_not_allocate() {
-    use vigie_probe::{Probe, Sample, SystemProbe};
+    use vigie_probe::{Probe, Sample, SystemProbe, SystemSample};
 
     let mut probe = SystemProbe::new().expect("probe");
     let mut sample = Sample::default();
+    let mut system = SystemSample::default();
     for _ in 0..3 {
         probe.sample(&mut sample).expect("sample");
+        probe.system(&mut system).expect("system");
     }
     COUNTING.store(true, Ordering::Relaxed);
     for _ in 0..20 {
         probe.sample(&mut sample).expect("sample");
+        probe.system(&mut system).expect("system");
     }
     COUNTING.store(false, Ordering::Relaxed);
     assert_eq!(ALLOCATIONS.load(Ordering::Relaxed), 0);

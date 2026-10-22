@@ -7,6 +7,8 @@ mod windows;
 mod windows_actions;
 #[cfg(windows)]
 mod windows_exe;
+#[cfg(windows)]
+mod windows_system;
 
 use std::path::PathBuf;
 
@@ -112,6 +114,68 @@ pub struct ProcDetails {
     pub command_line: Vec<String>,
 }
 
+/// Monotonic times of one logical core since boot, in nanoseconds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CoreTimes {
+    /// Time spent running anything but the idle loop.
+    pub busy_ns: u64,
+    pub total_ns: u64,
+}
+
+/// Physical and virtual memory, in bytes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MemoryInfo {
+    pub total: u64,
+    /// Free plus standby: what programs can get without anything being paged out.
+    pub available: u64,
+    /// File cache held by the system (part of it counts as available).
+    pub cached: u64,
+    /// Committed virtual memory and its limit (physical memory plus page files).
+    pub committed: u64,
+    pub commit_limit: u64,
+    /// Memory held compressed in RAM (Windows memory compression); 0 where it does not exist.
+    pub compressed: u64,
+}
+
+/// Monotonic byte counters of the machine's physical network interfaces.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NetCounters {
+    pub received: u64,
+    pub sent: u64,
+}
+
+/// Monotonic counters of one physical disk.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiskCounters {
+    /// 0 for the first physical disk, as Windows numbers them.
+    pub index: u32,
+    pub read_bytes: u64,
+    pub written_bytes: u64,
+    /// Time the disk was busy, and the clock it is measured against, in nanoseconds.
+    pub active_ns: u64,
+    pub clock_ns: u64,
+}
+
+/// Machine-wide figures for the Performance view. Filled in place, like `Sample`.
+#[derive(Clone, Debug, Default)]
+pub struct SystemSample {
+    /// Monotonic timestamp, same clock as `Sample::at_ns`.
+    pub at_ns: u64,
+    pub cores: Vec<CoreTimes>,
+    pub memory: MemoryInfo,
+    /// `None` where the system does not say.
+    pub network: Option<NetCounters>,
+    pub disks: Vec<DiskCounters>,
+    pub uptime_s: u64,
+}
+
+/// Facts about the machine that do not change while Vigie runs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SystemInfo {
+    pub cpu_model: String,
+    pub logical_cores: u32,
+}
+
 /// An icon as straight (not premultiplied) RGBA pixels, row by row from the top.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Icon {
@@ -139,6 +203,14 @@ pub trait Probe: Send {
     /// `icon_size` is the icon side in physical pixels.
     fn exe_info(&mut self, _exe: &std::path::Path, _icon_size: u32) -> ExeInfo {
         ExeInfo::default()
+    }
+    /// Machine-wide figures. Called every tick while the Performance view is shown.
+    fn system(&mut self, _out: &mut SystemSample) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+    /// Facts that do not change while Vigie runs. Call once.
+    fn system_info(&mut self) -> SystemInfo {
+        SystemInfo::default()
     }
     /// Acts on one process, after checking it is still the process `target` names.
     fn act(&mut self, _target: Target, _action: Action) -> Result<()> {
