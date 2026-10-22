@@ -6,6 +6,7 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
 
+use windows_sys::Win32::Foundation::{FreeLibrary, HMODULE};
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
     DeleteObject, GetDIBits, GetObjectW, HBITMAP,
@@ -13,9 +14,16 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
+use windows_sys::Win32::System::LibraryLoader::{
+    EnumResourceNamesW, FindResourceW, LOAD_LIBRARY_AS_DATAFILE, LOAD_LIBRARY_AS_IMAGE_RESOURCE,
+    LoadLibraryExW, LoadResource, LockResource, SizeofResource,
+};
 use windows_sys::Win32::System::Threading::{PROCESS_NAME_WIN32, QueryFullProcessImageNameW};
-use windows_sys::Win32::UI::Shell::ExtractIconExW;
-use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CreateIconFromResourceEx, DestroyIcon, GetIconInfo, HICON, ICONINFO, LR_DEFAULTCOLOR,
+    LookupIconIdFromDirectoryEx, RT_GROUP_ICON, RT_ICON,
+};
+use windows_sys::core::{BOOL, PCWSTR};
 
 use crate::{ExeInfo, Icon};
 
@@ -39,28 +47,119 @@ pub(crate) fn image_path(handle: &OwnedHandle) -> Option<PathBuf> {
     (ok != 0).then(|| OsString::from_wide(&buffer[..len as usize]).into())
 }
 
-pub(crate) fn exe_info(exe: &Path) -> ExeInfo {
+/// `size` is the icon's side in physical pixels; the closest size the file offers is used.
+pub(crate) fn exe_info(exe: &Path, size: u32) -> ExeInfo {
     let path = wide(exe);
     let (publisher, description) = version_strings(&path);
     ExeInfo {
-        icon: icon(&path),
+        icon: icon(&path, size),
         publisher,
         description,
     }
 }
 
-/// The executable's first icon at the system's large size (32 px at 100 % scaling).
-fn icon(path: &[u16]) -> Option<Icon> {
-    let mut large: HICON = std::ptr::null_mut();
-    // SAFETY: `path` is NUL-terminated; one icon is asked for, written into `large`.
-    let count = unsafe { ExtractIconExW(path.as_ptr(), 0, &mut large, std::ptr::null_mut(), 1) };
-    if count == 0 || large.is_null() {
+/// The executable's first icon group, as Explorer shows it, read straight from its resources.
+/// This avoids the shell icon APIs, which load shell32 and its dependencies (about 20 MB of
+/// images in the working set).
+fn icon(path: &[u16], size: u32) -> Option<Icon> {
+    struct Search {
+        size: i32,
+        icon: HICON,
+    }
+
+    unsafe extern "system" fn first_group(
+        module: HMODULE,
+        kind: PCWSTR,
+        name: PCWSTR,
+        param: isize,
+    ) -> BOOL {
+        // SAFETY: `param` is the `&mut Search` passed below, alive during the enumeration.
+        let search = unsafe { &mut *(param as *mut Search) };
+        // SAFETY: `module` is a data-file module; `name` is valid during this callback; every
+        // pointer and size comes from the resource functions themselves.
+        unsafe {
+            let Some(group) = resource(module, name, kind) else {
+                return 1;
+            };
+            let id = LookupIconIdFromDirectoryEx(
+                group.as_ptr(),
+                1,
+                search.size,
+                search.size,
+                LR_DEFAULTCOLOR,
+            );
+            if id == 0 {
+                return 1;
+            }
+            let Some(bits) = resource(module, id as u16 as usize as PCWSTR, RT_ICON) else {
+                return 1;
+            };
+            search.icon = CreateIconFromResourceEx(
+                bits.as_ptr(),
+                bits.len() as u32,
+                1,
+                0x0003_0000,
+                search.size,
+                search.size,
+                LR_DEFAULTCOLOR,
+            );
+        }
+        // Stop after the first group, found or not.
+        0
+    }
+
+    let size = size.clamp(16, 256) as i32;
+    // SAFETY: `path` is NUL-terminated; the module is loaded as data only (no code runs) and
+    // freed below.
+    let module = unsafe {
+        LoadLibraryExW(
+            path.as_ptr(),
+            std::ptr::null_mut(),
+            LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE,
+        )
+    };
+    if module.is_null() {
         return None;
     }
-    let pixels = icon_pixels(large);
-    // SAFETY: `large` is an icon this function owns.
-    unsafe { DestroyIcon(large) };
+    let mut search = Search {
+        size,
+        icon: std::ptr::null_mut(),
+    };
+    // SAFETY: `first_group` matches ENUMRESNAMEPROCW and uses `search` as documented above.
+    unsafe {
+        EnumResourceNamesW(
+            module,
+            RT_GROUP_ICON,
+            Some(first_group),
+            &mut search as *mut Search as isize,
+        );
+        FreeLibrary(module);
+    }
+    if search.icon.is_null() {
+        return None;
+    }
+    let pixels = icon_pixels(search.icon);
+    // SAFETY: the icon was created for us by CreateIconFromResourceEx.
+    unsafe { DestroyIcon(search.icon) };
     pixels
+}
+
+/// The bytes of one resource of a data-file module. They live as long as the module.
+///
+/// # Safety
+/// `module` must be loaded and stay loaded while the slice is used.
+unsafe fn resource<'a>(module: HMODULE, name: PCWSTR, kind: PCWSTR) -> Option<&'a [u8]> {
+    // SAFETY: per the contract above; null results are checked.
+    unsafe {
+        let info = FindResourceW(module, name, kind);
+        if info.is_null() {
+            return None;
+        }
+        let size = SizeofResource(module, info);
+        let data = LockResource(LoadResource(module, info));
+        (!data.is_null() && size > 0)
+            .then(|| std::slice::from_raw_parts(data.cast::<u8>(), size as usize))
+    }
 }
 
 fn icon_pixels(icon: HICON) -> Option<Icon> {
@@ -219,7 +318,7 @@ mod tests {
         let windows = std::env::var_os("SystemRoot")
             .map(PathBuf::from)
             .expect("SystemRoot");
-        let info = exe_info(&windows.join("explorer.exe"));
+        let info = exe_info(&windows.join("explorer.exe"), 32);
         let icon = info.icon.expect("explorer has an icon");
         assert_eq!(icon.rgba.len(), (icon.width * icon.height * 4) as usize);
         assert!(
@@ -236,7 +335,7 @@ mod tests {
 
     #[test]
     fn missing_file_has_nothing() {
-        let info = exe_info(Path::new("C:\\does\\not\\exist.exe"));
+        let info = exe_info(Path::new("C:\\does\\not\\exist.exe"), 32);
         assert!(info.icon.is_none() && info.publisher.is_none());
     }
 }

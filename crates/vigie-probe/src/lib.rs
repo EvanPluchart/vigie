@@ -125,7 +125,8 @@ pub trait Probe: Send {
     /// Processes that cannot be read are left out.
     fn details(&mut self, pids: &[Pid], out: &mut Vec<ProcDetails>) -> Result<()>;
     /// Icon, publisher and description of an executable. Call once per path and cache.
-    fn exe_info(&mut self, _exe: &std::path::Path) -> ExeInfo {
+    /// `icon_size` is the icon side in physical pixels.
+    fn exe_info(&mut self, _exe: &std::path::Path, _icon_size: u32) -> ExeInfo {
         ExeInfo::default()
     }
 }

@@ -77,10 +77,15 @@ fn main() -> anyhow::Result<()> {
         let _ = tx.send(Command::Filter(text.to_string()));
     });
 
+    // Showing the window first gives its real scale factor, so icons are read at the size they
+    // are drawn (16 logical pixels) and never scaled per frame.
+    app.show().context("showing the main window")?;
+    let icon_size = (16.0 * app.window().scale_factor()).round() as u32;
     let settings = Settings {
         sort: options.sort,
         filter: options.filter,
         interval: options.interval,
+        icon_size,
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
     for pid in options.expand {

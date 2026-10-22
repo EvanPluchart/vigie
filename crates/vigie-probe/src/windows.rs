@@ -549,8 +549,8 @@ impl Probe for WindowsProbe {
         Ok(())
     }
 
-    fn exe_info(&mut self, exe: &std::path::Path) -> ExeInfo {
-        windows_exe::exe_info(exe)
+    fn exe_info(&mut self, exe: &std::path::Path, icon_size: u32) -> ExeInfo {
+        windows_exe::exe_info(exe, icon_size)
     }
 }
 
@@ -677,6 +677,6 @@ mod details_tests {
         let exe = own.exe.as_ref().expect("own executable path");
         assert_eq!(Some(exe.as_path()), std::env::current_exe().ok().as_deref());
         // Test binaries have no icon resource; the call must still answer.
-        let _ = probe.exe_info(exe);
+        let _ = probe.exe_info(exe, 32);
     }
 }

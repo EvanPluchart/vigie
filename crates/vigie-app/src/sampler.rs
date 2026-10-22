@@ -24,6 +24,8 @@ pub struct Settings {
     pub sort: Sort,
     pub filter: String,
     pub interval: Duration,
+    /// Icon side in physical pixels.
+    pub icon_size: u32,
 }
 
 /// Starts the sampler. It stops when every `Command` sender is dropped or the event loop quits.
@@ -48,7 +50,10 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
     };
     let mut core = Core::new(settings.sort, settings.filter);
     let mut sample = Sample::default();
-    let mut exes = ExeCache::default();
+    let mut exes = ExeCache {
+        icon_size: settings.icon_size,
+        ..ExeCache::default()
+    };
     let mut next_tick = Instant::now();
     loop {
         match probe.sample(&mut sample) {
@@ -104,6 +109,7 @@ fn send(
 struct ExeCache {
     by_path: HashMap<PathBuf, Details>,
     next_icon: u32,
+    icon_size: u32,
     details: Vec<ProcDetails>,
 }
 
@@ -135,7 +141,7 @@ impl ExeCache {
                 continue;
             };
             let details = self.by_path.entry(exe.clone()).or_insert_with(|| {
-                let info = probe.exe_info(exe);
+                let info = probe.exe_info(exe, self.icon_size);
                 let icon = info.icon.map(|icon| {
                     let id = self.next_icon;
                     self.next_icon += 1;
