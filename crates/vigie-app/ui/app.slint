@@ -226,16 +226,24 @@ export component AppWindow inherits Window {
     in property <[ProcRow]> rows;
     in property <[image]> icons;
     in property <string> process-count;
+    // Processes matching the search, shown as "12 of 434" while searching.
+    in property <string> matching-count;
     in property <string> self-cpu: "—";
     in property <string> self-memory: "—";
     in property <int> sort-column: 2;
     in property <bool> sort-ascending;
     in-out property <string> search-text;
     in-out property <ColumnSet> columns: { publisher: false, pid: true, cpu: true, memory: true };
+    // The selected process. Rust keeps `selected` up to date as rows refresh, and clears
+    // `has-selection` when the process leaves the table.
+    in-out property <bool> has-selection;
+    in-out property <ProcRow> selected;
     callback show-about();
     callback sort-clicked(int);
     callback search-edited(string);
     callback toggle-clicked(int);
+    // Keyboard navigation: move the selection by this many process rows (Rust skips headers).
+    callback move-selection(int);
     // Last action's outcome, shown in the status bar (see src/model.rs for the codes).
     in-out property <int> notice-kind;
     in property <string> notice-name;
@@ -251,6 +259,7 @@ export component AppWindow inherits Window {
     property <int> confirm-pid;
     property <int> confirm-start;
     property <int> confirm-count;
+    property <bool> searching: root.search-text != "";
 
     // Destructive actions ask first and name their target; the others run at once.
     public function ask(item: ProcRow, action: int) {
@@ -264,6 +273,22 @@ export component AppWindow inherits Window {
         root.confirm-start = item.start;
         root.confirm-count = item.tree-size;
         root.confirm-open = true;
+    }
+
+    public function select(item: ProcRow) {
+        root.selected = item;
+        root.has-selection = true;
+        table.focus();
+    }
+
+    // Scrolls the table just enough to show row `index`.
+    public function scroll-to(index: int) {
+        let top = index * Theme.row-height;
+        if (top < -list.content-y) {
+            list.content-y = -top;
+        } else if (top + Theme.row-height > -list.content-y + list.visible-height) {
+            list.content-y = -(top + Theme.row-height - list.visible-height);
+        }
     }
 
     function priority-name(action: int) -> string {
@@ -284,6 +309,12 @@ export component AppWindow inherits Window {
             : "";
     }
 
+    function clear-search() {
+        root.search-text = "";
+        root.search-edited("");
+        table.focus();
+    }
+
     // A notice stays a few seconds, then the status bar shows the process count again.
     Timer {
         interval: 6s;
@@ -297,186 +328,335 @@ export component AppWindow inherits Window {
 
     title: "Vigie";
     icon: @image-url("../../../assets/brand/icons/vigie-256.png");
-    preferred-width: 760px;
-    preferred-height: 560px;
+    preferred-width: 820px;
+    preferred-height: 600px;
     background: Theme.background;
 
-    VerticalLayout {
-        HorizontalLayout {
-            padding: Theme.space-3;
-            padding-left: Theme.space-4;
-            padding-right: Theme.space-4;
-            spacing: Theme.space-3;
-            Text {
-                text: @tr("Processes");
-                color: Theme.text;
-                font-size: Theme.font-section;
-                font-weight: Theme.weight-strong;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
+    // Window-wide shortcuts that no focused widget took: Ctrl+F searches, Escape clears it.
+    FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.control && (event.text == "f" || event.text == "F")) {
+                search.focus();
+                return accept;
             }
-            LineEdit {
-                width: 260px;
-                placeholder-text: @tr("Search name, PID or publisher");
-                text <=> root.search-text;
-                edited(text) => { root.search-edited(text); }
+            if (event.text == Key.Escape && root.searching) {
+                root.clear-search();
+                return accept;
             }
+            return reject;
         }
 
-        // Right-click the header to choose the columns.
-        ContextMenuArea {
-            height: Theme.bar-height;
-            Menu {
-                MenuItem {
-                    title: @tr("Publisher");
-                    checkable: true;
-                    checked: root.columns.publisher;
-                    activated => { root.columns.publisher = !root.columns.publisher; }
+        VerticalLayout {
+            HorizontalLayout {
+                padding: Theme.space-3;
+                padding-left: Theme.space-4;
+                padding-right: Theme.space-4;
+                spacing: Theme.space-2;
+                Text {
+                    text: @tr("Processes");
+                    color: Theme.text;
+                    font-size: Theme.font-section;
+                    font-weight: Theme.weight-strong;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
                 }
-                MenuItem {
-                    title: @tr("PID");
-                    checkable: true;
-                    checked: root.columns.pid;
-                    activated => { root.columns.pid = !root.columns.pid; }
+                search := LineEdit {
+                    width: 300px;
+                    placeholder-text: @tr("Search name, PID or publisher (Ctrl+F)");
+                    text <=> root.search-text;
+                    edited(text) => { root.search-edited(text); }
                 }
-                MenuItem {
-                    title: @tr("CPU");
-                    checkable: true;
-                    checked: root.columns.cpu;
-                    activated => { root.columns.cpu = !root.columns.cpu; }
-                }
-                MenuItem {
-                    title: @tr("Memory");
-                    checkable: true;
-                    checked: root.columns.memory;
-                    activated => { root.columns.memory = !root.columns.memory; }
-                }
-            }
-            Columns {
-                SortHeader {
-                    label: @tr("Name"); column: 0; horizontal-stretch: 1;
-                    sort-column: root.sort-column; sort-ascending: root.sort-ascending;
-                    clicked(c) => { root.sort-clicked(c); }
-                }
-                if root.columns.publisher: HeaderCell {
-                    text: @tr("Publisher");
-                    width: 160px;
-                }
-                if root.columns.pid: SortHeader {
-                    label: @tr("PID"); column: 1; width: 72px; alignment: right;
-                    sort-column: root.sort-column; sort-ascending: root.sort-ascending;
-                    clicked(c) => { root.sort-clicked(c); }
-                }
-                if root.columns.cpu: SortHeader {
-                    label: @tr("CPU"); column: 2; width: 72px; alignment: right;
-                    sort-column: root.sort-column; sort-ascending: root.sort-ascending;
-                    clicked(c) => { root.sort-clicked(c); }
-                }
-                if root.columns.memory: SortHeader {
-                    label: @tr("Memory"); column: 3; width: 96px; alignment: right;
-                    sort-column: root.sort-column; sort-ascending: root.sort-ascending;
-                    clicked(c) => { root.sort-clicked(c); }
-                }
-            }
-            Rectangle {
-                y: parent.height - 1px;
-                height: 1px;
-                background: Theme.border;
-            }
-        }
-
-        ListView {
-            vertical-stretch: 1;
-            for row in root.rows: Rectangle {
-                height: Theme.row-height;
-                if row.kind == 0: GroupHeader {
-                    group: row.group;
-                    count: row.count;
-                }
-                if row.kind != 0: ContextMenuArea {
+                // Everything else: process actions, columns, About.
+                more := ContextMenuArea {
                     Menu {
                         MenuItem {
-                            title: @tr("End task");
-                            activated => { root.ask(row, 0); }
-                        }
-                        MenuItem {
-                            title: @tr("End process tree");
-                            enabled: row.tree-size > 0;
-                            activated => { root.ask(row, 1); }
-                        }
-                        MenuSeparator { }
-                        MenuItem {
                             title: @tr("Suspend");
-                            enabled: !row.own;
-                            activated => { root.ask(row, 2); }
+                            enabled: root.has-selection && !root.selected.own;
+                            activated => { root.ask(root.selected, 2); }
                         }
                         MenuItem {
                             title: @tr("Resume");
-                            activated => { root.ask(row, 3); }
+                            enabled: root.has-selection;
+                            activated => { root.ask(root.selected, 3); }
                         }
                         Menu {
                             title: @tr("Priority");
-                            MenuItem { title: root.priority-name(4); activated => { root.ask(row, 4); } }
-                            MenuItem { title: root.priority-name(5); activated => { root.ask(row, 5); } }
-                            MenuItem { title: root.priority-name(6); activated => { root.ask(row, 6); } }
-                            MenuItem { title: root.priority-name(7); activated => { root.ask(row, 7); } }
-                            MenuItem { title: root.priority-name(8); activated => { root.ask(row, 8); } }
+                            enabled: root.has-selection;
+                            MenuItem { title: root.priority-name(4); activated => { root.ask(root.selected, 4); } }
+                            MenuItem { title: root.priority-name(5); activated => { root.ask(root.selected, 5); } }
+                            MenuItem { title: root.priority-name(6); activated => { root.ask(root.selected, 6); } }
+                            MenuItem { title: root.priority-name(7); activated => { root.ask(root.selected, 7); } }
+                            MenuItem { title: root.priority-name(8); activated => { root.ask(root.selected, 8); } }
                         }
-                        MenuSeparator { }
                         MenuItem {
                             title: @tr("Open file location");
-                            activated => { root.ask(row, 9); }
+                            enabled: root.has-selection;
+                            activated => { root.ask(root.selected, 9); }
                         }
                         MenuItem {
                             title: @tr("Copy command line");
-                            activated => { root.ask(row, 10); }
+                            enabled: root.has-selection;
+                            activated => { root.ask(root.selected, 10); }
+                        }
+                        MenuSeparator { }
+                        Menu {
+                            title: @tr("Columns");
+                            MenuItem { title: @tr("Publisher"); checkable: true; checked: root.columns.publisher; activated => { root.columns.publisher = !root.columns.publisher; } }
+                            MenuItem { title: @tr("PID"); checkable: true; checked: root.columns.pid; activated => { root.columns.pid = !root.columns.pid; } }
+                            MenuItem { title: @tr("CPU"); checkable: true; checked: root.columns.cpu; activated => { root.columns.cpu = !root.columns.cpu; } }
+                            MenuItem { title: @tr("Memory"); checkable: true; checked: root.columns.memory; activated => { root.columns.memory = !root.columns.memory; } }
+                        }
+                        MenuSeparator { }
+                        MenuItem {
+                            title: @tr("About Vigie");
+                            activated => { root.show-about(); }
                         }
                     }
-                    ProcessLine {
-                        item: row;
-                        icon: root.icons[row.icon];
-                        columns: root.columns;
-                        toggle(pid) => { root.toggle-clicked(pid); }
+                    more-button := Button {
+                        text: "···";
+                        clicked => { more.show({ x: 0, y: self.height }); }
                     }
                 }
             }
-        }
 
-        Rectangle {
-            height: Theme.bar-height + 6px;
-            background: Theme.surface;
+            // Command bar: acts on the selected process and names it.
             Rectangle {
-                y: 0;
-                height: 1px;
-                background: Theme.border;
-            }
-            Columns {
-                spacing: Theme.space-4;
-                // The lagoon dot marks what is live: Vigie reporting on itself.
+                height: 44px;
+                background: Theme.surface;
+                Rectangle { y: 0; height: 1px; background: Theme.border; }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
                 HorizontalLayout {
-                    horizontal-stretch: 0;
+                    padding-left: Theme.space-4;
+                    padding-right: Theme.space-4;
+                    padding-top: Theme.space-1;
+                    padding-bottom: Theme.space-1;
                     spacing: Theme.space-2;
-                    Rectangle {
-                        width: 8px;
-                        height: 8px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: 4px;
-                        background: Theme.lagoon;
+                    Cell {
+                        text: root.has-selection ? @tr("{} · PID {}", root.selected.name, root.selected.pid)
+                            : @tr("Select a process to act on it");
+                        color: root.has-selection ? Theme.text : Theme.text-muted;
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: @tr("End process tree");
+                        enabled: root.has-selection && root.selected.tree-size > 0;
+                        clicked => { root.ask(root.selected, 1); }
+                    }
+                    Button {
+                        text: @tr("End task");
+                        primary: true;
+                        enabled: root.has-selection;
+                        clicked => { root.ask(root.selected, 0); }
+                    }
+                }
+            }
+
+            // Right-click the header to choose the columns (also in the ··· menu).
+            ContextMenuArea {
+                height: Theme.bar-height;
+                Menu {
+                    MenuItem { title: @tr("Publisher"); checkable: true; checked: root.columns.publisher; activated => { root.columns.publisher = !root.columns.publisher; } }
+                    MenuItem { title: @tr("PID"); checkable: true; checked: root.columns.pid; activated => { root.columns.pid = !root.columns.pid; } }
+                    MenuItem { title: @tr("CPU"); checkable: true; checked: root.columns.cpu; activated => { root.columns.cpu = !root.columns.cpu; } }
+                    MenuItem { title: @tr("Memory"); checkable: true; checked: root.columns.memory; activated => { root.columns.memory = !root.columns.memory; } }
+                }
+                Columns {
+                    SortHeader {
+                        label: @tr("Name"); column: 0; horizontal-stretch: 1;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                        clicked(c) => { root.sort-clicked(c); }
+                    }
+                    if root.columns.publisher: HeaderCell {
+                        text: @tr("Publisher");
+                        width: 160px;
+                    }
+                    if root.columns.pid: SortHeader {
+                        label: @tr("PID"); column: 1; width: 72px; alignment: right;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                        clicked(c) => { root.sort-clicked(c); }
+                    }
+                    if root.columns.cpu: SortHeader {
+                        label: @tr("CPU"); column: 2; width: 72px; alignment: right;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                        clicked(c) => { root.sort-clicked(c); }
+                    }
+                    if root.columns.memory: SortHeader {
+                        label: @tr("Memory"); column: 3; width: 96px; alignment: right;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                        clicked(c) => { root.sort-clicked(c); }
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+            }
+
+            // The table takes keyboard focus once a row is clicked.
+            table := FocusScope {
+                vertical-stretch: 1;
+                key-pressed(event) => {
+                    if (event.text == Key.DownArrow) { root.move-selection(1); return accept; }
+                    if (event.text == Key.UpArrow) { root.move-selection(-1); return accept; }
+                    if (event.text == Key.PageDown) { root.move-selection(10); return accept; }
+                    if (event.text == Key.PageUp) { root.move-selection(-10); return accept; }
+                    if (event.text == Key.End) { root.move-selection(1000000); return accept; }
+                    if (event.text == Key.Home) { root.move-selection(-1000000); return accept; }
+                    if (!root.has-selection) { return reject; }
+                    if (event.text == Key.RightArrow && root.selected.expandable && !root.selected.expanded) {
+                        root.toggle-clicked(root.selected.pid);
+                        return accept;
+                    }
+                    if (event.text == Key.LeftArrow && root.selected.expanded) {
+                        root.toggle-clicked(root.selected.pid);
+                        return accept;
+                    }
+                    if (event.text == Key.Return && root.selected.expandable) {
+                        root.toggle-clicked(root.selected.pid);
+                        return accept;
+                    }
+                    if (event.text == Key.Delete) {
+                        root.ask(root.selected, 0);
+                        return accept;
+                    }
+                    return reject;
+                }
+
+                list := ListView {
+                    for row in root.rows: Rectangle {
+                        height: Theme.row-height;
+                        property <bool> is-selected: root.has-selection && row.kind != 0 && row.key == root.selected.key;
+                        if row.kind == 0: GroupHeader {
+                            group: row.group;
+                            count: row.count;
+                        }
+                        if row.kind != 0: ContextMenuArea {
+                            Menu {
+                                MenuItem {
+                                    title: @tr("End task");
+                                    activated => { root.ask(row, 0); }
+                                }
+                                MenuItem {
+                                    title: @tr("End process tree");
+                                    enabled: row.tree-size > 0;
+                                    activated => { root.ask(row, 1); }
+                                }
+                                MenuSeparator { }
+                                MenuItem {
+                                    title: @tr("Suspend");
+                                    enabled: !row.own;
+                                    activated => { root.ask(row, 2); }
+                                }
+                                MenuItem {
+                                    title: @tr("Resume");
+                                    activated => { root.ask(row, 3); }
+                                }
+                                Menu {
+                                    title: @tr("Priority");
+                                    MenuItem { title: root.priority-name(4); activated => { root.ask(row, 4); } }
+                                    MenuItem { title: root.priority-name(5); activated => { root.ask(row, 5); } }
+                                    MenuItem { title: root.priority-name(6); activated => { root.ask(row, 6); } }
+                                    MenuItem { title: root.priority-name(7); activated => { root.ask(row, 7); } }
+                                    MenuItem { title: root.priority-name(8); activated => { root.ask(row, 8); } }
+                                }
+                                MenuSeparator { }
+                                MenuItem {
+                                    title: @tr("Open file location");
+                                    activated => { root.ask(row, 9); }
+                                }
+                                MenuItem {
+                                    title: @tr("Copy command line");
+                                    activated => { root.ask(row, 10); }
+                                }
+                            }
+                            // Hover and selection tints, under the content.
+                            Rectangle {
+                                background: is-selected ? Theme.selection
+                                    : touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+                            }
+                            Rectangle {
+                                x: 0;
+                                width: 3px;
+                                background: is-selected ? Theme.accent : transparent;
+                            }
+                            // Click selects, double-click expands, right click selects then opens
+                            // the menu. Under the line, so the chevron keeps its own clicks.
+                            touch := TouchArea {
+                                clicked => { root.select(row); }
+                                double-clicked => {
+                                    if (row.expandable) { root.toggle-clicked(row.pid); }
+                                }
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                                        root.select(row);
+                                    }
+                                }
+                            }
+                            ProcessLine {
+                                item: row;
+                                icon: root.icons[row.icon];
+                                columns: root.columns;
+                                toggle(pid) => { root.toggle-clicked(pid); }
+                            }
+                        }
+                    }
+                }
+
+                // Nothing matches the search: say so and offer the way back.
+                if root.searching && root.rows.length == 0: VerticalLayout {
+                    alignment: center;
+                    spacing: Theme.space-3;
+                    Text {
+                        text: @tr("No process matches “{}”", root.search-text);
+                        color: Theme.text-muted;
+                        font-size: Theme.font-section;
+                        horizontal-alignment: center;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        Button {
+                            text: @tr("Clear search");
+                            clicked => { root.clear-search(); }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: Theme.bar-height;
+                background: Theme.surface;
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                Columns {
+                    spacing: Theme.space-4;
+                    // The lagoon dot marks what is live: Vigie reporting on itself.
+                    HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: Theme.space-2;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: Theme.lagoon;
+                        }
+                        Cell {
+                            text: @tr("Vigie {} CPU · {}", root.self-cpu, root.self-memory);
+                            font-size: Theme.font-caption;
+                        }
                     }
                     Cell {
-                        text: @tr("Vigie {} CPU · {}", root.self-cpu, root.self-memory);
+                        text: root.notice-kind != 0 ? root.notice-text()
+                            : root.searching ? @tr("{} of {} processes", root.matching-count, root.process-count)
+                            : @tr("{} processes", root.process-count);
+                        color: root.notice-kind >= 7 ? Theme.danger : Theme.text-muted;
                         font-size: Theme.font-caption;
+                        horizontal-stretch: 1;
                     }
-                }
-                Cell {
-                    text: root.notice-kind == 0 ? @tr("{} processes", root.process-count) : root.notice-text();
-                    color: root.notice-kind >= 7 ? Theme.danger : Theme.text-muted;
-                    font-size: Theme.font-caption;
-                    horizontal-stretch: 1;
-                }
-                Button {
-                    text: @tr("About");
-                    clicked => { root.show-about(); }
                 }
             }
         }

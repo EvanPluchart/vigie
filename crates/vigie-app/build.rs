@@ -16,6 +16,8 @@ fn main() {
         println!("cargo:rerun-if-changed={ICON}");
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon(ICON);
+        resource.set("FileDescription", "Vigie");
+        resource.set("ProductName", "Vigie");
         resource.compile().expect("Windows resources compile");
     }
 }

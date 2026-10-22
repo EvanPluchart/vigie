@@ -77,6 +77,22 @@ fn main() -> anyhow::Result<()> {
         }
         let _ = tx.send(Command::Sort(next));
     });
+    let weak = app.as_weak();
+    app.on_move_selection(move |delta| {
+        let Some(app) = weak.upgrade() else { return };
+        let rows = app.get_rows();
+        let Some(model) = rows.as_any().downcast_ref::<VecModel<ProcRow>>() else {
+            return;
+        };
+        let selected = app.get_has_selection().then(|| app.get_selected().key);
+        if let Some(index) = model::step_selection(model, selected, delta)
+            && let Some(row) = model.row_data(index)
+        {
+            app.set_selected(row);
+            app.set_has_selection(true);
+            app.invoke_scroll_to(index as i32);
+        }
+    });
     let tx = commands.clone();
     app.on_request_action(move |pid, start, code| {
         let (Ok(pid), Ok(start_low_bits), Some(action)) =
@@ -112,6 +128,20 @@ fn main() -> anyhow::Result<()> {
         icon_size,
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
+    if let Some(pid) = options.select {
+        // Once rows have arrived, select as a click would.
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+            let Some(app) = weak.upgrade() else { return };
+            let row = app
+                .get_rows()
+                .iter()
+                .find(|r| r.kind == 1 && r.pid as u32 == pid);
+            if let Some(row) = row {
+                app.invoke_select(row);
+            }
+        });
+    }
     if let Some((code, pid)) = options.ask {
         // Once rows have arrived, open the confirmation as the menu would. Nothing runs unless
         // someone clicks the confirm button.

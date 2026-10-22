@@ -5,7 +5,7 @@ use std::time::Duration;
 use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory]";
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID]";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
@@ -23,6 +23,8 @@ pub struct Options {
     pub ask: Option<(i32, u32)>,
     /// Optional columns to show; `None` keeps the defaults.
     pub columns: Option<Vec<String>>,
+    /// Process to select at start, for screenshots.
+    pub select: Option<u32>,
 }
 
 impl Default for Options {
@@ -36,6 +38,7 @@ impl Default for Options {
             expand: Vec::new(),
             ask: None,
             columns: None,
+            select: None,
         }
     }
 }
@@ -78,6 +81,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
                     return Err(format!("unknown column `{bad}`"));
                 }
                 options.columns = Some(names);
+            }
+            ("--select", Some(pid)) => {
+                options.select = Some(pid.parse().map_err(|_| format!("invalid PID `{pid}`"))?);
             }
             ("--expand", Some(pid)) => options
                 .expand
@@ -138,6 +144,7 @@ mod tests {
                 expand: Vec::new(),
                 ask: None,
                 columns: None,
+                select: None,
             }
         );
     }

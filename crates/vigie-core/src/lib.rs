@@ -124,6 +124,8 @@ pub fn heat(value: f32, thresholds: [f32; 3]) -> u8 {
 pub struct Frame {
     pub rows: Vec<Row>,
     pub process_count: usize,
+    /// Processes matching the search; equals `process_count` when not searching.
+    pub matching_count: usize,
     pub self_cpu_percent: Option<f32>,
     pub self_memory_bytes: u64,
 }
@@ -300,6 +302,7 @@ impl Core {
             self.sort,
             &self.expanded,
         );
+        frame.matching_count = tree.matching;
         let total_memory = sample.memory_total_bytes;
         let row = |kind, node: usize, depth, figures: Figures, count, expanded| {
             let p = nodes[node].p;
@@ -319,7 +322,14 @@ impl Core {
                 kind,
                 pid: p.pid,
                 start_time: p.start_time,
-                name: p.name.clone(),
+                // Apps read best by their product name ("Brave Browser"); the rest by file name.
+                name: match details
+                    .get(&(p.pid, p.start_time))
+                    .and_then(|d| d.description.as_deref())
+                {
+                    Some(description) if tree.group[node] == Group::Apps => description.to_owned(),
+                    _ => p.name.clone(),
+                },
                 cpu_percent: figures.cpu,
                 memory_bytes: figures.memory,
                 cpu_heat: figures.cpu.map_or(0, |c| heat(c, CPU_HEAT)),
@@ -760,11 +770,19 @@ mod tests {
         assert!(core.missing_details(&s).is_empty());
         let frame = core.update(&s);
         assert_eq!(row(&frame, 20).icon, Some(3));
+        assert_eq!(
+            row(&frame, 20).name,
+            "App Deluxe",
+            "apps show their product name"
+        );
+        assert_eq!(row(&frame, 30).name, "tool");
+        assert_eq!(frame.matching_count, 8);
         assert_eq!(row(&frame, 30).icon, None);
 
         core.set_filter("lagoon");
         assert_eq!(pids(&core.update(&s)), [20]);
         core.set_filter("deluxe");
+        assert_eq!(core.update(&s).matching_count, 1);
         assert_eq!(pids(&core.update(&s)), [20]);
 
         // A process that exits loses its details; a new one with the same PID needs them again.

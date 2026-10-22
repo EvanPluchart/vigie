@@ -17,6 +17,7 @@ const KIND_ITSELF: i32 = 2;
 pub struct UiFrame {
     pub rows: Vec<ProcRow>,
     pub process_count: SharedString,
+    pub matching_count: SharedString,
     pub self_cpu: SharedString,
     pub self_memory: SharedString,
     /// Icons the UI has not seen yet, with their index in its icon model. Pixel buffers cross
@@ -30,6 +31,7 @@ impl UiFrame {
         Self {
             rows: frame.rows.iter().map(proc_row).collect(),
             process_count: frame.process_count.to_string().into(),
+            matching_count: frame.matching_count.to_string().into(),
             self_cpu: format_cpu(frame.self_cpu_percent),
             self_memory: format_memory(frame.self_memory_bytes),
             notice,
@@ -131,8 +133,10 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
     let rows = app.get_rows();
     if let Some(model) = rows.as_any().downcast_ref::<VecModel<ProcRow>>() {
         patch(model, frame.rows);
+        refresh_selection(&app, model);
     }
     app.set_process_count(frame.process_count);
+    app.set_matching_count(frame.matching_count);
     app.set_self_cpu(frame.self_cpu);
     app.set_self_memory(frame.self_memory);
     if let Some(notice) = frame.notice {
@@ -141,6 +145,44 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
         app.set_notice_count(notice.count);
         app.set_notice_kind(notice.kind);
     }
+}
+
+/// Keeps the selected row's figures current, and drops the selection once its process has left
+/// the table (exited, filtered out, or folded into a collapsed parent).
+fn refresh_selection(app: &AppWindow, model: &VecModel<ProcRow>) {
+    if !app.get_has_selection() {
+        return;
+    }
+    let key = app.get_selected().key;
+    match model.iter().find(|r| r.kind != KIND_GROUP && r.key == key) {
+        Some(row) => app.set_selected(row),
+        None => app.set_has_selection(false),
+    }
+}
+
+/// Index of the process row `delta` rows away from the selection (headers skipped, clamped to
+/// the table). With no selection, the first process row.
+pub fn step_selection(
+    model: &VecModel<ProcRow>,
+    selected_key: Option<i32>,
+    delta: i32,
+) -> Option<usize> {
+    let processes: Vec<usize> = (0..model.row_count())
+        .filter(|&i| model.row_data(i).is_some_and(|r| r.kind != KIND_GROUP))
+        .collect();
+    if processes.is_empty() {
+        return None;
+    }
+    let current = selected_key.and_then(|key| {
+        processes
+            .iter()
+            .position(|&i| model.row_data(i).is_some_and(|r| r.key == key))
+    });
+    let target = match current {
+        Some(at) => (at as i64 + i64::from(delta)).clamp(0, processes.len() as i64 - 1) as usize,
+        None => 0,
+    };
+    processes.get(target).copied()
 }
 
 /// "—" when there is no value yet, never a misleading 0.
@@ -315,6 +357,39 @@ mod tests {
         assert_eq!(rows(&model), next);
     }
 
+    #[test]
+    fn keyboard_steps_skip_headers_and_stay_in_bounds() {
+        let header = ProcRow {
+            key: -1,
+            kind: KIND_GROUP,
+            ..ProcRow::default()
+        };
+        let model = VecModel::from(vec![
+            header.clone(),
+            row(1, "a"),
+            header,
+            row(2, "b"),
+            row(3, "c"),
+        ]);
+        assert_eq!(
+            step_selection(&model, None, 1),
+            Some(1),
+            "first process row"
+        );
+        assert_eq!(
+            step_selection(&model, Some(2), 1),
+            Some(3),
+            "header skipped"
+        );
+        assert_eq!(step_selection(&model, Some(4), -1), Some(1));
+        assert_eq!(
+            step_selection(&model, Some(6), 1_000_000),
+            Some(4),
+            "clamped"
+        );
+        assert_eq!(step_selection(&model, Some(2), -1_000_000), Some(1));
+        assert_eq!(step_selection(&VecModel::default(), None, 1), None);
+    }
     #[test]
     fn formats_values() {
         assert_eq!(format_cpu(None), "—");

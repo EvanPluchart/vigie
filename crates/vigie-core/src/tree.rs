@@ -56,6 +56,10 @@ pub(crate) struct Tree {
     pub totals: Vec<Figures>,
     /// Number of descendants, by node.
     pub descendants: Vec<u32>,
+    /// Section of each node.
+    pub group: Vec<Group>,
+    /// Processes matching the search (all of them when not searching).
+    pub matching: usize,
 }
 
 /// Deepest ancestor walk; real trees are shallow, this only guards against corrupt parent loops.
@@ -167,7 +171,8 @@ pub(crate) fn build(
         primary.then_with(|| nodes[a].p.pid.cmp(&nodes[b].p.pid))
     };
 
-    let searching = nodes.iter().any(|n| !filter(n.p));
+    let matching = nodes.iter().filter(|n| filter(n.p)).count();
+    let searching = matching < nodes.len();
     let mut entries = Vec::with_capacity(nodes.len() + 4);
     for section in [Group::Apps, Group::Background, Group::System, Group::All] {
         if searching {
@@ -219,6 +224,8 @@ pub(crate) fn build(
         entries,
         totals,
         descendants,
+        matching,
+        group,
     }
 }
 
