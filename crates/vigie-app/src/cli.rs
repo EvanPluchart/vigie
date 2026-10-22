@@ -5,7 +5,7 @@ use std::time::Duration;
 use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light]";
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about]";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
@@ -14,6 +14,8 @@ pub struct Options {
     pub interval: Duration,
     /// `None` follows the system theme.
     pub dark: Option<bool>,
+    /// Opens the About window at start, for screenshots.
+    pub about: bool,
 }
 
 impl Default for Options {
@@ -23,6 +25,7 @@ impl Default for Options {
             filter: String::new(),
             interval: Duration::from_secs(1),
             dark: None,
+            about: false,
         }
     }
 }
@@ -49,6 +52,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             }
             ("--dark", None) => options.dark = Some(true),
             ("--light", None) => options.dark = Some(false),
+            ("--about", None) => options.about = true,
             _ => return Err(format!("unknown argument `{arg}`")),
         }
     }
@@ -102,6 +106,7 @@ mod tests {
                 filter: "code".into(),
                 interval: Duration::from_millis(500),
                 dark: Some(true),
+                about: false,
             }
         );
     }

@@ -1,4 +1,5 @@
-import { AboutSlint, Button, ListView, Palette, VerticalBox } from "std-widgets.slint";
+import { AboutSlint, Button, ListView, Palette } from "std-widgets.slint";
+import { Theme } from "theme.slint";
 
 export struct ProcRow {
     name: string,
@@ -10,27 +11,47 @@ export struct ProcRow {
 component Cell inherits Text {
     vertical-alignment: center;
     overflow: elide;
-    color: Palette.foreground;
+    color: Theme.text;
+    font-size: Theme.font-body;
+}
+
+component HeaderCell inherits Cell {
+    color: Theme.text-muted;
+    font-size: Theme.font-caption;
+    font-weight: Theme.weight-strong;
 }
 
 component Columns inherits HorizontalLayout {
-    padding-left: 12px;
-    padding-right: 12px;
-    spacing: 12px;
+    padding-left: Theme.space-4;
+    padding-right: Theme.space-4;
+    spacing: Theme.space-3;
 }
 
 export component AboutWindow inherits Window {
     title: @tr("About Vigie");
-    VerticalBox {
+    icon: @image-url("../../../assets/brand/icons/vigie-256.png");
+    background: Theme.background;
+    VerticalLayout {
+        padding: Theme.space-6;
+        spacing: Theme.space-3;
         alignment: start;
+        Image {
+            source: @image-url("../../../assets/brand/vigie-icon.svg");
+            width: 64px;
+            height: 64px;
+            horizontal-alignment: center;
+        }
         Text {
             text: "Vigie";
-            font-size: 22px;
-            font-weight: 600;
+            color: Theme.text;
+            font-size: Theme.font-title;
+            font-weight: Theme.weight-strong;
             horizontal-alignment: center;
         }
         Text {
             text: @tr("A fast cross-platform task manager.");
+            color: Theme.text-muted;
+            font-size: Theme.font-body;
             horizontal-alignment: center;
         }
         AboutSlint { }
@@ -49,30 +70,34 @@ export component AppWindow inherits Window {
     }
 
     title: "Vigie";
+    icon: @image-url("../../../assets/brand/icons/vigie-256.png");
     preferred-width: 760px;
     preferred-height: 560px;
-    background: Palette.background;
+    background: Theme.background;
 
     VerticalLayout {
         Rectangle {
-            height: 32px;
-            background: Palette.alternate-background;
+            height: Theme.bar-height;
             Columns {
-                Cell { text: @tr("Name"); font-weight: 600; horizontal-stretch: 1; }
-                Cell { text: @tr("PID"); font-weight: 600; width: 72px; horizontal-alignment: right; }
-                Cell { text: @tr("CPU"); font-weight: 600; width: 72px; horizontal-alignment: right; }
-                Cell { text: @tr("Memory"); font-weight: 600; width: 96px; horizontal-alignment: right; }
+                HeaderCell { text: @tr("Name"); horizontal-stretch: 1; }
+                HeaderCell { text: @tr("PID"); width: 72px; horizontal-alignment: right; }
+                HeaderCell { text: @tr("CPU"); width: 72px; horizontal-alignment: right; }
+                HeaderCell { text: @tr("Memory"); width: 96px; horizontal-alignment: right; }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border;
             }
         }
 
         ListView {
             vertical-stretch: 1;
-            for row[i] in root.rows: Rectangle {
-                height: 26px;
-                background: mod(i, 2) == 0 ? transparent : Palette.alternate-background.with-alpha(0.4);
+            for row in root.rows: Rectangle {
+                height: Theme.row-height;
                 Columns {
                     Cell { text: row.name; horizontal-stretch: 1; }
-                    Cell { text: row.pid; width: 72px; horizontal-alignment: right; }
+                    Cell { text: row.pid; width: 72px; horizontal-alignment: right; color: Theme.text-muted; }
                     Cell { text: row.cpu; width: 72px; horizontal-alignment: right; }
                     Cell { text: row.memory; width: 96px; horizontal-alignment: right; }
                 }
@@ -80,18 +105,41 @@ export component AppWindow inherits Window {
         }
 
         Rectangle {
-            height: 1px;
-            background: Palette.border;
-        }
-
-        Columns {
-            padding-top: 4px;
-            padding-bottom: 4px;
-            Cell { text: @tr("{} processes", root.process-count); horizontal-stretch: 1; }
-            Cell { text: @tr("Vigie: {} CPU · {}", root.self-cpu, root.self-memory); }
-            Button {
-                text: @tr("About");
-                clicked => { root.show-about(); }
+            height: Theme.bar-height + 6px;
+            background: Theme.surface;
+            Rectangle {
+                y: 0;
+                height: 1px;
+                background: Theme.border;
+            }
+            Columns {
+                spacing: Theme.space-4;
+                // The lagoon dot marks what is live: Vigie reporting on itself.
+                HorizontalLayout {
+                    horizontal-stretch: 0;
+                    spacing: Theme.space-2;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 4px;
+                        background: Theme.lagoon;
+                    }
+                    Cell {
+                        text: @tr("Vigie {} CPU · {}", root.self-cpu, root.self-memory);
+                        font-size: Theme.font-caption;
+                    }
+                }
+                Cell {
+                    text: @tr("{} processes", root.process-count);
+                    color: Theme.text-muted;
+                    font-size: Theme.font-caption;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: @tr("About");
+                    clicked => { root.show-about(); }
+                }
             }
         }
     }

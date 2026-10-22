@@ -45,6 +45,9 @@ fn main() -> anyhow::Result<()> {
             let _ = window.show();
         }
     });
+    if options.about {
+        app.invoke_show_about();
+    }
 
     // Dropping the sender tells the sampler to stop.
     let (stop_tx, stop_rx) = flume::bounded::<()>(1);
