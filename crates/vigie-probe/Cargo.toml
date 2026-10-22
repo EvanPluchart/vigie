@@ -8,3 +8,13 @@ authors.workspace = true
 [dependencies]
 sysinfo.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Wdk_System_SystemInformation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "sample"
+harness = false

@@ -1,10 +1,17 @@
 //! Per-OS system sampling behind one trait. No UI here. See docs/ARCHITECTURE.md.
 
 mod sysinfo_probe;
+#[cfg(windows)]
+mod windows;
 
 use std::path::PathBuf;
 
 pub use sysinfo_probe::SysinfoProbe;
+/// The fastest probe for the current system.
+#[cfg(not(windows))]
+pub use sysinfo_probe::SysinfoProbe as SystemProbe;
+#[cfg(windows)]
+pub use windows::WindowsProbe as SystemProbe;
 
 pub type Pid = u32;
 

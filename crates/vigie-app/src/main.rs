@@ -13,7 +13,7 @@ use std::thread;
 use anyhow::Context;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use vigie_core::Core;
-use vigie_probe::{Probe, Sample, SysinfoProbe};
+use vigie_probe::{Probe, Sample, SystemProbe};
 
 use crate::cli::Options;
 use crate::model::UiFrame;
@@ -65,7 +65,7 @@ fn spawn_sampler(
     thread::Builder::new()
         .name("vigie-sampler".into())
         .spawn(move || {
-            let mut probe = match SysinfoProbe::new() {
+            let mut probe = match SystemProbe::new() {
                 Ok(probe) => probe,
                 Err(err) => {
                     eprintln!("vigie: {err}");
