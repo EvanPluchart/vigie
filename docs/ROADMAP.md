@@ -15,7 +15,7 @@ Each milestone ends with something you can run and show. Estimates are evenings 
 
 Vigie should look as good as it is light. Design work has its own deliverables, reviewed with screenshots.
 
-* **D1 — Identity:** logo and app icon (readable at 16 px in the taskbar and the tray), palette, typography, art direction, short brand guide in `docs/BRAND.md`, masters in `assets/brand/`.
+* **D1 — Identity (done, approved 2026-10-22):** logo and app icon (readable at 16 px in the taskbar and the tray), palette, typography, art direction, short brand guide in `docs/BRAND.md`, masters in `assets/brand/`.
 * **D2 — Interface art direction (before M1 ends):** design tokens as a Slint global (colours for dark and light, type scale, spacing, radii), table density, heat colours, status bar; applied over the native styles without fighting them.
 * **D3 — UX pass per milestone:** each milestone ends with a screenshot review of its views (empty, loading, error and privilege-limited states included) and a list of fixes.
 
