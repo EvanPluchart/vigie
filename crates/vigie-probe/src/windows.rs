@@ -31,7 +31,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::core::BOOL;
 
-use crate::{Pid, Probe, ProbeError, ProcDetails, Result, Sample, SysinfoProbe};
+use crate::windows_exe;
+use crate::{ExeInfo, Pid, Probe, ProbeError, ProcDetails, Result, Sample};
 
 /// Not in the public headers: lists processes without their threads (recent Windows 11).
 const SYSTEM_BASIC_PROCESS_INFORMATION: SYSTEM_INFORMATION_CLASS = 252;
@@ -229,8 +230,6 @@ pub struct WindowsProbe {
     self_pid: Pid,
     /// PIDs owning a visible top-level window, refreshed every tick.
     windowed: HashSet<Pid>,
-    /// Expensive per-process details stay on `sysinfo` until they are measured.
-    details: SysinfoProbe,
 }
 
 impl WindowsProbe {
@@ -260,7 +259,6 @@ impl WindowsProbe {
             memory_total_bytes: memory.ullTotalPhys,
             self_pid: std::process::id(),
             windowed: HashSet::with_capacity(512),
-            details: SysinfoProbe::new()?,
         })
     }
 
@@ -525,7 +523,34 @@ impl Probe for WindowsProbe {
     }
 
     fn details(&mut self, pids: &[Pid], out: &mut Vec<ProcDetails>) -> Result<()> {
-        self.details.details(pids, out)
+        out.clear();
+        for &pid in pids {
+            // The handle kept for sampling, or a short-lived one (fallback mode keeps none).
+            let entry = self.entries.get(&pid);
+            let temporary;
+            let handle = match entry.and_then(|e| e.handle.as_ref()) {
+                Some(handle) => handle,
+                None => {
+                    temporary = open(pid);
+                    match temporary.as_ref() {
+                        Some(handle) => handle,
+                        None => continue,
+                    }
+                }
+            };
+            out.push(ProcDetails {
+                pid,
+                start_time: entry.map_or(0, |e| e.start_time),
+                exe: windows_exe::image_path(handle),
+                // Read on demand (it means reading the other process's memory), not here.
+                command_line: Vec::new(),
+            });
+        }
+        Ok(())
+    }
+
+    fn exe_info(&mut self, exe: &std::path::Path) -> ExeInfo {
+        windows_exe::exe_info(exe)
     }
 }
 
@@ -567,7 +592,7 @@ mod tests {
     #[test]
     fn matches_sysinfo() {
         let mut native = WindowsProbe::new().expect("probe");
-        let mut reference = SysinfoProbe::new().expect("probe");
+        let mut reference = crate::SysinfoProbe::new().expect("probe");
         let (mut a, mut b) = (Sample::default(), Sample::default());
         native.sample(&mut a).expect("sample");
         reference.sample(&mut b).expect("sample");
@@ -628,5 +653,30 @@ mod desktop_tests {
             assert_eq!(shell.name.to_lowercase(), "explorer.exe");
             assert!(sample.processes.iter().any(|p| p.has_window));
         }
+    }
+}
+
+#[cfg(test)]
+mod details_tests {
+    use super::*;
+
+    #[test]
+    fn own_executable_and_its_icon() {
+        let mut probe = WindowsProbe::new().expect("probe");
+        let mut sample = Sample::default();
+        probe.sample(&mut sample).expect("sample");
+        let mut details = Vec::new();
+        probe
+            .details(&[sample.self_pid, 4], &mut details)
+            .expect("details");
+        // System cannot be opened without elevation: it is left out, not an error.
+        let own = details
+            .iter()
+            .find(|d| d.pid == sample.self_pid)
+            .expect("own details");
+        let exe = own.exe.as_ref().expect("own executable path");
+        assert_eq!(Some(exe.as_path()), std::env::current_exe().ok().as_deref());
+        // Test binaries have no icon resource; the call must still answer.
+        let _ = probe.exe_info(exe);
     }
 }

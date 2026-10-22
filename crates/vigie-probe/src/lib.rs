@@ -3,6 +3,8 @@
 mod sysinfo_probe;
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+mod windows_exe;
 
 use std::path::PathBuf;
 
@@ -99,9 +101,31 @@ pub struct ProcDetails {
     pub command_line: Vec<String>,
 }
 
+/// An icon as straight (not premultiplied) RGBA pixels, row by row from the top.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Icon {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// What an executable file says about itself. Shared by every process of that executable.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ExeInfo {
+    pub icon: Option<Icon>,
+    pub publisher: Option<String>,
+    /// A readable name, such as "Brave Browser" for brave.exe.
+    pub description: Option<String>,
+}
+
 pub trait Probe: Send {
     /// One pass over the system. Cheap fields only: called every tick.
     fn sample(&mut self, out: &mut Sample) -> Result<()>;
     /// Expensive, rarely changing fields (exe path, command line, publisher, icon key) for some PIDs.
+    /// Processes that cannot be read are left out.
     fn details(&mut self, pids: &[Pid], out: &mut Vec<ProcDetails>) -> Result<()>;
+    /// Icon, publisher and description of an executable. Call once per path and cache.
+    fn exe_info(&mut self, _exe: &std::path::Path) -> ExeInfo {
+        ExeInfo::default()
+    }
 }
