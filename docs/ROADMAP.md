@@ -11,6 +11,16 @@ Each milestone ends with something you can run and show. Estimates are evenings 
 
 **Done when:** the window runs on the three systems and the overhead numbers are printed (the budget is enforced from M1).
 
+## Design track (runs alongside the milestones)
+
+Vigie should look as good as it is light. Design work has its own deliverables, reviewed with screenshots.
+
+* **D1 — Identity:** logo and app icon (readable at 16 px in the taskbar and the tray), palette, typography, art direction, short brand guide in `docs/BRAND.md`, masters in `assets/brand/`.
+* **D2 — Interface art direction (before M1 ends):** design tokens as a Slint global (colours for dark and light, type scale, spacing, radii), table density, heat colours, status bar; applied over the native styles without fighting them.
+* **D3 — UX pass per milestone:** each milestone ends with a screenshot review of its views (empty, loading, error and privilege-limited states included) and a list of fixes.
+
+**Done when:** each item has its screenshots and its decision recorded; D2 lands before M1 is called done.
+
 ## M1 — Processes (2 weeks)
 
 * Apps / background processes / system grouping, expandable process tree.
