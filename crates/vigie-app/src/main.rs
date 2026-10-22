@@ -37,6 +37,15 @@ fn main() -> anyhow::Result<()> {
     app.set_icons(ModelRc::from(Rc::new(VecModel::<slint::Image>::default())));
     app.set_search_text(options.filter.as_str().into());
     show_sort(&app, options.sort);
+    if let Some(columns) = &options.columns {
+        let has = |name: &str| columns.iter().any(|c| c == name);
+        app.set_columns(ColumnSet {
+            publisher: has("publisher"),
+            pid: has("pid"),
+            cpu: has("cpu"),
+            memory: has("memory"),
+        });
+    }
 
     let about: Rc<RefCell<Option<AboutWindow>>> = Rc::default();
     app.on_show_about(move || {

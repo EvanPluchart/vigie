@@ -97,6 +97,7 @@ fn proc_row(row: &Row) -> ProcRow {
         name: row.name.as_str().into(),
         pid,
         start: (row.start_time & 0x7fff_ffff) as i32,
+        publisher: row.publisher.as_deref().unwrap_or_default().into(),
         cpu: if figures {
             format_cpu(row.cpu_percent)
         } else {
@@ -234,6 +235,7 @@ mod tests {
             count: 2,
             expanded: true,
             icon: None,
+            publisher: None,
         };
         let group = proc_row(&process(RowKind::Group(Group::Apps)));
         let parent = proc_row(&process(RowKind::Process));

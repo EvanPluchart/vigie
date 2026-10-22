@@ -19,10 +19,19 @@ export struct ProcRow {
     pid: int,
     // Start time (low 31 bits): with the PID, names this process for actions.
     start: int,
+    publisher: string,
     cpu: string,
     memory: string,
     cpu-heat: int,
     memory-heat: int,
+}
+
+// Optional columns; Name is always shown.
+export struct ColumnSet {
+    publisher: bool,
+    pid: bool,
+    cpu: bool,
+    memory: bool,
 }
 
 component Cell inherits Text {
@@ -120,6 +129,7 @@ component Chevron inherits Path {
 component ProcessLine inherits Rectangle {
     in property <ProcRow> item;
     in property <image> icon;
+    in property <ColumnSet> columns;
     callback toggle(int);
     Columns {
         HorizontalLayout {
@@ -170,9 +180,10 @@ component ProcessLine inherits Rectangle {
                 horizontal-stretch: 1;
             }
         }
-        Cell { text: root.item.pid; width: 72px; horizontal-alignment: right; color: Theme.text-muted; }
-        HeatCell { text: root.item.cpu; heat: root.item.cpu-heat; width: 72px; }
-        HeatCell { text: root.item.memory; heat: root.item.memory-heat; width: 96px; }
+        if root.columns.publisher: Cell { text: root.item.publisher; width: 160px; color: Theme.text-muted; }
+        if root.columns.pid: Cell { text: root.item.pid; width: 72px; horizontal-alignment: right; color: Theme.text-muted; }
+        if root.columns.cpu: HeatCell { text: root.item.cpu; heat: root.item.cpu-heat; width: 72px; }
+        if root.columns.memory: HeatCell { text: root.item.memory; heat: root.item.memory-heat; width: 96px; }
     }
 }
 
@@ -216,6 +227,7 @@ export component AppWindow inherits Window {
     in property <int> sort-column: 2;
     in property <bool> sort-ascending;
     in-out property <string> search-text;
+    in-out property <ColumnSet> columns: { publisher: false, pid: true, cpu: true, memory: true };
     callback show-about();
     callback sort-clicked(int);
     callback search-edited(string);
@@ -301,31 +313,62 @@ export component AppWindow inherits Window {
             }
             LineEdit {
                 width: 260px;
-                placeholder-text: @tr("Search name or PID");
+                placeholder-text: @tr("Search name, PID or publisher");
                 text <=> root.search-text;
                 edited(text) => { root.search-edited(text); }
             }
         }
 
-        Rectangle {
+        // Right-click the header to choose the columns.
+        ContextMenuArea {
             height: Theme.bar-height;
+            Menu {
+                MenuItem {
+                    title: @tr("Publisher");
+                    checkable: true;
+                    checked: root.columns.publisher;
+                    activated => { root.columns.publisher = !root.columns.publisher; }
+                }
+                MenuItem {
+                    title: @tr("PID");
+                    checkable: true;
+                    checked: root.columns.pid;
+                    activated => { root.columns.pid = !root.columns.pid; }
+                }
+                MenuItem {
+                    title: @tr("CPU");
+                    checkable: true;
+                    checked: root.columns.cpu;
+                    activated => { root.columns.cpu = !root.columns.cpu; }
+                }
+                MenuItem {
+                    title: @tr("Memory");
+                    checkable: true;
+                    checked: root.columns.memory;
+                    activated => { root.columns.memory = !root.columns.memory; }
+                }
+            }
             Columns {
                 SortHeader {
                     label: @tr("Name"); column: 0; horizontal-stretch: 1;
                     sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                     clicked(c) => { root.sort-clicked(c); }
                 }
-                SortHeader {
+                if root.columns.publisher: HeaderCell {
+                    text: @tr("Publisher");
+                    width: 160px;
+                }
+                if root.columns.pid: SortHeader {
                     label: @tr("PID"); column: 1; width: 72px; alignment: right;
                     sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                     clicked(c) => { root.sort-clicked(c); }
                 }
-                SortHeader {
+                if root.columns.cpu: SortHeader {
                     label: @tr("CPU"); column: 2; width: 72px; alignment: right;
                     sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                     clicked(c) => { root.sort-clicked(c); }
                 }
-                SortHeader {
+                if root.columns.memory: SortHeader {
                     label: @tr("Memory"); column: 3; width: 96px; alignment: right;
                     sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                     clicked(c) => { root.sort-clicked(c); }
@@ -387,6 +430,7 @@ export component AppWindow inherits Window {
                     ProcessLine {
                         item: row;
                         icon: root.icons[row.icon];
+                        columns: root.columns;
                         toggle(pid) => { root.toggle-clicked(pid); }
                     }
                 }

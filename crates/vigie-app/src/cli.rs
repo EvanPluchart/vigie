@@ -5,7 +5,7 @@ use std::time::Duration;
 use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID]";
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory]";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
@@ -21,6 +21,8 @@ pub struct Options {
     /// Opens the menu action ACTION (code from ui/app.slint) on PID at start, without running
     /// it: shows the confirmation, for screenshots.
     pub ask: Option<(i32, u32)>,
+    /// Optional columns to show; `None` keeps the defaults.
+    pub columns: Option<Vec<String>>,
 }
 
 impl Default for Options {
@@ -33,6 +35,7 @@ impl Default for Options {
             about: false,
             expand: Vec::new(),
             ask: None,
+            columns: None,
         }
     }
 }
@@ -65,6 +68,16 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
                     .split_once(':')
                     .and_then(|(code, pid)| Some((code.parse().ok()?, pid.parse().ok()?)));
                 options.ask = Some(parsed.ok_or_else(|| format!("invalid --ask `{value}`"))?);
+            }
+            ("--columns", Some(list)) => {
+                let names: Vec<String> = list.split(',').map(str::to_owned).collect();
+                if let Some(bad) = names
+                    .iter()
+                    .find(|n| !["publisher", "pid", "cpu", "memory"].contains(&n.as_str()))
+                {
+                    return Err(format!("unknown column `{bad}`"));
+                }
+                options.columns = Some(names);
             }
             ("--expand", Some(pid)) => options
                 .expand
@@ -124,6 +137,7 @@ mod tests {
                 about: false,
                 expand: Vec::new(),
                 ask: None,
+                columns: None,
             }
         );
     }

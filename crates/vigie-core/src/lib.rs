@@ -92,6 +92,7 @@ pub struct Row {
     pub expanded: bool,
     /// Icon of the process's executable, as an index chosen by the caller of `set_details`.
     pub icon: Option<u32>,
+    pub publisher: Option<Arc<str>>,
 }
 
 /// Rarely changing facts about a process, read by the sampler from `Probe::details` and
@@ -299,6 +300,9 @@ impl Core {
             let p = nodes[node].p;
             Row {
                 icon: details.get(&(p.pid, p.start_time)).and_then(|d| d.icon),
+                publisher: details
+                    .get(&(p.pid, p.start_time))
+                    .and_then(|d| d.publisher.clone()),
                 kind,
                 pid: p.pid,
                 start_time: p.start_time,
@@ -329,6 +333,7 @@ impl Core {
                     count: count as u32,
                     expanded: true,
                     icon: None,
+                    publisher: None,
                 },
                 Entry::Process { node, depth, total } => {
                     let p = nodes[node].p;
