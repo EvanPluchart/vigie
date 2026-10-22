@@ -79,13 +79,18 @@ fn icon_pixels(icon: HICON) -> Option<Icon> {
     }
     let (width, height, mut bgra) = color?;
     // Old icons have no alpha channel: take transparency from the mask (white is transparent).
-    if bgra.chunks_exact(4).all(|p| p[3] == 0) {
+    if bgra.as_chunks::<4>().0.iter().all(|p| p[3] == 0) {
         let (_, _, mask) = mask?;
-        for (pixel, m) in bgra.chunks_exact_mut(4).zip(mask.chunks_exact(4)) {
+        for (pixel, m) in bgra
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(mask.as_chunks::<4>().0.iter())
+        {
             pixel[3] = if m[0] == 0 { 255 } else { 0 };
         }
     }
-    for pixel in bgra.chunks_exact_mut(4) {
+    for pixel in bgra.as_chunks_mut::<4>().0.iter_mut() {
         pixel.swap(0, 2);
     }
     Some(Icon {
@@ -172,7 +177,9 @@ fn version_strings(path: &[u16]) -> (Option<String>, Option<String>) {
     let string = |name: &str| {
         let bytes = query(&data, &format!("\\StringFileInfo\\{translation}\\{name}"))?;
         let units: Vec<u16> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .take_while(|&u| u != 0)
             .collect();
@@ -216,11 +223,11 @@ mod tests {
         let icon = info.icon.expect("explorer has an icon");
         assert_eq!(icon.rgba.len(), (icon.width * icon.height * 4) as usize);
         assert!(
-            icon.rgba.chunks_exact(4).any(|p| p[3] == 255),
+            icon.rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 255),
             "some opaque pixels"
         );
         assert!(
-            icon.rgba.chunks_exact(4).any(|p| p[3] == 0),
+            icon.rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 0),
             "some transparent pixels"
         );
         assert_eq!(info.publisher.as_deref(), Some("Microsoft Corporation"));
