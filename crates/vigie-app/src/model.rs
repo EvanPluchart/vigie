@@ -238,6 +238,14 @@ pub fn perf_ui(frame: &PerfFrame, perf: &Performance, info: &SystemInfo) -> Perf
         )
         .into(),
         memory_compressed: format_memory(memory.compressed),
+        memory_slots: match info.memory_slots {
+            Some(slots) => match slots.speed_mts {
+                Some(speed) => format!("{} of {} · {speed} MT/s", slots.used, slots.total),
+                None => format!("{} of {}", slots.used, slots.total),
+            }
+            .into(),
+            None => "—".into(),
+        },
         pressure: match frame.pressure {
             Pressure::Low => 0,
             Pressure::Medium => 1,
@@ -266,7 +274,7 @@ pub fn perf_ui(frame: &PerfFrame, perf: &Performance, info: &SystemInfo) -> Perf
         .map(|(disk, history)| {
             let (line, area) = graph_paths(history.iter(), HISTORY, 100.0, W, H);
             DiskCard {
-                title: format!("Disk {}", disk.index).into(),
+                title: disk_title(disk.index, disk.letters).into(),
                 active: format_percent(disk.active_percent),
                 read: format_bytes_per_s(disk.read_per_s),
                 write: format_bytes_per_s(disk.write_per_s),
@@ -310,6 +318,19 @@ pub fn perf_ui(frame: &PerfFrame, perf: &Performance, info: &SystemInfo) -> Perf
         cores: frame.core_percents.clone(),
         disks,
         gpus,
+    }
+}
+
+/// "Disk 0 (C: D:)", as Windows users know their disks.
+fn disk_title(index: u32, letters: u32) -> String {
+    let drives: Vec<String> = (0..26u8)
+        .filter(|bit| letters & (1 << bit) != 0)
+        .map(|bit| format!("{}:", char::from(b'A' + bit)))
+        .collect();
+    if drives.is_empty() {
+        format!("Disk {index}")
+    } else {
+        format!("Disk {index} ({})", drives.join(" "))
     }
 }
 
@@ -614,5 +635,7 @@ mod tests {
         assert_eq!(format_cpu(Some(12.345)), "12.3 %");
         assert_eq!(format_memory(3 * 1024 * 1024 / 2), "1.5 MB");
         assert_eq!(format_memory(3_800_000_000), "3.54 GB");
+        assert_eq!(disk_title(0, 0b1100), "Disk 0 (C: D:)");
+        assert_eq!(disk_title(1, 0), "Disk 1");
     }
 }

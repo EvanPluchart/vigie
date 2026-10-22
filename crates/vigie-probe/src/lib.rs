@@ -158,6 +158,8 @@ pub struct NetCounters {
 pub struct DiskCounters {
     /// 0 for the first physical disk, as Windows numbers them.
     pub index: u32,
+    /// Drive letters on this disk: bit 0 is A:, bit 2 is C:.
+    pub letters: u32,
     pub read_bytes: u64,
     pub written_bytes: u64,
     /// Time the disk was busy, and the clock it is measured against, in nanoseconds.
@@ -202,6 +204,17 @@ pub struct SystemInfo {
     pub logical_cores: u32,
     /// Hardware GPUs, by `GpuCounters::index`.
     pub gpus: Vec<String>,
+    /// From the firmware, when it says.
+    pub memory_slots: Option<MemorySlots>,
+}
+
+/// Physical memory slots, as the firmware describes them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MemorySlots {
+    pub used: u32,
+    pub total: u32,
+    /// Configured speed of the installed modules, in megatransfers per second.
+    pub speed_mts: Option<u32>,
 }
 
 /// An icon as straight (not premultiplied) RGBA pixels, row by row from the top.

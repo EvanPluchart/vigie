@@ -6,7 +6,7 @@ use windows_sys::Wdk::System::SystemInformation::{
 use windows_sys::Win32::System::ProcessStatus::{K32GetPerformanceInfo, PERFORMANCE_INFORMATION};
 use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
 use windows_sys::Win32::System::SystemInformation::{
-    GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX,
+    GetSystemFirmwareTable, GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX, RSMB,
 };
 use windows_sys::Win32::System::WindowsProgramming::SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION;
 
@@ -19,10 +19,11 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
 use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, GetLogicalDrives,
+    IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::IO::DeviceIoControl;
-use windows_sys::Win32::System::Ioctl::{DISK_PERFORMANCE, IOCTL_DISK_PERFORMANCE};
+use windows_sys::Win32::System::Ioctl::{DISK_EXTENT, DISK_PERFORMANCE, IOCTL_DISK_PERFORMANCE};
 
 use crate::{CoreTimes, DiskCounters, MemoryInfo, NetCounters, ProbeError, Result};
 
@@ -172,6 +173,8 @@ impl Network {
 #[derive(Default)]
 pub(crate) struct Disks {
     open: Vec<(u32, OwnedHandle)>,
+    /// Drive letters per disk number (bit 0 is A:), found at each scan.
+    letters: Vec<(u32, u32)>,
     reads_since_scan: u32,
 }
 
@@ -208,6 +211,7 @@ impl Disks {
             let query = perf.QueryTime as u64;
             out.push(DiskCounters {
                 index: *index,
+                letters: self.letters_of(*index),
                 read_bytes: perf.BytesRead as u64,
                 written_bytes: perf.BytesWritten as u64,
                 active_ns: query.saturating_sub(perf.IdleTime as u64) * 100,
@@ -241,12 +245,150 @@ impl Disks {
             self.open
                 .push((index, unsafe { OwnedHandle::from_raw_handle(raw) }));
         }
+        self.letters = drive_letters();
+    }
+}
+
+/// Which drive letters live on which physical disk: bit 0 is A:, keyed by disk number.
+fn drive_letters() -> Vec<(u32, u32)> {
+    #[repr(C)]
+    struct Extents {
+        count: u32,
+        extents: [DISK_EXTENT; 4],
+    }
+    let mut map: Vec<(u32, u32)> = Vec::new();
+    // SAFETY: plain call; a bit per existing drive letter.
+    let drives = unsafe { GetLogicalDrives() };
+    for letter in 0..26u32 {
+        if drives & (1 << letter) == 0 {
+            continue;
+        }
+        let path: Vec<u16> = format!("\\\\.\\{}:\0", char::from(b'A' + letter as u8))
+            .encode_utf16()
+            .collect();
+        // SAFETY: NUL-terminated path; no access rights, so no I/O can happen.
+        let raw = unsafe {
+            CreateFileW(
+                path.as_ptr(),
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
+        if raw == INVALID_HANDLE_VALUE || raw.is_null() {
+            continue;
+        }
+        // SAFETY: a fresh handle nothing else owns; closed when dropped.
+        let volume = unsafe { OwnedHandle::from_raw_handle(raw) };
+        // SAFETY: an all-zero Extents is a valid out buffer.
+        let mut extents: Extents = unsafe { std::mem::zeroed() };
+        let mut returned = 0u32;
+        // SAFETY: live volume handle; `extents` is valid for its size. Volumes on more than four
+        // extents fail and are skipped.
+        let ok = unsafe {
+            DeviceIoControl(
+                volume.as_raw_handle(),
+                IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                std::ptr::null(),
+                0,
+                (&mut extents as *mut Extents).cast(),
+                size_of::<Extents>() as u32,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            continue;
+        }
+        for extent in &extents.extents[..(extents.count as usize).min(4)] {
+            match map.iter_mut().find(|(disk, _)| *disk == extent.DiskNumber) {
+                Some((_, bits)) => *bits |= 1 << letter,
+                None => map.push((extent.DiskNumber, 1 << letter)),
+            }
+        }
+    }
+    map
+}
+
+impl Disks {
+    fn letters_of(&self, disk: u32) -> u32 {
+        self.letters
+            .iter()
+            .find(|(d, _)| *d == disk)
+            .map_or(0, |(_, bits)| *bits)
     }
 }
 
 pub(crate) fn uptime_s() -> u64 {
     // SAFETY: plain call.
     unsafe { GetTickCount64() / 1000 }
+}
+
+/// Memory slots from the firmware's SMBIOS tables (type 17, "memory device"): how many are
+/// filled, how many exist, and the configured speed. `None` when the firmware does not say.
+pub(crate) fn memory_slots() -> Option<crate::MemorySlots> {
+    // SAFETY: with a null buffer the call only reports the size needed.
+    let size = unsafe { GetSystemFirmwareTable(RSMB, 0, std::ptr::null_mut(), 0) };
+    if size == 0 {
+        return None;
+    }
+    let mut raw = vec![0u8; size as usize];
+    // SAFETY: `raw` is valid for `size` bytes.
+    if unsafe { GetSystemFirmwareTable(RSMB, 0, raw.as_mut_ptr(), size) } != size {
+        return None;
+    }
+    parse_memory_slots(&raw)
+}
+
+/// Parses the RawSMBIOSData that `GetSystemFirmwareTable('RSMB')` returns: an 8-byte header,
+/// then structures, each a formatted area followed by strings ending with two NULs.
+fn parse_memory_slots(raw: &[u8]) -> Option<crate::MemorySlots> {
+    const HEADER: usize = 8;
+    const MEMORY_DEVICE: u8 = 17;
+    let length = u32::from_le_bytes(raw.get(4..8)?.try_into().ok()?) as usize;
+    let table = raw.get(HEADER..HEADER + length)?;
+    let word = |s: &[u8], at: usize| s.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    let (mut total, mut used, mut speed) = (0u32, 0u32, 0u32);
+    let mut at = 0;
+    while at + 4 <= table.len() {
+        let kind = table[at];
+        let formatted = usize::from(table[at + 1]);
+        if formatted < 4 || at + formatted > table.len() {
+            break;
+        }
+        let structure = &table[at..at + formatted];
+        if kind == MEMORY_DEVICE {
+            total += 1;
+            // Size at 0x0C: 0 is an empty slot, 0xFFFF unknown.
+            if let Some(size) = word(structure, 0x0C)
+                && size != 0
+                && size != 0xFFFF
+            {
+                used += 1;
+                // Configured speed (0x20) when present, else the rated speed (0x15), in MT/s.
+                let configured = word(structure, 0x20).unwrap_or(0);
+                let rated = word(structure, 0x15).unwrap_or(0);
+                speed = speed.max(u32::from(if configured != 0 { configured } else { rated }));
+            }
+        }
+        if kind == 127 {
+            break; // End of table.
+        }
+        // Skip the strings: they end with a double NUL.
+        let mut next = at + formatted;
+        while next + 1 < table.len() && !(table[next] == 0 && table[next + 1] == 0) {
+            next += 1;
+        }
+        at = next + 2;
+    }
+    (total > 0).then_some(crate::MemorySlots {
+        used,
+        total,
+        speed_mts: (speed > 0).then_some(speed),
+    })
 }
 
 /// The processor's marketing name, as Windows records it.
@@ -319,11 +461,46 @@ mod tests {
         assert!(info.committed > 0 && info.committed <= info.commit_limit);
         assert!(uptime_s() > 0);
         assert!(!cpu_model().is_empty());
+        // Physical machines describe their memory slots; VMs may not.
+        if let Some(slots) = memory_slots() {
+            assert!(slots.used >= 1 && slots.used <= slots.total);
+        }
         // A machine running these tests has a network interface up (or none at all).
         let mut network = Network::default();
         if let Some(net) = network.read() {
             let later = network.read().expect("still readable");
             assert!(later.received >= net.received && later.sent >= net.sent);
         }
+    }
+}
+
+#[cfg(test)]
+mod smbios_tests {
+    use super::*;
+
+    /// A table with two memory devices (one filled at 6000 MT/s, one empty) and an end marker.
+    #[test]
+    fn parses_memory_devices() {
+        let device = |size: u16, speed: u16| {
+            let mut s = vec![0u8; 0x22];
+            s[0] = 17;
+            s[1] = 0x22;
+            s[0x0C..0x0E].copy_from_slice(&size.to_le_bytes());
+            s[0x20..0x22].copy_from_slice(&speed.to_le_bytes());
+            s.extend_from_slice(b"DIMM_A1\0\0");
+            s
+        };
+        let mut table = device(16384, 6000);
+        table.extend(device(0, 0));
+        table.extend([127, 4, 0, 0, 0, 0]);
+        let mut raw = vec![0, 3, 4, 0];
+        raw.extend((table.len() as u32).to_le_bytes());
+        raw.extend(table);
+        let slots = parse_memory_slots(&raw).expect("slots");
+        assert_eq!(
+            (slots.used, slots.total, slots.speed_mts),
+            (1, 2, Some(6000))
+        );
+        assert!(parse_memory_slots(&[0; 4]).is_none());
     }
 }

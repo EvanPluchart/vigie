@@ -596,6 +596,7 @@ impl Probe for WindowsProbe {
             cpu_model: crate::windows_system::cpu_model(),
             logical_cores: self.logical_cores,
             gpus: self.gpus.names(),
+            memory_slots: crate::windows_system::memory_slots(),
         }
     }
 }
@@ -748,5 +749,9 @@ mod system_tests {
         // The machine running the tests boots from a disk Windows can count.
         assert!(!system.disks.is_empty(), "no physical disk readable");
         assert!(system.disks.iter().all(|d| d.active_ns <= d.clock_ns));
+        assert!(
+            system.disks.iter().any(|d| d.letters & (1 << 2) != 0),
+            "the system drive C: sits on a listed disk"
+        );
     }
 }

@@ -426,6 +426,12 @@ export component AppWindow inherits Window {
                 search.focus();
                 return accept;
             }
+            // Ctrl+1 and Ctrl+2 switch views, in rail order.
+            if (event.modifiers.control && (event.text == "1" || event.text == "2")) {
+                root.tab = event.text == "1" ? 0 : 1;
+                root.tab-changed(root.tab);
+                return accept;
+            }
             if (event.text == Key.Escape && root.searching) {
                 root.clear-search();
                 return accept;

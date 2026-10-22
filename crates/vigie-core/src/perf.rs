@@ -106,6 +106,8 @@ impl Pressure {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DiskView {
     pub index: u32,
+    /// Drive letters on the disk, bit 0 is A: (see `DiskCounters::letters`).
+    pub letters: u32,
     /// Busy share of the last interval, 0 to 100.
     pub active_percent: Option<f32>,
     pub read_per_s: Option<f64>,
@@ -214,6 +216,7 @@ impl Performance {
             let before = self.prev_disks.iter().find(|d| d.index == now.index);
             let mut view = DiskView {
                 index: now.index,
+                letters: now.letters,
                 ..DiskView::default()
             };
             if let Some(before) = before
@@ -367,6 +370,7 @@ mod tests {
             }),
             disks: vec![DiskCounters {
                 index: 0,
+                letters: 0,
                 read_bytes: disk.0,
                 written_bytes: disk.1,
                 active_ns: disk.2,

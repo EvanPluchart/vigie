@@ -35,6 +35,7 @@ export struct PerfView {
     memory-cached: string,
     memory-committed: string,
     memory-compressed: string,
+    memory-slots: string,
     // 0 low, 1 medium, 2 high (see vigie_core::perf::Pressure).
     pressure: int,
     memory-line: string,
@@ -84,6 +85,8 @@ component Graph inherits Rectangle {
         height: 100%;
         viewbox-width: 300;
         viewbox-height: 100;
+        // Stretch to the graph box: the default keeps the 3:1 aspect and leaves a gap.
+        fit: fill;
         commands: root.area;
         fill: root.tint.with-alpha(0.14);
     }
@@ -92,6 +95,8 @@ component Graph inherits Rectangle {
         height: 100%;
         viewbox-width: 300;
         viewbox-height: 100;
+        // Stretch to the graph box: the default keeps the 3:1 aspect and leaves a gap.
+        fit: fill;
         commands: root.line;
         stroke: root.tint;
         stroke-width: 1.5px;
@@ -101,6 +106,8 @@ component Graph inherits Rectangle {
         height: 100%;
         viewbox-width: 300;
         viewbox-height: 100;
+        // Stretch to the graph box: the default keeps the 3:1 aspect and leaves a gap.
+        fit: fill;
         commands: root.second-line;
         stroke: root.second-tint;
         stroke-width: 1.5px;
@@ -203,6 +210,7 @@ export component PerformanceView inherits Rectangle {
                     Stat { label: @tr("Cached"); value: root.view.memory-cached; }
                     Stat { label: @tr("Committed"); value: root.view.memory-committed; }
                     Stat { label: @tr("Compressed"); value: root.view.memory-compressed; }
+                    Stat { label: @tr("Slots"); value: root.view.memory-slots; }
                     Stat {
                         label: @tr("Pressure");
                         value: root.view.pressure == 2 ? @tr("High") : root.view.pressure == 1 ? @tr("Medium") : @tr("Low");
