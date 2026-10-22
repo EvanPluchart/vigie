@@ -17,6 +17,8 @@ export struct ProcRow {
     icon: int,
     name: string,
     pid: int,
+    // Start time (low 31 bits): with the PID, names this process for actions.
+    start: int,
     cpu: string,
     memory: string,
     cpu-heat: int,
@@ -218,6 +220,60 @@ export component AppWindow inherits Window {
     callback sort-clicked(int);
     callback search-edited(string);
     callback toggle-clicked(int);
+    // Last action's outcome, shown in the status bar (see src/model.rs for the codes).
+    in-out property <int> notice-kind;
+    in property <string> notice-name;
+    in property <int> notice-pid;
+    in property <int> notice-count;
+    callback request-action(int, int, int);
+
+    // Action codes shared with src/main.rs.
+    // 0 end, 1 end tree, 2 suspend, 3 resume, 4-8 priority (low to high), 9 reveal, 10 copy.
+    property <bool> confirm-open;
+    property <int> confirm-action;
+    property <string> confirm-name;
+    property <int> confirm-pid;
+    property <int> confirm-start;
+    property <int> confirm-count;
+
+    // Destructive actions ask first and name their target; the others run at once.
+    public function ask(item: ProcRow, action: int) {
+        if (action == 3 || action >= 9) {
+            root.request-action(item.pid, item.start, action);
+            return;
+        }
+        root.confirm-action = action;
+        root.confirm-name = item.name;
+        root.confirm-pid = item.pid;
+        root.confirm-start = item.start;
+        root.confirm-count = item.count;
+        root.confirm-open = true;
+    }
+
+    function priority-name(action: int) -> string {
+        return action == 4 ? @tr("Low") : action == 5 ? @tr("Below normal") : action == 6 ? @tr("Normal")
+            : action == 7 ? @tr("Above normal") : @tr("High");
+    }
+
+    function notice-text() -> string {
+        return root.notice-kind == 1 ? @tr("Ended {} (PID {})", root.notice-name, root.notice-pid)
+            : root.notice-kind == 2 ? @tr("Ended {} (PID {}) and {} child processes", root.notice-name, root.notice-pid, root.notice-count)
+            : root.notice-kind == 3 ? @tr("Suspended {} (PID {})", root.notice-name, root.notice-pid)
+            : root.notice-kind == 4 ? @tr("Resumed {} (PID {})", root.notice-name, root.notice-pid)
+            : root.notice-kind == 5 ? @tr("Changed the priority of {} (PID {})", root.notice-name, root.notice-pid)
+            : root.notice-kind == 6 ? @tr("Copied the command line of {} (PID {})", root.notice-name, root.notice-pid)
+            : root.notice-kind == 7 ? @tr("{} (PID {}) has already exited", root.notice-name, root.notice-pid)
+            : root.notice-kind == 8 ? @tr("Access denied for {} (PID {}). Restart Vigie as administrator to act on it.", root.notice-name, root.notice-pid)
+            : root.notice-kind == 9 ? @tr("Could not act on {} (PID {})", root.notice-name, root.notice-pid)
+            : "";
+    }
+
+    // A notice stays a few seconds, then the status bar shows the process count again.
+    Timer {
+        interval: 6s;
+        running: root.notice-kind != 0;
+        triggered => { root.notice-kind = 0; }
+    }
 
     public function set-dark(dark: bool) {
         Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
@@ -290,10 +346,49 @@ export component AppWindow inherits Window {
                     group: row.group;
                     count: row.count;
                 }
-                if row.kind != 0: ProcessLine {
-                    item: row;
-                    icon: root.icons[row.icon];
-                    toggle(pid) => { root.toggle-clicked(pid); }
+                if row.kind != 0: ContextMenuArea {
+                    Menu {
+                        MenuItem {
+                            title: @tr("End task");
+                            activated => { root.ask(row, 0); }
+                        }
+                        MenuItem {
+                            title: @tr("End process tree");
+                            enabled: row.expandable;
+                            activated => { root.ask(row, 1); }
+                        }
+                        MenuSeparator { }
+                        MenuItem {
+                            title: @tr("Suspend");
+                            activated => { root.ask(row, 2); }
+                        }
+                        MenuItem {
+                            title: @tr("Resume");
+                            activated => { root.ask(row, 3); }
+                        }
+                        Menu {
+                            title: @tr("Priority");
+                            MenuItem { title: root.priority-name(4); activated => { root.ask(row, 4); } }
+                            MenuItem { title: root.priority-name(5); activated => { root.ask(row, 5); } }
+                            MenuItem { title: root.priority-name(6); activated => { root.ask(row, 6); } }
+                            MenuItem { title: root.priority-name(7); activated => { root.ask(row, 7); } }
+                            MenuItem { title: root.priority-name(8); activated => { root.ask(row, 8); } }
+                        }
+                        MenuSeparator { }
+                        MenuItem {
+                            title: @tr("Open file location");
+                            activated => { root.ask(row, 9); }
+                        }
+                        MenuItem {
+                            title: @tr("Copy command line");
+                            activated => { root.ask(row, 10); }
+                        }
+                    }
+                    ProcessLine {
+                        item: row;
+                        icon: root.icons[row.icon];
+                        toggle(pid) => { root.toggle-clicked(pid); }
+                    }
                 }
             }
         }
@@ -325,14 +420,81 @@ export component AppWindow inherits Window {
                     }
                 }
                 Cell {
-                    text: @tr("{} processes", root.process-count);
-                    color: Theme.text-muted;
+                    text: root.notice-kind == 0 ? @tr("{} processes", root.process-count) : root.notice-text();
+                    color: root.notice-kind >= 7 ? Theme.danger : Theme.text-muted;
                     font-size: Theme.font-caption;
                     horizontal-stretch: 1;
                 }
                 Button {
                     text: @tr("About");
                     clicked => { root.show-about(); }
+                }
+            }
+        }
+    }
+
+    // Confirmation for destructive actions: names the process, its PID and what will happen.
+    if root.confirm-open: Rectangle {
+        background: #000000.with-alpha(0.45);
+        // Swallow clicks outside the dialog; Escape or Cancel closes it.
+        TouchArea { }
+        FocusScope {
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.confirm-open = false;
+                    return accept;
+                }
+                return reject;
+            }
+            init => { self.focus(); }
+        }
+        Rectangle {
+            width: 420px;
+            height: dialog.preferred-height;
+            background: Theme.raised;
+            border-radius: Theme.radius-panel;
+            border-width: 1px;
+            border-color: Theme.border;
+            dialog := VerticalLayout {
+                padding: Theme.space-6;
+                spacing: Theme.space-3;
+                Text {
+                    text: root.confirm-action == 0 ? @tr("End {} (PID {})?", root.confirm-name, root.confirm-pid)
+                        : root.confirm-action == 1 ? @tr("End {} (PID {}) and its {} child processes?", root.confirm-name, root.confirm-pid, root.confirm-count)
+                        : root.confirm-action == 2 ? @tr("Suspend {} (PID {})?", root.confirm-name, root.confirm-pid)
+                        : @tr("Set the priority of {} (PID {}) to {}?", root.confirm-name, root.confirm-pid, root.priority-name(root.confirm-action));
+                    color: Theme.text;
+                    font-size: Theme.font-section;
+                    font-weight: Theme.weight-strong;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.confirm-action == 0 ? @tr("Unsaved work in this program will be lost.")
+                        : root.confirm-action == 1 ? @tr("Unsaved work in these programs will be lost.")
+                        : root.confirm-action == 2 ? @tr("It stops running until you resume it. Suspending a system process can freeze Windows.")
+                        : @tr("A high priority can slow down the rest of the system.");
+                    color: Theme.text-muted;
+                    font-size: Theme.font-body;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: Theme.space-2;
+                    Button {
+                        text: @tr("Cancel");
+                        clicked => { root.confirm-open = false; }
+                    }
+                    Button {
+                        primary: true;
+                        text: root.confirm-action == 0 ? @tr("End task")
+                            : root.confirm-action == 1 ? @tr("End process tree")
+                            : root.confirm-action == 2 ? @tr("Suspend")
+                            : @tr("Change priority");
+                        clicked => {
+                            root.confirm-open = false;
+                            root.request-action(root.confirm-pid, root.confirm-start, root.confirm-action);
+                        }
+                    }
                 }
             }
         }

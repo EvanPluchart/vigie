@@ -6,10 +6,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use vigie_core::{Core, Details, Pid, Sort};
-use vigie_probe::{Icon, Probe, ProcDetails, Sample, SystemProbe};
+use vigie_probe::{Action, Icon, Probe, ProbeError, ProcDetails, Sample, SystemProbe};
 
 use crate::AppWindow;
-use crate::model::{self, UiFrame};
+use crate::model::{self, Notice, UiFrame};
 
 /// What the UI asks of the sampler. Sorting and filtering run here, not on the UI thread.
 #[derive(Debug)]
@@ -18,6 +18,21 @@ pub enum Command {
     Filter(String),
     /// Expand or collapse the subtree of this PID.
     Toggle(Pid),
+    /// Act on a process, named by its PID and the low 31 bits of its start time. The UI has
+    /// already asked the user to confirm when the action is destructive.
+    Act {
+        pid: Pid,
+        start_low_bits: u32,
+        action: UserAction,
+    },
+}
+
+/// The actions of the process menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserAction {
+    End,
+    EndTree,
+    Probe(Action),
 }
 
 pub struct Settings {
@@ -59,7 +74,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
         match probe.sample(&mut sample) {
             Ok(()) => {
                 let icons = exes.fill(&mut probe, &mut core, &sample);
-                if !send(&window, &mut core, &sample, icons) {
+                if !send(&window, &mut core, &sample, icons, None) {
                     return;
                 }
             }
@@ -75,13 +90,29 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
             let wait = next_tick.saturating_duration_since(Instant::now());
             match commands.recv_timeout(wait) {
                 Ok(command) => {
+                    let mut notice = None;
+                    let mut resample = false;
                     match command {
                         Command::Sort(sort) => core.set_sort(sort),
                         Command::Filter(filter) => core.set_filter(&filter),
                         Command::Toggle(pid) => core.toggle(pid),
+                        Command::Act {
+                            pid,
+                            start_low_bits,
+                            action,
+                        } => {
+                            notice =
+                                execute(&mut probe, &core, &sample, pid, start_low_bits, action);
+                            // Show the effect (a process gone, say) without waiting for the tick.
+                            resample = true;
+                        }
                     }
-                    if !send(&window, &mut core, &sample, Vec::new()) {
+                    if !send(&window, &mut core, &sample, Vec::new(), notice) {
                         return;
+                    }
+                    if resample {
+                        next_tick = Instant::now();
+                        break;
                     }
                 }
                 Err(flume::RecvTimeoutError::Timeout) => break,
@@ -91,14 +122,83 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
     }
 }
 
+/// Runs a user action and describes its outcome for the status bar (`None`: nothing to say).
+fn execute(
+    probe: &mut impl Probe,
+    core: &Core,
+    sample: &Sample,
+    pid: Pid,
+    start_low_bits: u32,
+    action: UserAction,
+) -> Option<Notice> {
+    let name = sample
+        .processes
+        .iter()
+        .find(|p| p.pid == pid)
+        .map(|p| p.name.as_str())
+        .unwrap_or_default();
+    let notice = |kind, count: usize| {
+        Some(Notice {
+            kind,
+            name: name.into(),
+            pid: i32::try_from(pid).unwrap_or(i32::MAX),
+            count: i32::try_from(count).unwrap_or(i32::MAX),
+        })
+    };
+    let failure = |error: ProbeError| match error {
+        ProbeError::Gone => notice(Notice::GONE, 0),
+        ProbeError::Denied => notice(Notice::DENIED, 0),
+        _ => notice(Notice::FAILED, 0),
+    };
+    // The PID must still name the process the user saw.
+    let Some(target) = core.identify(pid, start_low_bits) else {
+        return notice(Notice::GONE, 0);
+    };
+    match action {
+        UserAction::End => match probe.act(target, Action::End) {
+            Ok(()) => notice(Notice::ENDED, 0),
+            Err(error) => failure(error),
+        },
+        UserAction::EndTree => {
+            // Children first, so none is orphaned and restarted by its parent meanwhile.
+            let tree = core.subtree(target);
+            let mut first_error = None;
+            for member in &tree {
+                match probe.act(*member, Action::End) {
+                    // A child may exit on its own while its siblings are ended.
+                    Ok(()) | Err(ProbeError::Gone) => {}
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            match first_error {
+                None => notice(Notice::ENDED_TREE, tree.len().saturating_sub(1)),
+                Some(error) => failure(error),
+            }
+        }
+        UserAction::Probe(action) => match probe.act(target, action) {
+            Ok(()) => match action {
+                Action::Suspend => notice(Notice::SUSPENDED, 0),
+                Action::Resume => notice(Notice::RESUMED, 0),
+                Action::SetPriority(_) => notice(Notice::PRIORITY, 0),
+                Action::CopyCommandLine => notice(Notice::COPIED, 0),
+                Action::End | Action::RevealFile => None,
+            },
+            Err(error) => failure(error),
+        },
+    }
+}
+
 /// Builds a frame and hands it to the UI thread. False once the event loop has quit.
 fn send(
     window: &slint::Weak<AppWindow>,
     core: &mut Core,
     sample: &Sample,
     icons: Vec<(u32, Icon)>,
+    notice: Option<Notice>,
 ) -> bool {
-    let frame = UiFrame::new(core.update(sample), icons);
+    let frame = UiFrame::new(core.update(sample), icons, notice);
     let window = window.clone();
     slint::invoke_from_event_loop(move || model::apply(&window, frame)).is_ok()
 }
@@ -163,5 +263,98 @@ impl ExeCache {
             }
         }
         icons
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vigie_core::Sort;
+    use vigie_probe::{ProcSample, Result, Target};
+
+    use super::*;
+
+    /// Records actions instead of touching any process.
+    #[derive(Default)]
+    struct FakeProbe {
+        acted: Vec<(Pid, Action)>,
+        refuse: Option<Pid>,
+    }
+
+    impl Probe for FakeProbe {
+        fn sample(&mut self, _out: &mut Sample) -> Result<()> {
+            Ok(())
+        }
+        fn details(&mut self, _pids: &[Pid], out: &mut Vec<ProcDetails>) -> Result<()> {
+            out.clear();
+            Ok(())
+        }
+        fn act(&mut self, target: Target, action: Action) -> Result<()> {
+            if self.refuse == Some(target.pid) {
+                return Err(ProbeError::Denied);
+            }
+            self.acted.push((target.pid, action));
+            Ok(())
+        }
+    }
+
+    /// app(20) with children 21 and 22; 22 has child 23.
+    fn family() -> Sample {
+        let p = |pid, parent| ProcSample {
+            pid,
+            parent,
+            start_time: 1_000,
+            name: format!("p{pid}"),
+            ..ProcSample::default()
+        };
+        Sample {
+            logical_cores: 1,
+            processes: vec![
+                p(20, None),
+                p(21, Some(20)),
+                p(22, Some(20)),
+                p(23, Some(22)),
+            ],
+            ..Sample::default()
+        }
+    }
+
+    fn setup() -> (FakeProbe, Core, Sample) {
+        let sample = family();
+        let mut core = Core::new(Sort::default(), "");
+        core.update(&sample);
+        (FakeProbe::default(), core, sample)
+    }
+
+    #[test]
+    fn end_tree_ends_children_first() {
+        let (mut probe, core, sample) = setup();
+        let notice =
+            execute(&mut probe, &core, &sample, 20, 1_000, UserAction::EndTree).expect("notice");
+        let order: Vec<Pid> = probe.acted.iter().map(|(pid, _)| *pid).collect();
+        assert_eq!(order.len(), 4);
+        assert_eq!(order.last(), Some(&20));
+        let at = |pid| order.iter().position(|&p| p == pid).unwrap();
+        assert!(at(23) < at(22));
+        assert_eq!((notice.kind, notice.count), (Notice::ENDED_TREE, 3));
+        assert_eq!(notice.name, "p20");
+    }
+
+    #[test]
+    fn stale_identity_acts_on_nothing() {
+        let (mut probe, core, sample) = setup();
+        let notice = execute(&mut probe, &core, &sample, 20, 999, UserAction::End).expect("notice");
+        assert!(probe.acted.is_empty());
+        assert_eq!(notice.kind, Notice::GONE);
+    }
+
+    #[test]
+    fn failures_are_reported() {
+        let (mut probe, core, sample) = setup();
+        probe.refuse = Some(21);
+        let notice =
+            execute(&mut probe, &core, &sample, 21, 1_000, UserAction::End).expect("notice");
+        assert_eq!(notice.kind, Notice::DENIED);
+        let reveal = UserAction::Probe(Action::RevealFile);
+        assert!(execute(&mut probe, &core, &sample, 20, 1_000, reveal).is_none());
     }
 }

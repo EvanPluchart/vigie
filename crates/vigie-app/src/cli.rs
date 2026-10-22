@@ -5,7 +5,7 @@ use std::time::Duration;
 use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]...";
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID]";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
@@ -18,6 +18,9 @@ pub struct Options {
     pub about: bool,
     /// Processes to show expanded at start, for screenshots.
     pub expand: Vec<u32>,
+    /// Opens the menu action ACTION (code from ui/app.slint) on PID at start, without running
+    /// it: shows the confirmation, for screenshots.
+    pub ask: Option<(i32, u32)>,
 }
 
 impl Default for Options {
@@ -29,6 +32,7 @@ impl Default for Options {
             dark: None,
             about: false,
             expand: Vec::new(),
+            ask: None,
         }
     }
 }
@@ -56,6 +60,12 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--dark", None) => options.dark = Some(true),
             ("--light", None) => options.dark = Some(false),
             ("--about", None) => options.about = true,
+            ("--ask", Some(value)) => {
+                let parsed = value
+                    .split_once(':')
+                    .and_then(|(code, pid)| Some((code.parse().ok()?, pid.parse().ok()?)));
+                options.ask = Some(parsed.ok_or_else(|| format!("invalid --ask `{value}`"))?);
+            }
             ("--expand", Some(pid)) => options
                 .expand
                 .push(pid.parse().map_err(|_| format!("invalid PID `{pid}`"))?),
@@ -113,6 +123,7 @@ mod tests {
                 dark: Some(true),
                 about: false,
                 expand: Vec::new(),
+                ask: None,
             }
         );
     }

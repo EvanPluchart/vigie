@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 pub use tree::Group;
 use tree::{Entry, Figures, Node};
-pub use vigie_probe::{Pid, ProcSample, Sample};
+pub use vigie_probe::{Pid, ProcSample, Sample, Target};
 
 /// Identifies a process across ticks. A PID can be reused, a `(pid, start_time)` pair cannot.
 pub type ProcKey = (Pid, u64);
@@ -143,6 +143,8 @@ pub struct Core {
     /// Start time of each live PID, to resolve UI requests made by PID.
     starts: HashMap<Pid, u64>,
     details: HashMap<ProcKey, Details>,
+    /// Real parent links of the last sample (start times checked), for ending a whole tree.
+    children: HashMap<Pid, Vec<Pid>>,
 }
 
 impl Core {
@@ -174,6 +176,39 @@ impl Core {
                 self.expanded.insert(key);
             }
         }
+    }
+
+    /// The live process with this PID, if its start time ends with these 31 bits (the UI keeps
+    /// only that much). `None` if the PID is gone or now names another process.
+    pub fn identify(&self, pid: Pid, start_low_bits: u32) -> Option<Target> {
+        let &start_time = self.starts.get(&pid)?;
+        (start_time & 0x7fff_ffff == u64::from(start_low_bits))
+            .then_some(Target { pid, start_time })
+    }
+
+    /// The process `target` names and all its descendants, children before their parents (the
+    /// order to end them in). Empty if `target` is no longer the live process with that PID.
+    pub fn subtree(&self, target: Target) -> Vec<Target> {
+        if self.starts.get(&target.pid) != Some(&target.start_time) {
+            return Vec::new();
+        }
+        let mut order = Vec::new();
+        // Iterative post-order; `seen` guards against parent loops.
+        let mut seen = HashSet::new();
+        let mut stack = vec![(target.pid, false)];
+        while let Some((pid, visited)) = stack.pop() {
+            if visited {
+                if let Some(&start_time) = self.starts.get(&pid) {
+                    order.push(Target { pid, start_time });
+                }
+            } else if seen.insert(pid) {
+                stack.push((pid, true));
+                if let Some(kids) = self.children.get(&pid) {
+                    stack.extend(kids.iter().map(|&k| (k, false)));
+                }
+            }
+        }
+        order
     }
 
     /// PIDs in `sample` whose details were never set: ask the probe for these.
@@ -233,6 +268,16 @@ impl Core {
             });
         }
         std::mem::swap(&mut self.prev, &mut self.next);
+        // A parent is trusted only if it started no later than its child (PIDs get reused).
+        self.children.clear();
+        for p in &sample.processes {
+            if let Some(parent) = p.parent
+                && parent != p.pid
+                && self.starts.get(&parent).is_some_and(|&s| s <= p.start_time)
+            {
+                self.children.entry(parent).or_default().push(p.pid);
+            }
+        }
         // Forget what belongs to processes that exited.
         let starts = &self.starts;
         self.expanded
@@ -711,6 +756,33 @@ mod tests {
         };
         core.update(&next);
         assert_eq!(core.missing_details(&next), [20]);
+    }
+
+    #[test]
+    fn subtree_lists_children_before_parents() {
+        let mut core = by_memory();
+        core.update(&desktop_sample());
+        let order: Vec<Pid> = core
+            .subtree(Target {
+                pid: 20,
+                start_time: 100,
+            })
+            .iter()
+            .map(|t| t.pid)
+            .collect();
+        // grandchild before worker, both children before the app.
+        let at = |pid| order.iter().position(|&p| p == pid).expect("listed");
+        assert_eq!(order.len(), 4);
+        assert!(at(23) < at(22) && at(22) < at(20) && at(21) < at(20));
+        assert_eq!(order.last(), Some(&20));
+        // A stale identity gets nothing.
+        assert!(
+            core.subtree(Target {
+                pid: 20,
+                start_time: 99
+            })
+            .is_empty()
+        );
     }
 
     #[test]

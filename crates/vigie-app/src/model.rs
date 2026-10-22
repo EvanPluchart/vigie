@@ -22,15 +22,17 @@ pub struct UiFrame {
     /// Icons the UI has not seen yet, with their index in its icon model. Pixel buffers cross
     /// threads; `Image`s are made on the UI thread.
     pub icons: Vec<(u32, SharedPixelBuffer<Rgba8Pixel>)>,
+    pub notice: Option<Notice>,
 }
 
 impl UiFrame {
-    pub fn new(frame: Frame, icons: Vec<(u32, Icon)>) -> Self {
+    pub fn new(frame: Frame, icons: Vec<(u32, Icon)>, notice: Option<Notice>) -> Self {
         Self {
             rows: frame.rows.iter().map(proc_row).collect(),
             process_count: frame.process_count.to_string().into(),
             self_cpu: format_cpu(frame.self_cpu_percent),
             self_memory: format_memory(frame.self_memory_bytes),
+            notice,
             icons: icons
                 .into_iter()
                 .map(|(id, icon)| {
@@ -46,6 +48,26 @@ impl UiFrame {
     }
 }
 
+/// The outcome of an action, for the status bar. `kind` codes match `notice-text()` in
+/// `ui/app.slint`.
+pub struct Notice {
+    pub kind: i32,
+    pub name: SharedString,
+    pub pid: i32,
+    pub count: i32,
+}
+
+impl Notice {
+    pub const ENDED: i32 = 1;
+    pub const ENDED_TREE: i32 = 2;
+    pub const SUSPENDED: i32 = 3;
+    pub const RESUMED: i32 = 4;
+    pub const PRIORITY: i32 = 5;
+    pub const COPIED: i32 = 6;
+    pub const GONE: i32 = 7;
+    pub const DENIED: i32 = 8;
+    pub const FAILED: i32 = 9;
+}
 fn proc_row(row: &Row) -> ProcRow {
     let pid = i32::try_from(row.pid).unwrap_or(i32::MAX);
     // A stable identity per row, so patching moves rows instead of rewriting them.
@@ -74,6 +96,7 @@ fn proc_row(row: &Row) -> ProcRow {
         icon: row.icon.and_then(|i| i32::try_from(i).ok()).unwrap_or(-1),
         name: row.name.as_str().into(),
         pid,
+        start: (row.start_time & 0x7fff_ffff) as i32,
         cpu: if figures {
             format_cpu(row.cpu_percent)
         } else {
@@ -109,6 +132,12 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
     app.set_process_count(frame.process_count);
     app.set_self_cpu(frame.self_cpu);
     app.set_self_memory(frame.self_memory);
+    if let Some(notice) = frame.notice {
+        app.set_notice_name(notice.name);
+        app.set_notice_pid(notice.pid);
+        app.set_notice_count(notice.count);
+        app.set_notice_kind(notice.kind);
+    }
 }
 
 /// "—" when there is no value yet, never a misleading 0.

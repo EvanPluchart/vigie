@@ -11,10 +11,12 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use anyhow::Context;
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use vigie_core::{Sort, SortKey};
 
-use crate::sampler::{Command, Settings};
+use vigie_probe::{Action, Priority};
+
+use crate::sampler::{Command, Settings, UserAction};
 
 slint::include_modules!();
 
@@ -67,6 +69,19 @@ fn main() -> anyhow::Result<()> {
         let _ = tx.send(Command::Sort(next));
     });
     let tx = commands.clone();
+    app.on_request_action(move |pid, start, code| {
+        let (Ok(pid), Ok(start_low_bits), Some(action)) =
+            (u32::try_from(pid), u32::try_from(start), user_action(code))
+        else {
+            return;
+        };
+        let _ = tx.send(Command::Act {
+            pid,
+            start_low_bits,
+            action,
+        });
+    });
+    let tx = commands.clone();
     app.on_toggle_clicked(move |pid| {
         if let Ok(pid) = u32::try_from(pid) {
             let _ = tx.send(Command::Toggle(pid));
@@ -88,6 +103,21 @@ fn main() -> anyhow::Result<()> {
         icon_size,
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
+    if let Some((code, pid)) = options.ask {
+        // Once rows have arrived, open the confirmation as the menu would. Nothing runs unless
+        // someone clicks the confirm button.
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+            let Some(app) = weak.upgrade() else { return };
+            let row = app
+                .get_rows()
+                .iter()
+                .find(|r| r.kind == 1 && r.pid as u32 == pid);
+            if let Some(row) = row {
+                app.invoke_ask(row, code);
+            }
+        });
+    }
     for pid in options.expand {
         let _ = commands.send(Command::Toggle(pid));
     }
@@ -98,6 +128,7 @@ fn main() -> anyhow::Result<()> {
     app.on_sort_clicked(|_| {});
     app.on_search_edited(|_| {});
     app.on_toggle_clicked(|_| {});
+    app.on_request_action(|_, _, _| {});
     let _ = sampler.join();
     Ok(())
 }
@@ -122,4 +153,23 @@ fn show_sort(app: &AppWindow, sort: Sort) {
     };
     app.set_sort_column(column);
     app.set_sort_ascending(sort.ascending);
+}
+
+/// Action codes used by the process menu in `ui/app.slint`.
+fn user_action(code: i32) -> Option<UserAction> {
+    let priority = |p| Some(UserAction::Probe(Action::SetPriority(p)));
+    match code {
+        0 => Some(UserAction::End),
+        1 => Some(UserAction::EndTree),
+        2 => Some(UserAction::Probe(Action::Suspend)),
+        3 => Some(UserAction::Probe(Action::Resume)),
+        4 => priority(Priority::Idle),
+        5 => priority(Priority::BelowNormal),
+        6 => priority(Priority::Normal),
+        7 => priority(Priority::AboveNormal),
+        8 => priority(Priority::High),
+        9 => Some(UserAction::Probe(Action::RevealFile)),
+        10 => Some(UserAction::Probe(Action::CopyCommandLine)),
+        _ => None,
+    }
 }
