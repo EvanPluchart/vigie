@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Vigie UI direction</title>
+<style>
+  :root { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  body { margin: 0; padding: 40px; background: #D9DDD6; display: flex; gap: 40px; align-items: flex-start; }
+  .dark {
+    --bg: #0E1116; --surface: #151A21; --raised: #1B212A; --border: #252C37;
+    --text: #E6EAF0; --muted: #8B93A1; --accent: #2EC4B6; --accent-ink: #0E1116;
+    --select: rgba(46,196,182,.16); --heat1: rgba(255,176,32,.14); --heat2: rgba(255,176,32,.30); --heat3: rgba(255,93,93,.34);
+  }
+  .light {
+    --bg: #F6F7F4; --surface: #FFFFFF; --raised: #FFFFFF; --border: #E3E6E1;
+    --text: #0E1116; --muted: #5B6472; --accent: #0B7A71; --accent-ink: #0E1116;
+    --select: rgba(46,196,182,.18); --heat1: rgba(255,176,32,.16); --heat2: rgba(255,176,32,.34); --heat3: rgba(217,45,58,.22);
+  }
+  .win { width: 760px; background: var(--bg); color: var(--text); border-radius: 10px; overflow: hidden;
+         box-shadow: 0 20px 50px rgba(0,0,0,.28); border: 1px solid var(--border); font-size: 13px; }
+  .title { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .title img { width: 16px; height: 16px; }
+  .title .wc { margin-left: auto; color: var(--muted); letter-spacing: 18px; }
+  .body { display: flex; height: 470px; }
+  .rail { width: 52px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 6px; }
+  .rail .it { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+  .rail .it.on { background: var(--select); color: var(--accent); }
+  .rail svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .bar h1 { font-size: 15px; font-weight: 600; margin: 0; }
+  .search { margin-left: auto; width: 220px; height: 30px; border-radius: 8px; background: var(--raised); border: 1px solid var(--border); color: var(--muted); display: flex; align-items: center; padding: 0 10px; gap: 6px; }
+  .search svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 6px 16px; border-bottom: 1px solid var(--border); }
+  th.n, td.n { text-align: right; }
+  th.sorted { color: var(--text); }
+  th.sorted::after { content: " ↓"; color: var(--accent); }
+  td { padding: 0 16px; height: 28px; white-space: nowrap; }
+  tr.group td { color: var(--muted); font-size: 12px; font-weight: 600; height: 30px; }
+  tr.sel td { background: var(--select); }
+  tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  td.h1 { background: var(--heat1); } td.h2 { background: var(--heat2); } td.h3 { background: var(--heat3); }
+  .ico { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 8px; }
+  .muted { color: var(--muted); }
+  .status { margin-top: auto; height: 30px; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-top: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .status .live { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: #2EC4B6; }
+  .status .r { margin-left: auto; }
+</style></head>
+<body>
+<script>
+const rows = [
+  ["group", "Apps (6)"],
+  ["Brave", 18, "#FB542B", "12.4 %", 3, "1 284 MB", 3, "sel"],
+  ["Visual Studio Code", 14, "#3B82F6", "6.1 %", 2, "912 MB", 2],
+  ["Discord", 9, "#5865F2", "1.5 %", 1, "687 MB", 1],
+  ["Vigie", 1, "#2EC4B6", "0.4 %", 0, "24 MB", 0],
+  ["Explorer", 1, "#F5B700", "0.1 %", 0, "162 MB", 0],
+  ["group", "Background processes (148)"],
+  ["Windows Search", 3, "#8B93A1", "2.3 %", 1, "96 MB", 0],
+  ["Audio service", 1, "#8B93A1", "0.8 %", 0, "21 MB", 0],
+  ["Antimalware", 1, "#8B93A1", "—", 0, "214 MB", 1],
+];
+const rail = `
+  <div class="it on"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
+  <div class="it"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 6-8 3 4"/></svg></div>
+  <div class="it"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div>
+  <div class="it"><svg viewBox="0 0 24 24"><path d="M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></svg></div>`;
+function win(theme, icon) {
+  const body = rows.map(r => r[0] === "group"
+    ? `<tr class="group"><td colspan="4">${r[1]}</td></tr>`
+    : `<tr class="${r[7] || ""}"><td><span class="ico" style="background:${r[2]}"></span>${r[0]} <span class="muted">${r[1] > 1 ? "(" + r[1] + ")" : ""}</span></td>
+       <td class="n muted">${1000 + r[0].length * 731}</td><td class="n ${r[4] ? "h" + r[4] : ""}">${r[3]}</td><td class="n ${r[6] ? "h" + r[6] : ""}">${r[5]}</td></tr>`).join("");
+  return `<div class="win ${theme}">
+    <div class="title"><img src="${icon}"><span>Vigie</span><span class="wc">–▢✕</span></div>
+    <div class="body"><div class="rail">${rail}</div><div class="main">
+      <div class="bar"><h1>Processes</h1><div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>Search name, PID, publisher</div></div>
+      <table><tr><th>Name</th><th class="n">PID</th><th class="n sorted">CPU</th><th class="n">Memory</th></tr>${body}</table>
+      <div class="status"><span class="live"><span class="dot"></span>Vigie 0.4 % CPU · 24 MB</span><span>461 processes</span><span class="r">CPU 23 % · Memory 61 %</span></div>
+    </div></div></div>`;
+}
+document.body.innerHTML = win("dark", "../icons/vigie-32.png") + win("light", "../icons/vigie-32.png");
+</script>
+</body></html>

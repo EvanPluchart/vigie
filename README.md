@@ -1,3 +1,5 @@
+<img src="assets/brand/vigie-lockup-horizontal.svg" alt="Vigie" height="64">
+
 # Vigie
 
 A fast, good-looking task manager for Windows, macOS and Linux, written in Rust with [Slint](https://slint.dev).
@@ -29,6 +31,7 @@ On Linux, Slint needs the system packages listed in `.github/workflows/ci.yml`.
 * [Architecture](docs/ARCHITECTURE.md)
 * [Roadmap](docs/ROADMAP.md)
 * [Feature matrix](docs/FEATURES.md)
+* [Brand and art direction](docs/BRAND.md)
 * [Decision records](docs/decisions)
 
 ## License
