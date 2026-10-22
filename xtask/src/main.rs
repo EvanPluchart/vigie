@@ -8,20 +8,28 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-const USAGE: &str = "usage: cargo xtask bench-overhead [--seconds=N]";
+const USAGE: &str = "usage: cargo xtask bench-overhead [--seconds=N] [--check]";
+/// Performance budget from docs/ARCHITECTURE.md.
+const CPU_BUDGET_PERCENT: f64 = 1.0;
+const MEMORY_BUDGET_MB: f64 = 30.0;
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
         Some("bench-overhead") => {
             let mut seconds = 60;
+            let mut check = false;
             for arg in args {
+                if arg == "--check" {
+                    check = true;
+                    continue;
+                }
                 match arg.strip_prefix("--seconds=").map(str::parse) {
                     Some(Ok(n)) if n > 5 => seconds = n,
                     _ => bail!("invalid argument `{arg}`\n{USAGE}"),
                 }
             }
-            bench_overhead(Duration::from_secs(seconds))
+            bench_overhead(Duration::from_secs(seconds), check)
         }
         _ => bail!("{USAGE}"),
     }
@@ -35,7 +43,8 @@ fn workspace_root() -> PathBuf {
 }
 
 /// Builds Vigie in release, runs it with a 1 s interval and reads its own CPU time and memory.
-fn bench_overhead(duration: Duration) -> Result<()> {
+/// With `check`, fails when the steady-state CPU or the peak memory is over budget.
+fn bench_overhead(duration: Duration, check: bool) -> Result<()> {
     const WARM_UP: Duration = Duration::from_secs(5);
     const POLL: Duration = Duration::from_millis(250);
 
@@ -84,7 +93,14 @@ fn bench_overhead(duration: Duration) -> Result<()> {
         mb(m.peak_memory),
         mb(m.last_memory)
     );
-    println!("  budget  < 1 % of one core, < 30 MB (enforced from M1)");
+    println!("  budget  < {CPU_BUDGET_PERCENT} % of one core, < {MEMORY_BUDGET_MB} MB");
+    if check {
+        let peak_mb = mb(m.peak_memory);
+        if cpu_steady >= CPU_BUDGET_PERCENT || peak_mb >= MEMORY_BUDGET_MB {
+            bail!("over budget: {cpu_steady:.2} % of one core, {peak_mb:.1} MB");
+        }
+        println!("  within budget");
+    }
     Ok(())
 }
 
