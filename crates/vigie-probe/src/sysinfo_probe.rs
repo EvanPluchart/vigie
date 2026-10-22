@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use sysinfo::{CpuRefreshKind, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
-use crate::{Pid, ProbeError, ProcDetails, ProcSample, Probe, Result, Sample};
+use crate::{Pid, Probe, ProbeError, ProcDetails, ProcSample, Result, Sample};
 
 pub struct SysinfoProbe {
     system: System,
@@ -110,7 +110,9 @@ mod tests {
         let mut sample = Sample::default();
         probe.sample(&mut sample).expect("sample");
         let mut details = Vec::new();
-        probe.details(&[sample.self_pid], &mut details).expect("details");
+        probe
+            .details(&[sample.self_pid], &mut details)
+            .expect("details");
         assert_eq!(details.len(), 1);
         assert!(details[0].exe.is_some());
     }
