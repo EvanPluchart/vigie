@@ -235,6 +235,10 @@ pub struct WindowsProbe {
     network: crate::windows_system::Network,
     disks: crate::windows_system::Disks,
     gpus: crate::windows_gpu::Gpus,
+    /// Socket tables, reused between reads (8-byte aligned).
+    sockets: Vec<u64>,
+    /// Loaded on the first request for who holds a file.
+    restart_manager: Option<crate::windows_locks::RestartManager>,
 }
 
 impl WindowsProbe {
@@ -267,6 +271,8 @@ impl WindowsProbe {
             cores: crate::windows_system::Cores::new(logical_cores.max(1)),
             network: crate::windows_system::Network::default(),
             disks: crate::windows_system::Disks::default(),
+            sockets: Vec::new(),
+            restart_manager: None,
             gpus: crate::windows_gpu::Gpus::discover(),
         })
     }
@@ -562,6 +568,41 @@ impl Probe for WindowsProbe {
 
     fn exe_info(&mut self, exe: &std::path::Path, icon_size: u32) -> ExeInfo {
         windows_exe::exe_info(exe, icon_size)
+    }
+
+    fn sockets(&mut self, out: &mut Vec<crate::Socket>) -> Result<()> {
+        crate::windows_net::sockets(&mut self.sockets, out)
+    }
+
+    fn lockers(&mut self, path: &std::path::Path, out: &mut Vec<crate::Locker>) -> Result<()> {
+        if self.restart_manager.is_none() {
+            self.restart_manager = Some(crate::windows_locks::RestartManager::load()?);
+        }
+        match &self.restart_manager {
+            Some(rm) => rm.lockers(path, out),
+            None => Err(ProbeError::Unsupported),
+        }
+    }
+
+    fn startup_items(&mut self, out: &mut Vec<crate::StartupItem>) -> Result<()> {
+        crate::windows_startup::items(out)
+    }
+
+    fn set_startup(
+        &mut self,
+        location: crate::StartupLocation,
+        name: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        crate::windows_startup::set_enabled(location, name, enabled)
+    }
+
+    fn services(&mut self, out: &mut Vec<crate::Service>) -> Result<()> {
+        crate::windows_services::services(out)
+    }
+
+    fn control_service(&mut self, name: &str, start: bool) -> Result<()> {
+        crate::windows_services::control(name, start)
     }
 
     fn act(&mut self, target: crate::Target, action: crate::Action) -> Result<()> {

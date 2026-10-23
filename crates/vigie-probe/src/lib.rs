@@ -10,8 +10,17 @@ mod windows_exe;
 #[cfg(windows)]
 mod windows_gpu;
 #[cfg(windows)]
+mod windows_locks;
+#[cfg(windows)]
+mod windows_net;
+#[cfg(windows)]
+mod windows_services;
+#[cfg(windows)]
+mod windows_startup;
+#[cfg(windows)]
 mod windows_system;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 pub use sysinfo_probe::SysinfoProbe;
@@ -34,6 +43,14 @@ pub enum ProbeError {
     Denied,
     #[error("not supported on this system")]
     Unsupported,
+    #[error("no such file")]
+    NotFound,
+    /// Asked about a folder where only files work (who holds a file).
+    #[error("this is a folder")]
+    IsFolder,
+    /// A service cannot stop while services that depend on it run.
+    #[error("other services depend on it")]
+    DependentsRunning,
     #[error("{0}")]
     Failed(String),
 }
@@ -217,6 +234,119 @@ pub struct MemorySlots {
     pub speed_mts: Option<u32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Protocol {
+    Tcp,
+    Udp,
+}
+
+/// The TCP states worth telling apart; the rest are short-lived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TcpState {
+    Listen,
+    Established,
+    TimeWait,
+    CloseWait,
+    Other,
+}
+
+/// One socket and the process that owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Socket {
+    pub protocol: Protocol,
+    pub local: SocketAddr,
+    /// The other end of a TCP connection; `None` for listening TCP and for UDP.
+    pub remote: Option<SocketAddr>,
+    /// `None` for UDP.
+    pub state: Option<TcpState>,
+    /// 0 for connections the system holds on its own (TIME_WAIT), 4 for the kernel (http.sys).
+    pub pid: Pid,
+}
+
+/// What the system says a process holding a file is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LockerKind {
+    App,
+    Service,
+    /// The desktop shell.
+    Explorer,
+    Console,
+    /// Ending it would crash or restart the system.
+    Critical,
+    Other,
+}
+
+/// A process that has a file open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Locker {
+    pub pid: Pid,
+    /// Same clock and resolution as `ProcSample::start_time`.
+    pub start_time: u64,
+    /// What the system calls it ("Microsoft Word").
+    pub name: String,
+    /// Short name of the service, for services.
+    pub service: Option<String>,
+    pub kind: LockerKind,
+}
+
+/// Where a startup item is registered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum StartupLocation {
+    /// The user's Run key.
+    UserRun,
+    /// The machine's Run key (changing it needs administrator rights).
+    MachineRun,
+    /// The machine's Run key for 32-bit programs.
+    MachineRun32,
+    /// The user's startup folder.
+    UserFolder,
+    /// The startup folder of all users.
+    CommonFolder,
+}
+
+/// A program that starts with the session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartupItem {
+    /// The registry value or file name; identifies the item within its location.
+    pub name: String,
+    /// The command line, or the path of the file in a startup folder.
+    pub command: String,
+    pub location: StartupLocation,
+    pub enabled: bool,
+    /// The program it starts, when it can be told from the command.
+    pub exe: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ServiceState {
+    Running,
+    Starting,
+    Stopping,
+    Paused,
+    Stopped,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StartType {
+    Automatic,
+    AutomaticDelayed,
+    Manual,
+    Disabled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Service {
+    /// Short name, used to control it.
+    pub name: String,
+    pub display_name: String,
+    pub state: ServiceState,
+    /// `None` when its configuration cannot be read.
+    pub start_type: Option<StartType>,
+    /// The process it runs in, while running.
+    pub pid: Option<Pid>,
+}
+
 /// An icon as straight (not premultiplied) RGBA pixels, row by row from the top.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Icon {
@@ -252,6 +382,35 @@ pub trait Probe: Send {
     /// GPU engines and memory into `out.gpus`. Costlier than `system` (driver round trips):
     /// call it only while GPU figures are shown, and not necessarily every tick.
     fn gpus(&mut self, _out: &mut SystemSample) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+    /// Every TCP and UDP socket with its owning process. On demand, while ports are shown.
+    fn sockets(&mut self, _out: &mut Vec<Socket>) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+    /// Processes that have the file at `path` open. On demand.
+    fn lockers(&mut self, _path: &std::path::Path, _out: &mut Vec<Locker>) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+    /// Programs that start with the session. On demand.
+    fn startup_items(&mut self, _out: &mut Vec<StartupItem>) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+    /// Enables or disables a startup item, reversibly.
+    fn set_startup(
+        &mut self,
+        _location: StartupLocation,
+        _name: &str,
+        _enabled: bool,
+    ) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+    /// Every service with its state. On demand: costs one query per service.
+    fn services(&mut self, _out: &mut Vec<Service>) -> Result<()> {
+        Err(ProbeError::Unsupported)
+    }
+    /// Starts (`true`) or stops a service by its short name. Callers confirm stopping first.
+    fn control_service(&mut self, _name: &str, _start: bool) -> Result<()> {
         Err(ProbeError::Unsupported)
     }
     /// Facts that do not change while Vigie runs. Call once.
