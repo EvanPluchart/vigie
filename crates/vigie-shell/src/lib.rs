@@ -311,6 +311,8 @@ mod tests {
         assert_eq!(clamp_into(area, -50, -50, 320, 380), (8, 8));
     }
 
+    /// Windows paths: only meaningful where the value is read.
+    #[cfg(windows)]
     #[test]
     fn debugger_values_round_trip_and_stale_paths_are_seen() {
         let here = std::env::current_exe().unwrap();

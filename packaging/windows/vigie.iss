@@ -1,5 +1,5 @@
 ﻿; Vigie installer (decision 0009): per-user, no elevation, into %LOCALAPPDATA%\Programs\Vigie.
-; Built by `cargo xtask dist` with Inno Setup 6.7.3:
+; Built by `cargo xtask dist` with Inno Setup 6 (6.7.3 locally, 6.7.1 in CI):
 ;   ISCC.exe /DAppVersion=0.1.0 /DSourceExe=<path to vigie.exe> /DOutputDir=<dist> vigie.iss
 
 #ifndef AppVersion

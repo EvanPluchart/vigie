@@ -699,13 +699,20 @@ mod tests {
         probe.sample(&mut sample).expect("sample");
         let second = by_pid(&sample, 4).measured_at_ns;
         assert_eq!(second, sample.at_ns);
-        probe.sample(&mut sample).expect("sample");
-        // Then opened processes are measured every tick, System only on full snapshots.
-        assert_eq!(
-            by_pid(&sample, sample.self_pid).measured_at_ns,
-            sample.at_ns
-        );
-        assert_eq!(by_pid(&sample, 4).measured_at_ns, second);
+        // Then opened processes are measured every tick, System only on full snapshots. A new
+        // service also triggers a snapshot (decision 0004), and machines starting services
+        // (CI runners) do that often: some tick before the next periodic snapshot keeps
+        // System's older measurement.
+        let mut kept = false;
+        for _ in 0..3 {
+            probe.sample(&mut sample).expect("sample");
+            assert_eq!(
+                by_pid(&sample, sample.self_pid).measured_at_ns,
+                sample.at_ns
+            );
+            kept |= by_pid(&sample, 4).measured_at_ns < sample.at_ns;
+        }
+        assert!(kept, "System was measured on every tick");
     }
 }
 

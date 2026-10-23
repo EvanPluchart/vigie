@@ -72,6 +72,8 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 * "Replace Task Manager" option on Windows (reversible; Image File Execution Options in HKLM, so one administrator prompt each way: decision 0009).
 * Landing page on evanpluchart.fr.
 
+**Status (2026-10-23):** version 0.1.0. The Windows installer is built and tested here (install, launch, uninstall, nothing left). The macOS `.dmg` and the Linux AppImage are built by the release workflow, unsigned until certificates exist. Replacing Task Manager is waiting for the author's manual check. The landing page is in `site/`, to deploy. Flatpak is deferred (decision 0009). Audit in `docs/ux/audit-m6.md`.
+
 ## Later, maybe
 
 Network traffic per process on all systems, energy impact on laptops, remote monitoring of another machine, a CLI (`vigie top`).

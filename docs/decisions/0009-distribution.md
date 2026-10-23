@@ -13,7 +13,7 @@ M6 ships Vigie on three systems. Two things decided with the author shape it:
 
 ### Windows installer
 
-* **Tool and pinning:** Inno Setup 6, pinned to an exact version: winget locally, Chocolatey in CI. Script: `packaging/windows/vigie.iss`. `cargo xtask dist` builds the release binary, then the installer, into `dist/`.
+* **Tool and pinning:** Inno Setup 6, pinned to an exact version: 6.7.3 locally (winget), 6.7.1 in CI (the newest on Chocolatey). Script: `packaging/windows/vigie.iss`. `cargo xtask dist` builds the release binary, then the installer, into `dist/`.
 * **Per-user install, no elevation:** `PrivilegesRequired=lowest`, into `%LOCALAPPDATA%\Programs\Vigie`.
 * **Installed:** a Start-menu shortcut, and optionally a "start with Windows" value in HKCU `Run`.
 * **Upgrades:** the installer closes a running Vigie first (`CloseApplications`).
