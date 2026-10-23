@@ -70,9 +70,9 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 
 * Windows installer, signed macOS `.dmg`, AppImage and Flatpak.
 * "Replace Task Manager" option on Windows (reversible; Image File Execution Options in HKLM, so one administrator prompt each way: decision 0009).
-* Landing page on evanpluchart.fr.
+* Landing page on GitHub Pages (French and English).
 
-**Status (2026-10-23):** version 0.1.0. The Windows installer is built and tested here (install, launch, uninstall, nothing left). The macOS `.dmg` and the Linux AppImage are built by the release workflow, unsigned until certificates exist. Replacing Task Manager is waiting for the author's manual check. The landing page is in `site/`, to deploy. Flatpak is deferred (decision 0009). Audit in `docs/ux/audit-m6.md`.
+**Status (2026-10-23):** version 0.1.0. The Windows installer is built and tested here (install, launch, uninstall, nothing left). The macOS `.dmg` and the Linux AppImage are built by the release workflow, unsigned until certificates exist. Replacing Task Manager is waiting for the author's manual check. The landing page is in `site/` (French and English, `site/DESIGN.md`), to publish with `pages.yml`. Flatpak is deferred (decision 0009). Audit in `docs/ux/audit-m6.md`.
 
 ## Later, maybe
 

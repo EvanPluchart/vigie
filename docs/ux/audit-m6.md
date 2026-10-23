@@ -14,7 +14,7 @@ Build of 2026-10-23, version 0.1.0. M6 is mostly packaging, so this audit sorts 
 | Task Manager arguments | Unit test | Paths naming taskmgr.exe, quoted or not, and their flags are accepted |
 | Debugger value | Unit test | Built and read back. A stale path is recognised, and so is another program (Process Explorer) |
 | macOS build of the app | `cargo check -p vigie --target aarch64-apple-darwin` | Compiles. Not linked: that needs a Mac |
-| Landing page (`site/`) | Rendered with headless Chrome at 1280 and 520 px | Laid out in both. No personal data in the screenshots: the Ports view was captured on a test process on 127.0.0.1:3000, and the Files view was left out because its path showed the user name |
+| Landing page (`site/`, French and English, light only) | Rendered with headless Chrome at 1440 and 520 px, with and without reduced motion | Laid out in both. The Ports and Files views show a test process (127.0.0.1:3000, a held file on a temporary `V:` drive), so no user path appears. The Processes view shows the author's real apps |
 
 ## Written, proven only by the release workflow
 
@@ -31,7 +31,7 @@ The first run of `ci.yml` and of `release.yml` (on the `release-check` branch, w
 |---|---|
 | Replacing Task Manager | A real try. The switch is in Settings, on an installed Vigie, and asks for one UAC prompt each way. Then check: <ul><li>Ctrl+Shift+Esc opens Vigie, or brings the running one to the front;</li><li>turning the switch off gives Task Manager back;</li><li>uninstalling with the switch on asks to turn it off first.</li></ul> |
 | Signing | A Windows code-signing certificate and an Apple Developer ID, as repository secrets (names in `release.yml`). Until then, SmartScreen and Gatekeeper warn on first launch. |
-| Landing page | Deployment to evanpluchart.fr, following `site/README.md`. |
+| Landing page | Publishing on GitHub Pages: enable Pages (source "GitHub Actions"), make the repository public, run `pages.yml`. See `site/README.md`. |
 | App ID | `fr.evanpluchart.Vigie`, proposed and used in the Linux and macOS metadata. To confirm before any store. |
 | Flatpak | Deferred: in its sandbox, Vigie would see only itself (decision 0009). |
 

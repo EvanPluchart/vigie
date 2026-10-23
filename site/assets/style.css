@@ -1,0 +1,287 @@
+/* Vigie landing page. Design system: ../DESIGN.md. Brand: ../../docs/BRAND.md. */
+
+@font-face {
+  font-family: "Outfit";
+  src: url("fonts/outfit.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --paper: #F6F7F4;
+  --surface: #ECEEE9;
+  --line: #E3E6E1;
+  --ink: #0E1116;
+  --muted: #4A5262;
+  --lagoon: #2EC4B6;
+  --deep: #0B7A71;
+
+  --t-display: clamp(52px, 9vw, 152px);
+  --t-head: clamp(36px, 5vw, 76px);
+  --t-figure: clamp(64px, 10vw, 168px);
+  --t-lead: clamp(20px, 1.6vw, 25px);
+  --t-body: 18px;
+  --t-small: 15px;
+
+  --margin: clamp(16px, 3vw, 40px);
+  --gap: clamp(16px, 2vw, 28px);
+  --section: clamp(96px, 12vw, 180px);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 var(--t-body)/1.55 "Outfit", "Segoe UI", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+}
+
+img { display: block; max-width: 100%; height: auto; }
+a { color: var(--deep); text-underline-offset: 0.18em; }
+p { margin: 0; }
+
+.frame { width: 100%; max-width: 1440px; margin: 0 auto; padding: 0 var(--margin); }
+
+.skip {
+  position: absolute; left: var(--margin); top: -60px; z-index: 10;
+  background: var(--ink); color: var(--paper); padding: 10px 14px; border-radius: 8px;
+}
+.skip:focus { top: 12px; }
+
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+/* The eye: the lagoon dot that marks where Vigie reports on itself. */
+.eye {
+  display: inline-block;
+  width: 0.2em; height: 0.2em;
+  margin-left: 0.04em;
+  border-radius: 50%;
+  background: var(--lagoon);
+  vertical-align: baseline;
+}
+
+/* ---------- Buttons ---------- */
+
+.button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 54px; padding: 0 26px;
+  border-radius: 8px;
+  background: var(--lagoon); color: var(--ink);
+  font-weight: 600; font-size: 17px; text-decoration: none;
+  transition: background-color 160ms ease-out, color 160ms ease-out, transform 120ms ease-out;
+}
+.button:hover { background: var(--ink); color: var(--lagoon); }
+.button:active { transform: scale(0.97); }
+.button-small { min-height: 42px; padding: 0 18px; font-size: 15px; }
+.button-ink { background: var(--ink); color: var(--paper); }
+.button-ink:hover { background: var(--paper); color: var(--ink); }
+
+/* ---------- Navigation ---------- */
+
+.nav {
+  display: flex; align-items: center; gap: clamp(14px, 2vw, 28px);
+  padding-top: 22px; padding-bottom: 22px;
+}
+.nav-logo { margin-right: auto; display: block; }
+.nav-logo img { height: 34px; width: auto; }
+.nav nav { display: flex; gap: clamp(14px, 2vw, 28px); }
+.nav a:not(.button) { color: var(--ink); text-decoration: none; font-size: 16px; }
+.nav a:not(.button):hover { text-decoration: underline; }
+.nav-lang { font-weight: 600; }
+
+/* ---------- Hero ---------- */
+
+.hero { padding-top: clamp(40px, 7vw, 110px); }
+
+.hero h1 {
+  margin: 0;
+  font-size: var(--t-display); font-weight: 600;
+  line-height: 0.92; letter-spacing: -0.045em;
+}
+.hero h1 .quiet { color: var(--muted); }
+
+.hero-foot {
+  display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap);
+  margin-top: clamp(28px, 4vw, 56px); align-items: end;
+}
+.hero-lead { grid-column: 1 / span 6; font-size: var(--t-lead); line-height: 1.45; max-width: 34em; }
+.hero-action { grid-column: 8 / span 5; justify-self: end; text-align: right; }
+.hero-action .note { margin-top: 12px; }
+
+.note { color: var(--muted); font-size: var(--t-small); }
+
+.hero-stage { margin-top: clamp(48px, 7vw, 104px); position: relative; }
+.hero-stage::before {
+  /* The lagoon band: the brand's tile colour behind the lower part of the window. */
+  content: ""; position: absolute; left: 0; right: 0; top: 28%; bottom: 0;
+  background: var(--lagoon);
+}
+.hero-window { position: relative; margin: 0; }
+.hero-window img { border-radius: 12px; border: 1px solid var(--line); width: 100%; }
+
+/* The app's status bar, redrawn: what Vigie costs, live. */
+.status {
+  position: relative;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px;
+  padding: 22px 0 clamp(36px, 5vw, 64px);
+  font-size: var(--t-small); color: var(--ink);
+}
+.status-self { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; }
+.status-self .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink); }
+.status-note { color: var(--ink); opacity: 0.8; }
+
+/* ---------- Sections ---------- */
+
+section { padding: var(--section) 0; }
+.field-ink { background: var(--ink); color: var(--paper); }
+.field-surface { background: var(--surface); }
+.field-lagoon { background: var(--lagoon); color: var(--ink); }
+
+.head {
+  margin: 0; max-width: 16ch;
+  font-size: var(--t-head); font-weight: 600;
+  line-height: 1.0; letter-spacing: -0.035em;
+}
+.lead { font-size: var(--t-lead); line-height: 1.45; margin-top: 22px; max-width: 32em; }
+.text p + p { margin-top: 16px; }
+.text p { max-width: 58ch; }
+
+/* Cost figures on Ink: lagoon is legible here (8.7:1). */
+.cost-head { color: var(--paper); max-width: 18ch; }
+.figures {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap);
+  margin-top: clamp(48px, 6vw, 88px);
+}
+.figure strong {
+  display: block; color: var(--lagoon);
+  font-size: var(--t-figure); font-weight: 600; line-height: 0.95; letter-spacing: -0.04em;
+}
+.figure span { display: block; margin-top: 14px; font-size: var(--t-lead); max-width: 16em; }
+.cost-note { margin-top: clamp(40px, 5vw, 64px); color: #B9C0CC; font-size: var(--t-small); max-width: 70ch; }
+.cost-note a { color: var(--lagoon); }
+
+/* Feature rows: text and image, alternating sides. */
+.row {
+  display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap); align-items: center;
+}
+.row .text { grid-column: 1 / span 4; }
+.row .shot { grid-column: 6 / span 7; }
+.row.flip .text { grid-column: 9 / span 4; order: 2; }
+.row.flip .shot { grid-column: 1 / span 7; order: 1; }
+.text .head { margin-bottom: 24px; }
+
+.shot { margin: 0; }
+.shot img { border-radius: 12px; border: 1px solid var(--line); width: 100%; }
+.shot figcaption { margin-top: 12px; color: var(--muted); font-size: var(--t-small); }
+
+.pair {
+  display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap);
+  margin-top: clamp(40px, 5vw, 72px); align-items: start;
+}
+/* Two close-ups, offset one under the other. */
+.pair .shot:first-child { grid-column: 1 / span 9; }
+.pair .shot:last-child { grid-column: 4 / span 9; margin-top: clamp(24px, 3vw, 48px); }
+.pair-head { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap); align-items: end; }
+.pair-head .head { grid-column: 1 / span 7; max-width: 20ch; }
+.pair-head .text { grid-column: 9 / span 4; }
+
+/* The app's range bar, redrawn as text. */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 22px; }
+.chips span {
+  padding: 5px 11px; border-radius: 4px; font-size: var(--t-small); color: var(--muted);
+}
+.chips span.on { background: rgba(46, 196, 182, 0.18); color: var(--ink); font-weight: 600; }
+
+/* ---------- Comparison ---------- */
+
+.compare-head { max-width: 18ch; }
+.table {
+  margin-top: clamp(40px, 5vw, 72px);
+  display: grid; grid-template-columns: 1.3fr 1fr 1fr;
+}
+.table > div { padding: 18px 20px; }
+.table .th { font-weight: 600; font-size: var(--t-lead); padding-bottom: 22px; }
+.table .rh { font-size: var(--t-lead); }
+.table .vigie { background: var(--lagoon); color: var(--ink); }
+.table .odd:not(.vigie) { background: var(--surface); }
+.table .muted { color: var(--muted); }
+.table small { display: block; color: var(--muted); font-size: var(--t-small); margin-top: 4px; }
+.table .vigie small { color: var(--ink); opacity: 0.8; }
+
+/* ---------- Questions ---------- */
+
+.faq { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap); }
+.faq .head { grid-column: 1 / span 4; }
+.faq-list { grid-column: 6 / span 7; }
+details { border-radius: 12px; padding: 20px 22px; }
+details[open] { background: var(--surface); }
+summary { cursor: pointer; font-size: var(--t-lead); font-weight: 600; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; float: right; font-weight: 400; }
+details[open] summary::after { content: "–"; }
+details p { margin-top: 12px; max-width: 58ch; }
+
+/* ---------- Download ---------- */
+
+.download { text-align: left; }
+.download .head { max-width: 14ch; font-size: var(--t-display); line-height: 0.92; letter-spacing: -0.045em; }
+.download-foot { margin-top: clamp(32px, 4vw, 56px); display: flex; flex-wrap: wrap; gap: 18px 32px; align-items: center; }
+.download-foot .note { color: var(--ink); max-width: 46ch; }
+
+/* ---------- Footer ---------- */
+
+footer { background: var(--ink); color: #B9C0CC; padding: 56px 0 64px; font-size: var(--t-small); }
+footer .frame { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: center; }
+footer img { height: 28px; width: auto; margin-right: auto; }
+footer a { color: var(--paper); }
+
+/* ---------- Motion ---------- */
+
+.js .rise { opacity: 0; transform: translateY(20px); transition: opacity 700ms ease-out, transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.js .rise.seen { opacity: 1; transform: none; }
+.js .hero-window { transform: translateY(40px); opacity: 0; transition: transform 1100ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 900ms ease-out; }
+.js .hero-window.seen { transform: none; opacity: 1; }
+.hero h1 .eye { animation: blink 3.2s ease-in-out 1.2s 1 both; }
+@keyframes blink {
+  0%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(1); }
+  52% { transform: scaleY(0.1); }
+  56% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .js .rise, .js .hero-window { opacity: 1; transform: none; transition: none; }
+  .hero h1 .eye { animation: none; }
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 900px) {
+  .nav nav { display: none; }
+  .hero-lead, .hero-action { grid-column: 1 / -1; justify-self: start; text-align: left; }
+  .row .text, .row .shot, .row.flip .text, .row.flip .shot { grid-column: 1 / -1; order: 0; }
+  .row .text { margin-bottom: 32px; }
+  .pair-head .head, .pair-head .text, .pair .shot:first-child, .pair .shot:last-child { grid-column: 1 / -1; margin-top: 0; }
+  .pair-head .text { margin-top: 20px; }
+  .figures { grid-template-columns: 1fr; }
+  .faq .head, .faq-list { grid-column: 1 / -1; }
+}
+
+@media (max-width: 600px) {
+  .hero-stage::before { top: 40%; }
+  .table { grid-template-columns: 1fr; }
+  .table .th { display: none; }
+  .table .rh { padding-bottom: 6px; font-weight: 600; background: none !important; }
+  .table > div:not(.rh):not(.th) { padding-top: 10px; padding-bottom: 10px; }
+  .table .tm::before { content: attr(data-label) " : "; color: var(--muted); }
+  .table .vigie::before { content: attr(data-label) " : "; font-weight: 600; }
+  .table .odd:not(.vigie) { background: none; }
+}

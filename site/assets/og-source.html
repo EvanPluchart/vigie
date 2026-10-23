@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Source of og.png and og-en.png (1200 × 630). Render with headless Chrome:
+     chrome --headless=new --window-size=1200,630 --screenshot=og.png "og-source.html#fr"  (or #en) -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Outfit"; src: url("fonts/outfit.woff2") format("woff2"); font-weight: 400 700; }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body { background: #F6F7F4; color: #0E1116; font-family: "Outfit", sans-serif; position: relative; }
+  .band { position: absolute; left: 0; right: 0; bottom: 0; height: 230px; background: #2EC4B6; }
+  .logo { position: absolute; left: 64px; top: 56px; height: 52px; }
+  h1 { position: absolute; left: 64px; top: 150px; margin: 0; font-size: 86px; font-weight: 600;
+       line-height: 0.92; letter-spacing: -0.045em; }
+  h1 .quiet { color: #4A5262; }
+  .eye { display: inline-block; width: 0.2em; height: 0.2em; margin-left: 0.04em; border-radius: 50%; background: #2EC4B6; }
+  .shot { position: absolute; left: 720px; top: 120px; width: 700px; border-radius: 12px; border: 1px solid #E3E6E1; }
+  .foot { position: absolute; left: 64px; bottom: 56px; font-size: 26px; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="band"></div>
+  <img class="logo" src="../logo.svg" alt="">
+  <img class="shot" id="shot" src="processes.png" alt="">
+  <h1 id="title">Tout voir.<br><span class="quiet">Ne rien peser</span><span class="eye"></span></h1>
+  <p class="foot" id="foot">Le gestionnaire de tâches qui ne pèse rien</p>
+  <script>
+    if (location.hash === "#en") {
+      document.documentElement.lang = "en";
+      document.getElementById("shot").src = "en/processes.png";
+      document.getElementById("title").innerHTML = 'See everything.<br><span class="quiet">Weigh nothing</span><span class="eye"></span>';
+      document.getElementById("foot").textContent = "The task manager that weighs nothing";
+    }
+  </script>
+</body>
+</html>

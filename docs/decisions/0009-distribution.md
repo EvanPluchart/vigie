@@ -64,8 +64,13 @@ M6 ships Vigie on three systems. Two things decided with the author shape it:
 
 ### Landing page
 
-* `site/` is a static page: French first, no tracking, no external scripts, built from the previews.
-* The author deploys it to evanpluchart.fr.
+* `site/` is a static page for GitHub Pages, at `https://evanpluchart.github.io/vigie/`:
+  * French at the root, English in `en/`;
+  * light only;
+  * no tracking, no external scripts or fonts (Outfit is self-hosted).
+* Its design system is `site/DESIGN.md`, in the same format as Recto's.
+* `.github/workflows/pages.yml` publishes it by hand, once Pages is enabled and the repository is
+  public.
 
 ## Consequences
 

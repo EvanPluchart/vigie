@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vigie — the task manager that weighs nothing</title>
+<meta name="description" content="Vigie shows what runs on your PC, what slows it down and who holds your ports and files, for under 1% of a core and about ten megabytes. Free, no account, no telemetry.">
+<meta name="author" content="Evan Pluchart">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F6F7F4">
+<link rel="canonical" href="https://evanpluchart.github.io/vigie/en/">
+<link rel="alternate" hreflang="fr" href="https://evanpluchart.github.io/vigie/">
+<link rel="alternate" hreflang="en" href="https://evanpluchart.github.io/vigie/en/">
+<link rel="alternate" hreflang="x-default" href="https://evanpluchart.github.io/vigie/en/">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="en_GB">
+<meta property="og:title" content="Vigie — see everything, weigh nothing">
+<meta property="og:description" content="The task manager that tells you what slows your PC down, for under 1% of a core.">
+<meta property="og:url" content="https://evanpluchart.github.io/vigie/en/">
+<meta property="og:image" content="https://evanpluchart.github.io/vigie/assets/og-en.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../favicon.png" type="image/png">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preload" href="../assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../assets/style.css">
+<script>document.documentElement.classList.add("js")</script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+
+<header>
+<div class="nav frame">
+  <a class="nav-logo" href="./" aria-label="Vigie, home"><img src="../logo.svg" alt="Vigie" width="100" height="34"></a>
+  <nav aria-label="Sections">
+    <a href="#cost">Its cost</a>
+    <a href="#features">Features</a>
+    <a href="#compare">Compare</a>
+    <a href="#questions">Questions</a>
+  </nav>
+  <a class="nav-lang" href="../" hreflang="fr" lang="fr" aria-label="Version française">FR</a>
+  <a class="button button-small" href="#download">Download</a>
+</div>
+</header>
+
+<main id="content">
+
+  <section class="hero" aria-labelledby="title" style="padding-bottom:0">
+    <div class="frame">
+      <h1 id="title" class="rise">See everything.<br><span class="quiet">Weigh nothing</span><span class="eye" aria-hidden="true"></span></h1>
+      <div class="hero-foot">
+        <p class="hero-lead rise">Vigie is a free task manager. It shows what runs on your PC, what slows it down and who holds your ports and files, while staying out of the way.</p>
+        <div class="hero-action rise">
+          <a class="button" href="https://github.com/EvanPluchart/vigie/releases/latest">Download for Windows</a>
+          <p class="note">Windows 10 and 11 · free · MIT licence</p>
+        </div>
+      </div>
+    </div>
+    <div class="hero-stage">
+      <div class="frame">
+        <figure class="hero-window">
+          <img src="../assets/en/processes.png" alt="Vigie's Processes view: apps grouped with their icons, the machine's CPU and memory at the top of their columns, a command bar." width="1184" height="741">
+        </figure>
+        <p class="status" aria-label="Vigie's status bar">
+          <span class="status-self"><span class="dot" aria-hidden="true"></span><span>Vigie <span data-cpu>0.3</span>% CPU · <span data-mem>9.2</span> MB</span></span>
+          <span class="status-note">Vigie's status bar shows its own cost at all times. Typical figures on a desktop PC running 430 processes.</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="cost" class="field-ink" aria-labelledby="cost-title">
+    <div class="frame">
+      <h2 id="cost-title" class="head cost-head rise">Its own cost is part of the spec<span class="eye" aria-hidden="true"></span></h2>
+      <div class="figures">
+        <div class="figure rise"><strong>&lt;&nbsp;1%</strong><span>of one CPU core, refreshing every second</span></div>
+        <div class="figure rise"><strong>9&nbsp;MB</strong><span>of private memory, seven days of history included</span></div>
+        <div class="figure rise"><strong>0</strong><span>network requests: no account, no telemetry, no ads</span></div>
+      </div>
+      <p class="cost-note rise">Measured for every version with <code>cargo xtask bench-overhead</code>: one minute of running, CPU time and memory read from the system. A change that breaks the budget does not get in. When its window goes to the background, Vigie slows down by itself; minimised, it looks only once every ten seconds.</p>
+    </div>
+  </section>
+
+  <section id="features" aria-labelledby="slow-title">
+    <div class="frame row">
+      <div class="text rise">
+        <h2 id="slow-title" class="head">Why is my PC slow?</h2>
+        <p class="lead">Vigie asks for you, every five seconds.</p>
+        <p style="margin-top:22px">A saturated processor, memory running out, a program growing for an hour, a disk at its limit: every finding comes with its figures and one suggestion. If you like, a notification tells you, at most once every fifteen minutes.</p>
+      </div>
+      <figure class="shot rise">
+        <img src="../assets/en/diagnostics.png" alt="The Diagnostics view: two findings, committed memory near its limit and a computer running for 35 days, each with its explanation and a suggestion." width="1184" height="741" loading="lazy">
+      </figure>
+    </div>
+  </section>
+
+  <section class="field-surface" aria-labelledby="time-title">
+    <div class="frame row flip">
+      <div class="text rise">
+        <h2 id="time-title" class="head">Scroll back in time.</h2>
+        <p class="lead">Processor, memory, network, disks and graphics cards, from the last minute to the last seven days.</p>
+        <div class="chips" aria-hidden="true"><span class="on">1 min</span><span>10 min</span><span>1 h</span><span>6 h</span><span>24 h</span><span>7 days</span></div>
+        <p style="margin-top:22px">Hover a graph to read a value and its time, drag it to go back. Short spikes stay visible on long ranges. Every process you select gets its own history too.</p>
+      </div>
+      <figure class="shot rise">
+        <img src="../assets/en/performance.png" alt="The Performance view: processor with its cores, memory, network, disk and graphics cards, each with its graph over the last minute." width="1184" height="821" loading="lazy">
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="dev-title">
+    <div class="frame">
+      <div class="pair-head">
+        <h2 id="dev-title" class="head rise">Who holds port 3000? Who locks this file?</h2>
+        <div class="text rise">
+          <p>Type a port number: Vigie finds the process listening on it. Drop a file Windows refuses to delete: it lists the programs keeping it open. Either way, "End task" asks first and names what will stop.</p>
+        </div>
+      </div>
+      <div class="pair">
+        <figure class="shot rise">
+          <img src="../assets/en/ports.png" alt="The Ports view, filtered on 3000: a Python process listens on 127.0.0.1, port 3000." width="1184" height="172" loading="lazy">
+        </figure>
+        <figure class="shot rise">
+          <img src="../assets/en/files.png" alt="The Files view: devis-atelier-brume.pdf is held by a console program, with an End task button." width="1184" height="316" loading="lazy">
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="field-surface" aria-labelledby="keys-title">
+    <div class="frame row">
+      <div class="text rise">
+        <h2 id="keys-title" class="head">Ctrl+K, and the rest follows.</h2>
+        <p class="lead">A command palette, a shortcut for every view, lists you move through with the arrow keys.</p>
+        <p style="margin-top:22px">Startup apps, services, settings: everything is two keys away. And if you want, Ctrl+Shift+Esc opens Vigie instead of Task Manager, reversible at any time.</p>
+      </div>
+      <figure class="shot rise">
+        <img src="../assets/en/palette.png" alt="The command palette open over the process list: go to views, search, end a task, switch theme." width="1184" height="741" loading="lazy">
+      </figure>
+    </div>
+  </section>
+
+  <section id="compare" aria-labelledby="compare-title">
+    <div class="frame">
+      <h2 id="compare-title" class="head compare-head rise">What Task Manager does not tell you<span class="eye" aria-hidden="true"></span></h2>
+      <div class="table rise" role="table" aria-label="Comparison with Windows Task Manager">
+        <div class="th" role="columnheader"></div>
+        <div class="th" role="columnheader">Task Manager</div>
+        <div class="th vigie" role="columnheader">Vigie</div>
+
+        <div class="rh odd" role="rowheader">Graph history</div>
+        <div class="tm odd" data-label="Task Manager" role="cell">The last minute</div>
+        <div class="vigie odd" data-label="Vigie" role="cell">Up to seven days, scrollable</div>
+
+        <div class="rh" role="rowheader">Why it is slow</div>
+        <div class="tm muted" data-label="Task Manager" role="cell">Up to you to guess</div>
+        <div class="vigie" data-label="Vigie" role="cell">Findings with their evidence and a suggestion</div>
+
+        <div class="rh odd" role="rowheader">Who listens on a port</div>
+        <div class="tm odd muted" data-label="Task Manager" role="cell">No<small>Resource Monitor, separately</small></div>
+        <div class="vigie odd" data-label="Vigie" role="cell">Search by port, end task</div>
+
+        <div class="rh" role="rowheader">Who locks a file</div>
+        <div class="tm muted" data-label="Task Manager" role="cell">No<small>Resource Monitor, separately</small></div>
+        <div class="vigie" data-label="Vigie" role="cell">Drop the file on the window</div>
+
+        <div class="rh odd" role="rowheader">Alerts</div>
+        <div class="tm odd muted" data-label="Task Manager" role="cell">No</div>
+        <div class="vigie odd" data-label="Vigie" role="cell">Notifications, adjustable thresholds</div>
+
+        <div class="rh" role="rowheader">Its own cost</div>
+        <div class="tm muted" data-label="Task Manager" role="cell">Not shown</div>
+        <div class="vigie" data-label="Vigie" role="cell">In the status bar, at all times</div>
+      </div>
+      <p class="note rise" style="margin-top:24px">Compared with Windows 11 Task Manager. It stays the system's tool: Vigie replaces it only if you ask.</p>
+    </div>
+  </section>
+
+  <section id="questions" class="field-surface" aria-labelledby="questions-title">
+    <div class="frame faq">
+      <h2 id="questions-title" class="head rise">Questions</h2>
+      <div class="faq-list rise">
+        <details>
+          <summary>Is it free?</summary>
+          <p>Yes, with nothing in return. Vigie is open source under the MIT licence, written in Rust.</p>
+        </details>
+        <details>
+          <summary>What leaves my computer?</summary>
+          <p>Nothing. Vigie makes no network request: no account, no telemetry, no silent update. Its settings stay in a text file on your PC.</p>
+        </details>
+        <details>
+          <summary>Does it need administrator rights?</summary>
+          <p>No. Vigie installs for your account only. Only stopping a system service and replacing Task Manager ask for an administrator confirmation, when you do them.</p>
+        </details>
+        <details>
+          <summary>Why does Windows show a warning?</summary>
+          <p>This first version is not signed yet, so Windows SmartScreen warns on the first launch: "More info", then "Run anyway".</p>
+        </details>
+        <details>
+          <summary>What about Mac and Linux?</summary>
+          <p>Vigie already builds there and shows processes. Performance, diagnostics, ports and the rest come next: everything is built on Windows first.</p>
+        </details>
+        <details>
+          <summary>How do I uninstall it?</summary>
+          <p>From Settings, Apps, like any program. If it replaced Task Manager, uninstalling gives Task Manager its place back first. Your settings stay in <code>%APPDATA%\Vigie</code>, just in case.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section id="download" class="field-lagoon download" aria-labelledby="download-title">
+    <div class="frame">
+      <h2 id="download-title" class="head rise">Keep an eye on it.</h2>
+      <div class="download-foot rise">
+        <a class="button button-ink" href="https://github.com/EvanPluchart/vigie/releases/latest">Download Vigie 0.1</a>
+        <p class="note">Windows 10 and 11, an installer that needs no administrator rights, or a portable version. English and French.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="frame">
+    <img src="../logo-reversed.svg" alt="Vigie" width="82" height="28">
+    <span>By Evan Pluchart · MIT licence</span>
+    <a href="https://github.com/EvanPluchart/vigie">Source code</a>
+    <a href="../" hreflang="fr" lang="fr">Français</a>
+  </div>
+</footer>
+
+<script src="../assets/main.js" defer></script>
+</body>
+</html>
