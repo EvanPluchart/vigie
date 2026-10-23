@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>fr.evanpluchart.Vigie</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Vigie</name>
+  <summary>A fast task manager</summary>
+  <summary xml:lang="fr">Un gestionnaire de tâches rapide</summary>
+  <developer id="fr.evanpluchart">
+    <name>Evan Pluchart</name>
+  </developer>
+  <description>
+    <p>
+      Vigie shows what runs on your computer and what slows it down, while costing almost
+      nothing itself: under one percent of a core and a few megabytes.
+    </p>
+    <p xml:lang="fr">
+      Vigie montre ce qui tourne sur votre ordinateur et ce qui le ralentit, en ne coûtant
+      presque rien : moins d'un pour cent d'un cœur et quelques mégaoctets.
+    </p>
+  </description>
+  <launchable type="desktop-id">fr.evanpluchart.Vigie.desktop</launchable>
+  <url type="homepage">https://evanpluchart.fr/vigie</url>
+  <url type="vcs-browser">https://github.com/EvanPluchart/vigie</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-23"/>
+  </releases>
+</component>

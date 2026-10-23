@@ -1,0 +1,119 @@
+// The tray mini view (decision 0008): machine figures and the busiest processes, near the
+// taskbar. Created on demand and dropped when it hides.
+
+import { Palette } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { VButton } from "controls.slint";
+
+export struct MiniRow {
+    name: string,
+    cpu: string,
+    memory: string,
+}
+
+component Meter inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <float> share;
+    spacing: Theme.space-1;
+    HorizontalLayout {
+        Text {
+            text: root.label;
+            color: Theme.text-muted;
+            font-size: Theme.font-caption;
+            horizontal-stretch: 1;
+        }
+        Text {
+            text: root.value;
+            color: Theme.text;
+            font-size: Theme.font-body;
+            font-weight: Theme.weight-strong;
+        }
+    }
+    Rectangle {
+        height: 6px;
+        border-radius: 3px;
+        background: Theme.text.with-alpha(0.08);
+        Rectangle {
+            x: 0;
+            width: parent.width * clamp(root.share, 0, 100) / 100;
+            border-radius: 3px;
+            background: root.share >= 90 ? Theme.danger : root.share >= 75 ? Theme.warning : Theme.accent;
+        }
+    }
+}
+
+export component MiniWindow inherits Window {
+    in property <string> cpu: "—";
+    in property <string> memory: "—";
+    in property <float> cpu-share;
+    in property <float> memory-share;
+    in property <[MiniRow]> top;
+    callback open();
+    callback dismiss();
+    title: "Vigie mini";
+    no-frame: true;
+    always-on-top: true;
+    width: 300px;
+    height: 330px;
+    background: Theme.raised;
+
+    // 0 follows the system, 1 dark, 2 light: the same as the main window.
+    public function set-scheme(scheme: int) {
+        Palette.color-scheme = scheme == 1 ? ColorScheme.dark : scheme == 2 ? ColorScheme.light : ColorScheme.unknown;
+    }
+
+    FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            return reject;
+        }
+        Rectangle {
+            border-width: 1px;
+            border-color: Theme.border;
+            VerticalLayout {
+                padding: Theme.space-4;
+                spacing: Theme.space-3;
+                HorizontalLayout {
+                    spacing: Theme.space-2;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 4px;
+                        background: Theme.lagoon;
+                    }
+                    Text {
+                        text: "Vigie";
+                        color: Theme.text;
+                        font-size: Theme.font-section;
+                        font-weight: Theme.weight-strong;
+                        horizontal-stretch: 1;
+                    }
+                }
+                Meter { label: @tr("Processor"); value: root.cpu; share: root.cpu-share; }
+                Meter { label: @tr("Memory"); value: root.memory; share: root.memory-share; }
+                Text {
+                    text: @tr("Busiest processes");
+                    color: Theme.text-muted;
+                    font-size: Theme.font-caption;
+                }
+                for row in root.top: HorizontalLayout {
+                    spacing: Theme.space-2;
+                    Text { text: row.name; color: Theme.text; font-size: Theme.font-body; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: row.cpu; color: Theme.text-muted; font-size: Theme.font-body; width: 56px; horizontal-alignment: right; }
+                    Text { text: row.memory; color: Theme.text-muted; font-size: Theme.font-body; width: 72px; horizontal-alignment: right; }
+                }
+                Rectangle { vertical-stretch: 1; }
+                VButton {
+                    text: @tr("Open Vigie");
+                    kind: 1;
+                    clicked => { root.open(); }
+                }
+            }
+        }
+    }
+}

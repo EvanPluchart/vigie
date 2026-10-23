@@ -10,6 +10,7 @@ crates/
   vigie-probe   per-OS sampling behind one trait: processes, CPU, memory, disk, network, GPU   (no UI)
   vigie-core    process tree, app grouping, CPU% from deltas, history ring buffers, alerts,     (no UI, no OS calls)
                 diagnostics
+  vigie-shell   desktop integration: tray, notifications, settings file (decision 0008)        (no UI)
   vigie-app     Slint application, binary "vigie"; ui/*.slint holds every view
 xtask/          bench-overhead, bundle, release                                                 (M0)
 ```
@@ -30,7 +31,7 @@ pub trait Probe: Send {
 * `sample` fills a caller-owned `Sample` so buffers are reused between ticks: **no allocation in the steady state.**
 * Cheap vs expensive split: `sample` returns PID, parent PID, name, CPU time, memory, I/O counters, start time. `details` is only called for PIDs that are new or currently visible, and its results are cached by `(pid, start_time)` (a PID can be reused, a pair cannot).
 * Backends:
-  * **Windows:** one `NtQuerySystemInformation(SystemProcessInformation)` call per tick returns every process with its times and memory. No `OpenProcess` per process in the hot path.
+  * **Windows** (decision 0004): `NtQuerySystemInformation(SystemBasicProcessInformation)` lists processes every tick without their threads; times and memory come from a handle opened once per process, or, for processes that cannot be opened, from a full `SystemProcessInformation` snapshot every 5 ticks. Each sample says when it was measured.
   * **Linux:** `/proc/<pid>/stat` and `statm`, read with reused buffers. `/proc/stat`, `/proc/meminfo` for the system.
   * **macOS:** `proc_listallpids` + `proc_pid_rusage`, `host_statistics64` for the system.
 * Start with `sysinfo` behind the trait where a native backend is not written yet (decision 0002). Replace a path with native code only when `cargo xtask bench-overhead` shows it matters.
@@ -39,7 +40,7 @@ pub trait Probe: Send {
 
 * **CPU %** comes from deltas between two samples (CPU time / wall time / logical cores). The first sample of a process shows no CPU % rather than a wrong one.
 * **Process tree and app grouping:** children are attached to their parent; processes are grouped into apps by executable path and window ownership (Windows), bundle (macOS) or `.desktop` file (Linux).
-* **History:** fixed-size ring buffers per metric, in three tiers: 1 s for 10 min, 10 s for 6 h, 1 min for 7 days. Per-process history only for the top consumers of each tier, to keep memory bounded. Memory cost of the history is computed and shown in the About window.
+* **History** (decision 0006): buckets keyed by time in three tiers (1 s for 10 min, 10 s for 6 h, 1 min for 7 days), mean and peak, gaps left empty. Per-process history for 32 processes at most (top consumers and the selected one). Memory cost is computed and shown in the About window. In memory only: it restarts empty at each launch.
 * **Diagnostics** ("why is my computer slow?") are pure functions over the current sample and the history: memory pressure, a process growing without bound, sustained CPU, disk saturation. Each one returns a finding with evidence and a suggested action.
 * **Alerts** are rules (`metric`, `threshold`, `duration`, `scope`) evaluated on each tick.
 
@@ -74,15 +75,17 @@ UI callbacks (sort, filter, kill, suspend) ──> command channel ──> sampl
 
 * Code, comments and commit messages in English.
 * No `unwrap()` on anything that depends on the OS. A probe failure for one process skips that process, it never fails the tick.
-* Test flags on the binary, for screenshots and agents: `vigie [--tab=processes|performance|history|ports] [--sort=cpu|memory|name|pid[:asc]] [--filter=TEXT] [--interval=MS] [--dark|--light]`.
+* Test flags on the binary, for screenshots and agents: `vigie [--tab=processes|performance] [--sort=cpu|memory|name|pid[:asc]] [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID] [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] [--tab=diagnostics] [--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--notify-test] [--mini] [--palette[=TEXT]] [--lang=en|fr]`. Flags override settings for the session and are never saved.
 
 ## Performance budget
 
 | Metric | Budget | How it is checked |
 |---|---|---|
-| CPU while focused, 1 s interval, ~300 processes | < 1 % of one core on average | `cargo xtask bench-overhead` (60 s run, reads Vigie's own CPU time) |
-| Memory (RSS) | < 30 MB | same run |
+| CPU while focused, 1 s interval, idle machine with ~300 processes | < 1 % of one core on average | `cargo xtask bench-overhead` (60 s run, reads Vigie's own CPU time) |
+| Memory (private bytes: what Vigie allocates for itself, not shared pages) | < 30 MB | same run; the working set is reported too |
 | `Probe::sample` | < 3 ms for 500 processes | criterion benchmark in `vigie-probe` |
 | Steady-state allocations per tick | 0 in `sample` | counting allocator in a test |
+
+The metrics were settled on 2026-10-23: private memory, because the working set grows with the window and with shared system pages; CPU on an idle machine, because a loaded one is too noisy to compare builds.
 
 A change that breaks the budget does not merge.

@@ -1,0 +1,268 @@
+// "Why is my computer slow?": findings with their evidence and one suggestion each, or what
+// was checked when all is well (decision 0006).
+
+import { ScrollView } from "std-widgets.slint";
+import { VButton } from "controls.slint";
+import { Theme } from "theme.slint";
+
+// One finding, formatted by Rust (src/model.rs). Figures `a`, `b`, `c` depend on the kind.
+export struct FindingRow {
+    // 0 CPU saturated (a: mean, b: window), 1 one process on a full core (a: cores, b: window),
+    // 2 memory pressure (a: available %, b: commit %), 3 memory growing (a: from, b: to,
+    // c: over), 4 disk busy (a: mean, b: disk index, c: drive letters), 5 long uptime (a: days),
+    // 6 restart pending for updates, 7 low disk space (a: drive, b: free, c: free share).
+    kind: int,
+    // 0 info, 1 warning, 2 critical.
+    severity: int,
+    // Memory pressure: 1 medium, 2 high; cause 0 available memory, 1 commit.
+    level: int,
+    cause: int,
+    a: string,
+    b: string,
+    c: string,
+    // Processes named as evidence, one per line: "name · PID 123 · 45 % · 1.2 GB".
+    evidence: string,
+    // 0 end the process, 1 leave it (system), 2 close programs, 3 open Performance, 4 restart,
+    // 5 free up space.
+    suggestion: int,
+    // The process the suggestion is about.
+    name: string,
+    pid: int,
+    start: int,
+}
+
+// What the checks found when there is nothing to report, one line per area.
+export struct CheckSummary {
+    // "12 %", the machine CPU mean over two minutes; "—" while measuring.
+    cpu: string,
+    // 0 low, 1 medium, 2 high.
+    pressure: int,
+    // Busiest disk over the last minute.
+    disk: string,
+    // Minutes Vigie has watched; growth needs 30.
+    watched-minutes: int,
+    tracked: int,
+}
+
+component FindingCard inherits Rectangle {
+    in property <FindingRow> item;
+    callback end(FindingRow);
+    callback show-performance();
+    callback free-space();
+    background: Theme.surface;
+    border-radius: Theme.radius-panel;
+    border-width: 1px;
+    border-color: Theme.border;
+    clip: true;
+    property <color> tone: root.item.severity == 2 ? Theme.danger : root.item.severity == 1 ? Theme.warning : Theme.accent;
+    Rectangle {
+        x: 0;
+        width: 4px;
+        background: root.tone;
+    }
+    VerticalLayout {
+        padding: Theme.space-4;
+        padding-left: Theme.space-4 + 4px;
+        spacing: Theme.space-2;
+        Text {
+            color: Theme.text;
+            font-size: Theme.font-section;
+            font-weight: Theme.weight-strong;
+            wrap: word-wrap;
+            text: root.item.kind == 0 ? @tr("The processor is saturated")
+                : root.item.kind == 1 ? @tr("{} keeps a processor core busy", root.item.name)
+                : root.item.kind == 2 ? (root.item.cause == 1 ? @tr("Committed memory is near its limit") : @tr("Memory is running low"))
+                : root.item.kind == 3 ? @tr("{} keeps using more memory", root.item.name)
+                : root.item.kind == 4 ? (root.item.c == "" ? @tr("Disk {} is saturated", root.item.b) : @tr("Disk {} ({}) is saturated", root.item.b, root.item.c))
+                : root.item.kind == 6 ? @tr("A restart is waiting to finish installing updates")
+                : root.item.kind == 7 ? @tr("Drive {} is almost full", root.item.a)
+                : @tr("Your computer has been running for {} days", root.item.a);
+        }
+        Text {
+            color: Theme.text-muted;
+            font-size: Theme.font-body;
+            wrap: word-wrap;
+            text: root.item.kind == 0 ? @tr("{} busy on average over the last {} minutes.", root.item.a, root.item.b)
+                : root.item.kind == 1 ? @tr("{} cores on average over the last {} minutes.", root.item.a, root.item.b)
+                : root.item.kind == 2 ? (root.item.cause == 1
+                    ? @tr("Programs have reserved {} % of what memory and the page file can hold; new allocations may fail.", root.item.b)
+                    : @tr("Only {} % of memory is available; the system moves memory to disk, which is slow.", root.item.a))
+                : root.item.kind == 3 ? @tr("From {} to {} over {}, steadily. A program that never gives memory back often has a leak.", root.item.a, root.item.b, root.item.c)
+                : root.item.kind == 4 ? @tr("Busy {} of the time over the last minute. Programs that read or write files wait for it.", root.item.a)
+                : root.item.kind == 6 ? @tr("Windows installed updates that only take effect after a restart. Until then, some fixes are not applied and the system may run slower.")
+                : root.item.kind == 7 ? @tr("Only {} free ({}). Windows needs room for updates, the page file and temporary files; with too little, programs and updates fail.", root.item.b, root.item.c)
+                : @tr("Some slowdowns and pending updates only clear with a restart.");
+        }
+        if root.item.evidence != "": Text {
+            color: Theme.text;
+            font-size: Theme.font-caption;
+            wrap: word-wrap;
+            text: root.item.evidence;
+        }
+        HorizontalLayout {
+            spacing: Theme.space-3;
+            padding-top: Theme.space-1;
+            Text {
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                color: Theme.text-muted;
+                font-size: Theme.font-body;
+                wrap: word-wrap;
+                text: root.item.suggestion == 0 ? @tr("Suggestion: end {} if you do not need it now. Unsaved work in it will be lost.", root.item.name)
+                    : root.item.suggestion == 1 ? @tr("{} is part of the system: ending it could crash the computer. If this lasts, restart.", root.item.name)
+                    : root.item.suggestion == 2 ? @tr("Suggestion: close the programs you do not need.")
+                    : root.item.suggestion == 3 ? @tr("Vigie cannot tell yet which program uses the disk. Check the disk activity over time.")
+                    : root.item.suggestion == 5 ? @tr("Suggestion: free up space with Storage Sense, or move large files elsewhere.")
+                    : @tr("Suggestion: restart (not shut down: with fast startup, shutting down keeps the system running).");
+            }
+            if root.item.suggestion == 0: VButton {
+                kind: 2;
+                text: @tr("End task…");
+                clicked => { root.end(root.item); }
+            }
+            if root.item.suggestion == 3: VButton {
+                kind: 1;
+                text: @tr("Open Performance");
+                clicked => { root.show-performance(); }
+            }
+            if root.item.suggestion == 5: VButton {
+                kind: 1;
+                text: @tr("Open storage settings");
+                clicked => { root.free-space(); }
+            }
+        }
+    }
+}
+
+// One "checked, all well" line.
+component Check inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> detail;
+    in property <bool> ok: true;
+    spacing: Theme.space-3;
+    Path {
+        width: 16px;
+        height: 16px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.ok ? Theme.accent : Theme.text-muted;
+        stroke-width: 1.8px;
+        commands: root.ok ? "M 3 8.5 L 6.5 12 L 13 4.5" : "M 4 8 L 12 8";
+    }
+    Text {
+        text: root.label;
+        color: Theme.text;
+        font-size: Theme.font-body;
+        font-weight: Theme.weight-strong;
+        width: 120px;
+        vertical-alignment: center;
+    }
+    Text {
+        text: root.detail;
+        color: Theme.text-muted;
+        font-size: Theme.font-body;
+        horizontal-stretch: 1;
+        wrap: word-wrap;
+        vertical-alignment: center;
+    }
+}
+
+export component DiagnosticsView inherits Rectangle {
+    in property <[FindingRow]> findings;
+    in property <CheckSummary> checks;
+    // False until the first run.
+    in property <bool> ready;
+    // False where the system gives no machine-wide figures to diagnose from.
+    in property <bool> available: true;
+    callback end(FindingRow);
+    callback show-performance();
+    callback free-space();
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding: Theme.space-3;
+            padding-left: Theme.space-4;
+            padding-right: Theme.space-4;
+            Text {
+                text: @tr("Why is my computer slow?");
+                color: Theme.text;
+                font-size: Theme.font-section;
+                font-weight: Theme.weight-strong;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: @tr("Checked every 5 s");
+                color: Theme.text-muted;
+                font-size: Theme.font-caption;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: Theme.space-4;
+                spacing: Theme.space-3;
+                alignment: start;
+                if !root.ready || !root.available: Text {
+                    text: root.ready ? @tr("Diagnostics need the performance figures, which are not available on this system yet.") : @tr("Measuring…");
+                    wrap: word-wrap;
+                    color: Theme.text-muted;
+                    font-size: Theme.font-section;
+                }
+                for item in root.findings: FindingCard {
+                    item: item;
+                    end(f) => { root.end(f); }
+                    show-performance => { root.show-performance(); }
+                    free-space => { root.free-space(); }
+                }
+                // All clear: say so, and what was looked at.
+                if root.ready && root.available && root.findings.length == 0: Rectangle {
+                    background: Theme.surface;
+                    border-radius: Theme.radius-panel;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    VerticalLayout {
+                        padding: Theme.space-6;
+                        spacing: Theme.space-3;
+                        Text {
+                            text: @tr("Nothing is slowing your computer down right now");
+                            color: Theme.text;
+                            font-size: Theme.font-title;
+                            font-weight: Theme.weight-strong;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: @tr("Vigie keeps checking while it runs. If something feels slow, come back here.");
+                            color: Theme.text-muted;
+                            font-size: Theme.font-body;
+                            wrap: word-wrap;
+                        }
+                        Rectangle { height: Theme.space-2; }
+                        Check {
+                            label: @tr("Processor");
+                            detail: @tr("{} on average over 2 minutes", root.checks.cpu);
+                        }
+                        Check {
+                            label: @tr("Memory");
+                            detail: root.checks.pressure == 0 ? @tr("Pressure low") : @tr("Pressure rising, not critical");
+                        }
+                        Check {
+                            label: @tr("Disks");
+                            detail: @tr("Busiest disk {} busy over the last minute", root.checks.disk);
+                        }
+                        Check {
+                            label: @tr("Processes");
+                            ok: root.checks.watched-minutes >= 30;
+                            detail: root.checks.watched-minutes >= 30
+                                ? @tr("No process keeps growing ({} watched)", root.checks.tracked)
+                                : @tr("Memory growth is judged after 30 minutes of watching ({} min so far)", root.checks.watched-minutes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,353 @@
+// The Performance view: one card per resource, each with a graph over the chosen range.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Graph, GraphData, RangeBar, Spans } from "timeline.slint";
+
+export struct DiskCard {
+    index: int,
+    // Drive letters on the disk, "C: D:"; empty when it has none.
+    drives: string,
+    active: string,
+    read: string,
+    write: string,
+}
+
+export struct GpuCard {
+    index: int,
+    // Adapter name; empty when the system gives none.
+    name: string,
+    value: string,
+    memory-used: string,
+    memory-total: string,
+}
+
+// Everything the view shows, formatted by Rust (src/model.rs). Graphs come separately.
+export struct PerfView {
+    ready: bool,
+    // False where the probe has no machine-wide figures (not Windows yet).
+    available: bool,
+    cpu-value: string,
+    cpu-model: string,
+    logical-cores: int,
+    memory-value: string,
+    memory-used: string,
+    memory-total: string,
+    memory-cached: string,
+    committed-used: string,
+    committed-limit: string,
+    // Committed share of its limit, percent.
+    commit-percent: int,
+    memory-compressed: string,
+    // "2 of 4 · 6000 MT/s" parts; slots-total 0 when the firmware does not say.
+    slots-used: int,
+    slots-total: int,
+    slots-speed: int,
+    // 0 low, 1 medium, 2 high (see vigie_core::perf::Pressure); cause 0 available, 1 commit.
+    pressure: int,
+    pressure-cause: int,
+    network-value: string,
+    network-received: string,
+    network-sent: string,
+    network-scale: string,
+    uptime-days: int,
+    uptime-hours: int,
+    uptime-minutes: int,
+    // Seconds of history kept so far.
+    history-age: int,
+}
+
+export global PerfText {
+    pure public function disk-title(card: DiskCard) -> string {
+        return card.drives == "" ? @tr("Disk {}", card.index) : @tr("Disk {} ({})", card.index, card.drives);
+    }
+
+    pure public function uptime(view: PerfView) -> string {
+        return view.uptime-days > 0 ? @tr("up {} d {} h", view.uptime-days, view.uptime-hours)
+            : view.uptime-hours > 0 ? @tr("up {} h {} min", view.uptime-hours, view.uptime-minutes)
+            : @tr("up {} min", view.uptime-minutes);
+    }
+}
+
+component Label inherits Text {
+    color: Theme.text-muted;
+    font-size: Theme.font-caption;
+    vertical-alignment: center;
+}
+
+component Figure inherits Text {
+    color: Theme.text;
+    font-size: Theme.font-body;
+    vertical-alignment: center;
+}
+
+component Card inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+    background: Theme.surface;
+    border-radius: Theme.radius-panel;
+    border-width: 1px;
+    border-color: Theme.border;
+    VerticalLayout {
+        padding: Theme.space-4;
+        spacing: Theme.space-3;
+        alignment: start;
+        HorizontalLayout {
+            Text {
+                text: root.title;
+                color: Theme.text;
+                font-size: Theme.font-section;
+                font-weight: Theme.weight-strong;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Text {
+                text: root.value;
+                color: Theme.text;
+                font-size: Theme.font-title;
+                font-weight: Theme.weight-strong;
+            }
+        }
+        @children
+    }
+}
+
+// The figures under a card's graph: the same height in every card, so cards line up.
+component Facts inherits VerticalLayout {
+    height: 76px;
+    spacing: Theme.space-2;
+    alignment: start;
+}
+
+// Two-column label/value line.
+component Stat inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <color> value-color: Theme.text;
+    spacing: Theme.space-2;
+    Label { text: root.label; horizontal-stretch: 1; }
+    Figure { text: root.value; color: root.value-color; horizontal-alignment: right; }
+}
+
+export component PerformanceView inherits Rectangle {
+    in property <PerfView> view;
+    in property <[float]> cores;
+    in property <[DiskCard]> disks;
+    in property <[GpuCard]> gpus;
+    in property <GraphData> cpu-graph;
+    in property <GraphData> memory-graph;
+    in property <GraphData> network-graph;
+    in property <[GraphData]> disk-graphs;
+    in property <[GraphData]> gpu-graphs;
+    in-out property <int> span-index;
+    in-out property <int> offset;
+    callback range-changed(int, int);
+    property <int> span: Spans.seconds[root.span-index];
+    property <int> drag-origin;
+
+    function drag(share: float) {
+        range.set(root.span-index, root.drag-origin + round(share * root.span));
+    }
+
+    if !root.view.ready || !root.view.available: Text {
+        text: root.view.ready ? @tr("Performance figures are not available on this system yet.") : @tr("Measuring…");
+        color: Theme.text-muted;
+        font-size: Theme.font-section;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    VerticalLayout {
+        visible: root.view.ready && root.view.available;
+        Rectangle {
+            height: 40px;
+            background: Theme.surface;
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+            HorizontalLayout {
+                padding-left: Theme.space-4;
+                padding-right: Theme.space-4;
+                padding-top: Theme.space-2;
+                padding-bottom: Theme.space-2;
+                range := RangeBar {
+                    span-index <=> root.span-index;
+                    offset <=> root.offset;
+                    history-age: root.view.history-age;
+                    changed(index, offset) => { root.range-changed(index, offset); }
+                }
+            }
+        }
+
+    // Every card has the same size, on a grid: two columns, one when the window is narrow.
+    // Each card is a graph of the same height over a block of figures of the same height.
+    scroll := ScrollView {
+        vertical-stretch: 1;
+        property <int> columns: self.visible-width < 760px ? 1 : 2;
+        property <length> card-width: (self.visible-width - Theme.space-4 * (self.columns + 1)) / self.columns;
+        property <length> card-height: 284px;
+        property <int> count: 3 + max(root.disks.length, 1) + root.gpus.length;
+        content-height: ceil(self.count / self.columns) * (self.card-height + Theme.space-4) + Theme.space-4;
+
+        Card {
+            x: Theme.space-4;
+            y: Theme.space-4;
+            width: scroll.card-width;
+            height: scroll.card-height;
+            title: @tr("CPU");
+            value: root.view.cpu-value;
+            Graph {
+                data: root.cpu-graph;
+                span: root.span;
+                offset: root.offset;
+                recorded: root.view.history-age;
+                drag-started => { root.drag-origin = root.offset; }
+                dragged(share) => { root.drag(share); }
+            }
+            Facts {
+                // One bar per logical processor: rectangles stay cheap with many cores.
+                HorizontalLayout {
+                    height: 28px;
+                    spacing: 2px;
+                    for value in root.cores: Rectangle {
+                        background: Theme.border.with-alpha(0.5);
+                        border-radius: 2px;
+                        Rectangle {
+                            y: parent.height - self.height;
+                            height: parent.height * clamp(value, 0, 100) / 100;
+                            border-radius: 2px;
+                            background: value >= 80 ? Theme.warning : Theme.accent;
+                        }
+                    }
+                }
+                Label { text: root.view.cpu-model; overflow: elide; }
+                Stat {
+                    label: @tr("{} logical processors", root.view.logical-cores);
+                    value: PerfText.uptime(root.view);
+                }
+            }
+        }
+        Card {
+            x: scroll.columns == 2 ? scroll.card-width + 2 * Theme.space-4 : Theme.space-4;
+            y: scroll.columns == 2 ? Theme.space-4 : scroll.card-height + 2 * Theme.space-4;
+            width: scroll.card-width;
+            height: scroll.card-height;
+            title: @tr("Memory");
+            value: root.view.memory-value;
+            Graph {
+                data: root.memory-graph;
+                span: root.span;
+                offset: root.offset;
+                recorded: root.view.history-age;
+                tint: root.view.pressure == 2 ? Theme.danger : root.view.pressure == 1 ? Theme.warning : Theme.accent;
+                drag-started => { root.drag-origin = root.offset; }
+                dragged(share) => { root.drag(share); }
+            }
+            Facts {
+                GridLayout {
+                    spacing-horizontal: Theme.space-6;
+                    spacing-vertical: Theme.space-2;
+                    Row {
+                        Stat { label: @tr("In use"); value: @tr("{} of {}", root.view.memory-used, root.view.memory-total); }
+                        Stat { label: @tr("Cached"); value: root.view.memory-cached; }
+                    }
+                    Row {
+                        Stat { label: @tr("Committed"); value: @tr("{} of {}", root.view.committed-used, root.view.committed-limit); }
+                        Stat { label: @tr("Compressed"); value: root.view.memory-compressed; }
+                    }
+                    Row {
+                        Stat {
+                            label: @tr("Slots");
+                            value: root.view.slots-total == 0 ? "—"
+                                : root.view.slots-speed > 0 ? @tr("{} of {} · {} MT/s", root.view.slots-used, root.view.slots-total, root.view.slots-speed)
+                                : @tr("{} of {}", root.view.slots-used, root.view.slots-total);
+                        }
+                        Stat {
+                            label: @tr("Pressure");
+                            // Say why when it is not low: physical memory, or commit near its limit.
+                            value: root.view.pressure == 0 ? @tr("Low")
+                                : root.view.pressure-cause == 1
+                                    ? (root.view.pressure == 2 ? @tr("High (commit {} %)", root.view.commit-percent) : @tr("Medium (commit {} %)", root.view.commit-percent))
+                                    : (root.view.pressure == 2 ? @tr("High") : @tr("Medium"));
+                            value-color: root.view.pressure == 2 ? Theme.danger : root.view.pressure == 1 ? Theme.warning : Theme.text;
+                        }
+                    }
+                }
+            }
+        }
+        Card {
+            x: Theme.space-4;
+            y: (scroll.columns == 2 ? 1 : 2) * (scroll.card-height + Theme.space-4) + Theme.space-4;
+            width: scroll.card-width;
+            height: scroll.card-height;
+            title: @tr("Network");
+            value: root.view.network-value;
+            Graph {
+                data: root.network-graph;
+                unit: 1;
+                span: root.span;
+                offset: root.offset;
+                recorded: root.view.history-age;
+                drag-started => { root.drag-origin = root.offset; }
+                dragged(share) => { root.drag(share); }
+            }
+            Facts {
+                Stat { label: @tr("Received"); value: root.view.network-received; }
+                Stat { label: @tr("Sent"); value: root.view.network-sent; value-color: Theme.warning; }
+                Stat { label: @tr("Graph scale"); value: root.view.network-scale; }
+            }
+        }
+        // Disks, then GPUs, fill the grid after the first three cards.
+        for disk[i] in root.disks: Card {
+            x: scroll.columns == 2 ? mod(3 + i, 2) * (scroll.card-width + Theme.space-4) + Theme.space-4 : Theme.space-4;
+            y: floor((3 + i) / scroll.columns) * (scroll.card-height + Theme.space-4) + Theme.space-4;
+            width: scroll.card-width;
+            height: scroll.card-height;
+            title: PerfText.disk-title(disk);
+            value: disk.active;
+            Graph {
+                data: root.disk-graphs[i];
+                span: root.span;
+                offset: root.offset;
+                recorded: root.view.history-age;
+                drag-started => { root.drag-origin = root.offset; }
+                dragged(share) => { root.drag(share); }
+            }
+            Facts {
+                Stat { label: @tr("Read"); value: disk.read; }
+                Stat { label: @tr("Write"); value: disk.write; }
+            }
+        }
+        if root.disks.length == 0: Card {
+            x: scroll.columns == 2 ? scroll.card-width + 2 * Theme.space-4 : Theme.space-4;
+            y: (scroll.columns == 2 ? 1 : 3) * (scroll.card-height + Theme.space-4) + Theme.space-4;
+            width: scroll.card-width;
+            height: scroll.card-height;
+            title: @tr("Disks");
+            value: "—";
+            Label { text: @tr("No disk counters are readable on this system."); wrap: word-wrap; }
+        }
+        for gpu[i] in root.gpus: Card {
+            property <int> slot: 3 + max(root.disks.length, 1) + i;
+            x: scroll.columns == 2 ? mod(self.slot, 2) * (scroll.card-width + Theme.space-4) + Theme.space-4 : Theme.space-4;
+            y: floor(self.slot / scroll.columns) * (scroll.card-height + Theme.space-4) + Theme.space-4;
+            width: scroll.card-width;
+            height: scroll.card-height;
+            title: gpu.name == "" ? @tr("GPU {}", gpu.index) : gpu.name;
+            value: gpu.value;
+            Graph {
+                data: root.gpu-graphs[i];
+                span: root.span;
+                offset: root.offset;
+                recorded: root.view.history-age;
+                drag-started => { root.drag-origin = root.offset; }
+                dragged(share) => { root.drag(share); }
+            }
+            Facts {
+                Stat {
+                    label: @tr("Dedicated memory");
+                    value: gpu.memory-total == "" ? "—" : @tr("{} of {}", gpu.memory-used, gpu.memory-total);
+                }
+            }
+        }
+    }
+    }
+}

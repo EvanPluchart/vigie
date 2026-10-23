@@ -5,3 +5,5 @@ dist/
 .agents/
 .claude/skills/
 .claude/settings.local.json
+/target-old/
+/target-dev/

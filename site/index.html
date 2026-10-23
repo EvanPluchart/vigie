@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vigie — le gestionnaire de tâches qui ne pèse rien</title>
+<meta name="description" content="Vigie montre ce qui tourne sur votre PC, ce qui le ralentit et qui tient vos ports et vos fichiers, pour moins de 1 % d'un cœur et une dizaine de mégaoctets. Gratuit, sans compte, sans télémétrie.">
+<meta name="author" content="Evan Pluchart">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F6F7F4">
+<link rel="canonical" href="https://evanpluchart.github.io/vigie/">
+<link rel="alternate" hreflang="fr" href="https://evanpluchart.github.io/vigie/">
+<link rel="alternate" hreflang="en" href="https://evanpluchart.github.io/vigie/en/">
+<link rel="alternate" hreflang="x-default" href="https://evanpluchart.github.io/vigie/en/">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="fr_FR">
+<meta property="og:title" content="Vigie — tout voir, ne rien peser">
+<meta property="og:description" content="Le gestionnaire de tâches qui montre ce qui ralentit votre PC, pour moins de 1 % d'un cœur.">
+<meta property="og:url" content="https://evanpluchart.github.io/vigie/">
+<meta property="og:image" content="https://evanpluchart.github.io/vigie/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preload" href="assets/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/style.css">
+<script>document.documentElement.classList.add("js")</script>
+</head>
+<body>
+<a class="skip" href="#contenu">Aller au contenu</a>
+
+<header>
+<div class="nav frame">
+  <a class="nav-logo" href="./" aria-label="Vigie, accueil"><img src="logo.svg" alt="Vigie" width="100" height="34"></a>
+  <nav aria-label="Sections">
+    <a href="#cout">Son coût</a>
+    <a href="#fonctions">Fonctions</a>
+    <a href="#comparer">Comparer</a>
+    <a href="#questions">Questions</a>
+  </nav>
+  <a class="nav-lang" href="en/" hreflang="en" lang="en" aria-label="English version">EN</a>
+  <a class="button button-small" href="#telecharger">Télécharger</a>
+</div>
+</header>
+
+<main id="contenu">
+
+  <section class="hero" aria-labelledby="titre" style="padding-bottom:0">
+    <div class="frame">
+      <h1 id="titre" class="rise">Tout voir.<br><span class="quiet">Ne rien peser</span><span class="eye" aria-hidden="true"></span></h1>
+      <div class="hero-foot">
+        <p class="hero-lead rise">Vigie est un gestionnaire de tâches gratuit. Il montre ce qui tourne sur votre PC, ce qui le ralentit et qui tient vos ports et vos fichiers, en se faisant oublier.</p>
+        <div class="hero-action rise">
+          <a class="button" href="https://github.com/EvanPluchart/vigie/releases/latest">Télécharger pour Windows</a>
+          <p class="note">Windows 10 et 11 · gratuit · licence MIT</p>
+        </div>
+      </div>
+    </div>
+    <div class="hero-stage">
+      <div class="frame">
+        <figure class="hero-window">
+          <img src="assets/processes.png" alt="Vigie, vue Processus : les applications regroupées avec leurs icônes, le processeur et la mémoire de la machine en tête de colonne, une barre de commandes." width="1184" height="741">
+        </figure>
+        <p class="status" aria-label="La barre d'état de Vigie">
+          <span class="status-self"><span class="dot" aria-hidden="true"></span><span>Vigie <span data-cpu>0,3</span>&nbsp;% processeur · <span data-mem>9,2</span>&nbsp;Mo</span></span>
+          <span class="status-note">La barre d'état de Vigie affiche son propre coût, en permanence. Valeurs typiques sur un PC de bureau à 430&nbsp;processus.</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="cout" class="field-ink" aria-labelledby="cout-titre">
+    <div class="frame">
+      <h2 id="cout-titre" class="head cost-head rise">Son coût fait partie du cahier des charges<span class="eye" aria-hidden="true"></span></h2>
+      <div class="figures">
+        <div class="figure rise"><strong>&lt;&nbsp;1&nbsp;%</strong><span>d'un cœur processeur, à une actualisation par seconde</span></div>
+        <div class="figure rise"><strong>9&nbsp;Mo</strong><span>de mémoire privée, historique de sept jours compris</span></div>
+        <div class="figure rise"><strong>0</strong><span>requête réseau&nbsp;: ni compte, ni télémétrie, ni publicité</span></div>
+      </div>
+      <p class="cost-note rise">Mesuré à chaque version avec <code>cargo xtask bench-overhead</code>&nbsp;: une minute de fonctionnement, temps processeur et mémoire lus par le système. Une modification qui dépasse le budget n'est pas intégrée. Quand la fenêtre passe en arrière-plan, Vigie ralentit de lui-même&nbsp;; réduit, il ne regarde plus qu'une fois toutes les dix secondes.</p>
+    </div>
+  </section>
+
+  <section id="fonctions" aria-labelledby="lent-titre">
+    <div class="frame row">
+      <div class="text rise">
+        <h2 id="lent-titre" class="head">Pourquoi mon PC rame&nbsp;?</h2>
+        <p class="lead">Vigie pose la question à votre place, toutes les cinq secondes.</p>
+        <p style="margin-top:22px">Processeur saturé, mémoire qui manque, programme qui grossit depuis une heure, disque à bout de souffle&nbsp;: chaque constat vient avec ses chiffres et une seule suggestion. Si vous le souhaitez, une notification vous prévient, au plus une fois par quart d'heure.</p>
+      </div>
+      <figure class="shot rise">
+        <img src="assets/diagnostics.png" alt="La vue Diagnostics : deux constats, la mémoire validée qui approche de sa limite et un ordinateur allumé depuis 35 jours, chacun avec son explication et une suggestion." width="1184" height="741" loading="lazy">
+      </figure>
+    </div>
+  </section>
+
+  <section class="field-surface" aria-labelledby="temps-titre">
+    <div class="frame row flip">
+      <div class="text rise">
+        <h2 id="temps-titre" class="head">Remontez le temps.</h2>
+        <p class="lead">Processeur, mémoire, réseau, disques et cartes graphiques, de la dernière minute aux sept derniers jours.</p>
+        <div class="chips" aria-hidden="true"><span class="on">1 min</span><span>10 min</span><span>1 h</span><span>6 h</span><span>24 h</span><span>7 jours</span></div>
+        <p style="margin-top:22px">Survolez une courbe pour lire une valeur et son heure, faites-la glisser pour revenir en arrière. Les pics courts restent visibles sur les longues durées. Chaque processus sélectionné a aussi son propre historique.</p>
+      </div>
+      <figure class="shot rise">
+        <img src="assets/performance.png" alt="La vue Performances : cartes processeur avec ses cœurs, mémoire, réseau, disque et cartes graphiques, chacune avec sa courbe sur la dernière minute." width="1184" height="821" loading="lazy">
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="dev-titre">
+    <div class="frame">
+      <div class="pair-head">
+        <h2 id="dev-titre" class="head rise">Qui tient le port&nbsp;3000&nbsp;? Qui verrouille ce fichier&nbsp;?</h2>
+        <div class="text rise">
+          <p>Tapez un numéro de port&nbsp;: Vigie trouve le processus qui l'écoute. Déposez un fichier que Windows refuse de supprimer&nbsp;: il liste les programmes qui le gardent ouvert. Dans les deux cas, «&nbsp;Fin de tâche&nbsp;» demande d'abord confirmation et nomme ce qui va s'arrêter.</p>
+        </div>
+      </div>
+      <div class="pair">
+        <figure class="shot rise">
+          <img src="assets/ports.png" alt="La vue Ports, filtrée sur 3000 : un processus Python écoute sur 127.0.0.1, port 3000." width="1184" height="172" loading="lazy">
+        </figure>
+        <figure class="shot rise">
+          <img src="assets/files.png" alt="La vue Fichiers : le fichier devis-atelier-brume.pdf est tenu par un programme console, avec un bouton Fin de tâche." width="1184" height="316" loading="lazy">
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="field-surface" aria-labelledby="clavier-titre">
+    <div class="frame row">
+      <div class="text rise">
+        <h2 id="clavier-titre" class="head">Ctrl+K, et le reste suit.</h2>
+        <p class="lead">Une palette de commandes, des raccourcis pour chaque vue, un menu au clic droit partout, des listes qui se parcourent aux flèches.</p>
+        <p style="margin-top:22px">Programmes au démarrage, services, réglages&nbsp;: tout est à deux touches. Et si vous le voulez, Ctrl+Maj+Échap ouvre Vigie à la place du Gestionnaire des tâches, réversible à tout moment.</p>
+      </div>
+      <figure class="shot rise">
+        <img src="assets/palette.png" alt="La palette de commandes ouverte au-dessus de la liste des processus : aller aux vues, rechercher, mettre fin à une tâche, changer de thème." width="1184" height="741" loading="lazy">
+      </figure>
+    </div>
+  </section>
+
+  <section id="comparer" aria-labelledby="comparer-titre">
+    <div class="frame">
+      <h2 id="comparer-titre" class="head compare-head rise">Ce que le Gestionnaire des tâches ne dit pas<span class="eye" aria-hidden="true"></span></h2>
+      <div class="table rise" role="table" aria-label="Comparaison avec le Gestionnaire des tâches de Windows">
+        <div class="th" role="columnheader"></div>
+        <div class="th" role="columnheader">Gestionnaire des tâches</div>
+        <div class="th vigie" role="columnheader">Vigie</div>
+
+        <div class="rh odd" role="rowheader">Historique des courbes</div>
+        <div class="tm odd" data-label="Gestionnaire des tâches" role="cell">La dernière minute</div>
+        <div class="vigie odd" data-label="Vigie" role="cell">Jusqu'à sept jours, à faire défiler</div>
+
+        <div class="rh" role="rowheader">Pourquoi c'est lent</div>
+        <div class="tm muted" data-label="Gestionnaire des tâches" role="cell">À deviner</div>
+        <div class="vigie" data-label="Vigie" role="cell">Des constats avec leurs preuves et une suggestion</div>
+
+        <div class="rh odd" role="rowheader">Qui écoute sur un port</div>
+        <div class="tm odd muted" data-label="Gestionnaire des tâches" role="cell">Non<small>Le Moniteur de ressources, à part</small></div>
+        <div class="vigie odd" data-label="Vigie" role="cell">Recherche par port, fin de tâche</div>
+
+        <div class="rh" role="rowheader">Qui verrouille un fichier</div>
+        <div class="tm muted" data-label="Gestionnaire des tâches" role="cell">Non<small>Le Moniteur de ressources, à part</small></div>
+        <div class="vigie" data-label="Vigie" role="cell">Glisser le fichier sur la fenêtre</div>
+
+        <div class="rh odd" role="rowheader">Alertes</div>
+        <div class="tm odd muted" data-label="Gestionnaire des tâches" role="cell">Non</div>
+        <div class="vigie odd" data-label="Vigie" role="cell">Notifications, seuils réglables</div>
+
+        <div class="rh" role="rowheader">Son propre coût</div>
+        <div class="tm muted" data-label="Gestionnaire des tâches" role="cell">Non affiché</div>
+        <div class="vigie" data-label="Vigie" role="cell">Dans la barre d'état, en permanence</div>
+      </div>
+      <p class="note rise" style="margin-top:24px">Comparé au Gestionnaire des tâches de Windows&nbsp;11. Vous y retrouvez aussi ses vues habituelles (Processus, Détails, Utilisateurs, Démarrage, Services) et les mêmes entrées au clic droit. Il reste l'outil du système&nbsp;: Vigie ne le remplace que si vous le demandez.</p>
+    </div>
+  </section>
+
+  <section id="questions" class="field-surface" aria-labelledby="questions-titre">
+    <div class="frame faq">
+      <h2 id="questions-titre" class="head rise">Questions</h2>
+      <div class="faq-list rise">
+        <details>
+          <summary>Est-ce gratuit&nbsp;?</summary>
+          <p>Oui, sans contrepartie. Vigie est un logiciel libre sous licence MIT, écrit en Rust.</p>
+        </details>
+        <details>
+          <summary>Qu'est-ce qui sort de ma machine&nbsp;?</summary>
+          <p>Rien. Vigie ne fait aucune requête réseau&nbsp;: pas de compte, pas de télémétrie, pas de mise à jour silencieuse. Ses réglages restent dans un fichier texte sur votre PC.</p>
+        </details>
+        <details>
+          <summary>Faut-il des droits administrateur&nbsp;?</summary>
+          <p>Non. Vigie s'installe pour votre compte seulement. Seuls arrêter un service système et remplacer le Gestionnaire des tâches demandent une confirmation administrateur, au moment où vous le faites.</p>
+        </details>
+        <details>
+          <summary>Pourquoi Windows affiche-t-il un avertissement&nbsp;?</summary>
+          <p>Cette première version n'est pas encore signée. Windows SmartScreen prévient donc au premier lancement&nbsp;: «&nbsp;Informations complémentaires&nbsp;», puis «&nbsp;Exécuter quand même&nbsp;».</p>
+        </details>
+        <details>
+          <summary>Et sur Mac ou Linux&nbsp;?</summary>
+          <p>Vigie s'y construit déjà et y montre les processus. Les performances, les diagnostics, les ports et le reste arrivent ensuite&nbsp;: tout est développé sous Windows d'abord.</p>
+        </details>
+        <details>
+          <summary>Comment le désinstaller&nbsp;?</summary>
+          <p>Depuis Paramètres, Applications, comme n'importe quel programme. S'il remplaçait le Gestionnaire des tâches, la désinstallation lui rend d'abord sa place. Vos réglages restent dans <code>%APPDATA%\Vigie</code>, au cas où.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section id="telecharger" class="field-lagoon download" aria-labelledby="telecharger-titre">
+    <div class="frame">
+      <h2 id="telecharger-titre" class="head rise">Gardez un œil dessus.</h2>
+      <div class="download-foot rise">
+        <a class="button button-ink" href="https://github.com/EvanPluchart/vigie/releases/latest">Télécharger Vigie 0.1</a>
+        <p class="note">Windows 10 et 11, installeur sans droits administrateur ou version portable. Français et anglais.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="frame">
+    <img src="logo-reversed.svg" alt="Vigie" width="82" height="28">
+    <span>Par Evan Pluchart · licence MIT</span>
+    <a href="https://github.com/EvanPluchart/vigie">Code source</a>
+    <a href="en/" hreflang="en" lang="en">English</a>
+  </div>
+</footer>
+
+<script src="assets/main.js" defer></script>
+</body>
+</html>

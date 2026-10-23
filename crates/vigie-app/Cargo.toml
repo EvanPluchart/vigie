@@ -13,3 +13,11 @@ path = "src/main.rs"
 [dependencies]
 vigie-probe.workspace = true
 vigie-core.workspace = true
+vigie-shell.workspace = true
+slint.workspace = true
+flume.workspace = true
+anyhow.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
+winresource.workspace = true

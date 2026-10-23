@@ -32,4 +32,4 @@ Launch with test flags (`--tab`, `--sort`, `--filter`, `--interval`, `--dark`/`-
 
 ## Skills
 
-`.claude/skills/logo-design` (local, not committed) designs the logo and app icon. Brief: a lookout post or spyglass, simple enough to read at 16 px in the taskbar and the tray.
+The `logo-design` skill (installed globally, not part of this repository) designs the logo and app icon. Brief: a lookout post or spyglass, simple enough to read at 16 px in the taskbar and the tray.
