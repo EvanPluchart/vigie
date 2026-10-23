@@ -8,9 +8,10 @@ use std::time::{Duration, Instant};
 use vigie_core::diagnose::{Diagnostics, Finding, Input};
 use vigie_core::history::SECOND;
 use vigie_core::perf::{PerfFrame, Performance};
-use vigie_core::{Core, Details, Group, Pid, Sort};
+use vigie_core::{Core, Details, Group, Pid, Sort, tools};
 use vigie_probe::{
-    Action, Icon, Probe, ProbeError, ProcDetails, Sample, SystemInfo, SystemProbe, SystemSample,
+    Action, Icon, Locker, Probe, ProbeError, ProcDetails, Sample, Service, Socket, StartupItem,
+    StartupLocation, SystemInfo, SystemProbe, SystemSample,
 };
 
 use crate::AppWindow;
@@ -40,6 +41,25 @@ pub enum Command {
     Select(Option<(Pid, u32)>),
     /// The process history panel opened or closed.
     History(bool),
+    /// The Ports view's search.
+    PortsFilter(String),
+    /// Who holds this file?
+    CheckFile(PathBuf),
+    /// The Startup view's pane: 0 startup apps, 1 services.
+    StartupPane(i32),
+    /// Read the shown pane of the Startup view again.
+    StartupRefresh,
+    SetStartup {
+        location: StartupLocation,
+        name: String,
+        enabled: bool,
+    },
+    ServiceFilter(String),
+    /// Start (`true`) or stop a service, by short name. The UI confirmed stopping already.
+    ControlService {
+        name: String,
+        start: bool,
+    },
     /// Act on a process, named by its PID and the low 31 bits of its start time. The UI has
     /// already asked the user to confirm when the action is destructive.
     Act {
@@ -112,12 +132,16 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
         history_open: settings.history_open,
         // Started on the Diagnostics view: send its state with the first frame.
         diagnosis_fresh: settings.tab == 2,
+        tools: Tools {
+            startup_dirty: settings.tab == 5,
+            ..Tools::default()
+        },
         ..Views::default()
     };
     loop {
         match probe.sample(&mut sample) {
             Ok(()) => {
-                let icons = exes.fill(&mut probe, &mut core, &sample);
+                let mut icons = exes.fill(&mut probe, &mut core, &sample);
                 // Machine-wide figures every tick (about 0.25 ms): they feed the history.
                 // GPU counters cost driver round trips: every other tick while the Performance
                 // view is shown, every 10 s otherwise, for the history (decisions 0005, 0006).
@@ -139,6 +163,15 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                 };
                 views.started_ns.get_or_insert(sample.at_ns);
                 views.diagnose(&core, sample.logical_cores, false);
+                views.tools.read(
+                    &mut probe,
+                    &core,
+                    &sample,
+                    &mut exes,
+                    views.tab,
+                    pace.visible,
+                    &mut icons,
+                );
                 if !send(&window, &mut core, &sample, &mut views, icons, None) {
                     return;
                 }
@@ -168,6 +201,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                             Command::Tab(tab) => {
                                 views.tab = tab;
                                 views.timeline.invalidate();
+                                views.tools.opened(tab);
                                 if tab == 2 {
                                     views.diagnose(&core, sample.logical_cores, true);
                                     views.diagnosis_fresh = true;
@@ -187,6 +221,42 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                             Command::History(open) => {
                                 views.history_open = open;
                                 views.process_timeline.invalidate();
+                            }
+                            Command::PortsFilter(filter) => {
+                                views.tools.ports_filter = filter;
+                                views.tools.ports_fresh = true;
+                            }
+                            Command::CheckFile(path) => {
+                                views.tools.check(&mut probe, &core, &sample, path);
+                            }
+                            Command::StartupPane(pane) => {
+                                views.tools.pane = pane;
+                                if pane == 1 && !views.tools.services_loaded {
+                                    views.tools.services_dirty = true;
+                                }
+                            }
+                            Command::StartupRefresh => {
+                                if views.tools.pane == 1 {
+                                    views.tools.services_dirty = true;
+                                } else {
+                                    views.tools.startup_dirty = true;
+                                }
+                            }
+                            Command::SetStartup {
+                                location,
+                                name,
+                                enabled,
+                            } => {
+                                notice = views
+                                    .tools
+                                    .set_startup(&mut probe, location, &name, enabled);
+                            }
+                            Command::ServiceFilter(filter) => {
+                                views.tools.service_filter = filter;
+                                views.tools.services_fresh = true;
+                            }
+                            Command::ControlService { name, start } => {
+                                notice = views.tools.control(&mut probe, &name, start);
                             }
                             Command::Window { focused, visible } => {
                                 let woke = (focused && !pace.focused) || (visible && !pace.visible);
@@ -212,10 +282,21 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                                 );
                                 // Show the effect (a process gone, say) without waiting for the tick.
                                 resample = true;
+                                views.tools.after_action();
                             }
                         }
                     }
-                    if !send(&window, &mut core, &sample, &mut views, Vec::new(), notice) {
+                    let mut icons = Vec::new();
+                    views.tools.read(
+                        &mut probe,
+                        &core,
+                        &sample,
+                        &mut exes,
+                        views.tab,
+                        pace.visible,
+                        &mut icons,
+                    );
+                    if !send(&window, &mut core, &sample, &mut views, icons, notice) {
                         return;
                     }
                     if resample {
@@ -328,6 +409,7 @@ struct Views {
     diagnosed_ns: Option<u64>,
     /// The findings changed since the Diagnostics view last got them.
     diagnosis_fresh: bool,
+    tools: Tools,
 }
 
 impl Views {
@@ -408,6 +490,7 @@ fn send(
     if views.tab == 1 {
         frame.perf_offset = views.range.shown_offset(sample.at_ns);
     }
+    frame.tools = std::mem::take(&mut views.tools.ui);
     if views.tab == 0 && views.history_open {
         let tracked = views
             .selected
@@ -462,21 +545,15 @@ impl ExeCache {
             let (Some(exe), Some(&start)) = (&found.exe, starts.get(&found.pid)) else {
                 continue;
             };
-            let details = self.by_path.entry(exe.clone()).or_insert_with(|| {
-                let info = probe.exe_info(exe, self.icon_size);
-                let icon = info.icon.map(|icon| {
-                    let id = self.next_icon;
-                    self.next_icon += 1;
-                    icons.push((id, icon));
-                    id
-                });
-                Details {
-                    icon,
-                    publisher: info.publisher.map(Into::into),
-                    description: info.description.map(Into::into),
-                }
-            });
-            core.set_details((found.pid, start), details.clone());
+            let details = Self::lookup(
+                &mut self.by_path,
+                &mut self.next_icon,
+                self.icon_size,
+                probe,
+                exe,
+                &mut icons,
+            );
+            core.set_details((found.pid, start), details);
         }
         // Processes that could not be read get empty details, so they are not asked again.
         for pid in core.missing_details(sample) {
@@ -485,6 +562,270 @@ impl ExeCache {
             }
         }
         icons
+    }
+}
+
+impl ExeCache {
+    /// What `exe` says about itself, read once; a new icon is added to `icons`.
+    fn lookup(
+        by_path: &mut HashMap<PathBuf, Details>,
+        next_icon: &mut u32,
+        icon_size: u32,
+        probe: &mut impl Probe,
+        exe: &std::path::Path,
+        icons: &mut Vec<(u32, Icon)>,
+    ) -> Details {
+        if let Some(details) = by_path.get(exe) {
+            return details.clone();
+        }
+        let info = probe.exe_info(exe, icon_size);
+        let icon = info.icon.map(|icon| {
+            let id = *next_icon;
+            *next_icon += 1;
+            icons.push((id, icon));
+            id
+        });
+        let details = Details {
+            icon,
+            publisher: info.publisher.map(Into::into),
+            description: info.description.map(Into::into),
+        };
+        by_path.insert(exe.to_path_buf(), details.clone());
+        details
+    }
+
+    fn details_of(
+        &mut self,
+        probe: &mut impl Probe,
+        exe: &std::path::Path,
+        icons: &mut Vec<(u32, Icon)>,
+    ) -> Details {
+        Self::lookup(
+            &mut self.by_path,
+            &mut self.next_icon,
+            self.icon_size,
+            probe,
+            exe,
+            icons,
+        )
+    }
+}
+
+/// How often the Ports view reads the socket tables (decision 0007).
+const PORTS_EVERY: Duration = Duration::from_secs(2);
+
+/// State of the developer tools views (decision 0007). Every read happens on demand: while
+/// Ports is shown, when a file is checked, when Startup opens or is refreshed.
+#[derive(Default)]
+struct Tools {
+    sockets: Vec<Socket>,
+    ports_filter: String,
+    ports_at: Option<Instant>,
+    /// The search changed: rebuild the rows from the last read.
+    ports_fresh: bool,
+    lock_path: Option<PathBuf>,
+    lockers: Vec<Locker>,
+    /// An action may have ended a holder: ask again then, once the process is gone.
+    locks_again_at: Option<Instant>,
+    startup: Vec<StartupItem>,
+    startup_dirty: bool,
+    /// 0 startup apps, 1 services.
+    pane: i32,
+    services: Vec<Service>,
+    services_loaded: bool,
+    services_dirty: bool,
+    services_fresh: bool,
+    service_filter: String,
+    /// A started or stopped service takes a moment to settle: read again then.
+    services_again_at: Option<Instant>,
+    /// What the next frame carries.
+    ui: model::ToolsUi,
+}
+
+impl Tools {
+    fn opened(&mut self, tab: i32) {
+        match tab {
+            // Read at once, not 2 s later.
+            3 => self.ports_at = None,
+            5 => {
+                if self.startup.is_empty() {
+                    self.startup_dirty = true;
+                }
+                if self.pane == 1 && !self.services_loaded {
+                    self.services_dirty = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// After ending a process: the views that list processes change.
+    fn after_action(&mut self) {
+        self.ports_at = None;
+        self.services_dirty |= self.services_loaded;
+        if self.lock_path.is_some() {
+            self.locks_again_at = Some(Instant::now() + Duration::from_millis(500));
+        }
+    }
+
+    fn unsupported(&mut self, error: &ProbeError) -> bool {
+        let unsupported = matches!(error, ProbeError::Unsupported);
+        if unsupported {
+            self.ui.available = Some(false);
+        }
+        unsupported
+    }
+
+    /// Reads what the shown view needs now and stages it in `ui`.
+    #[allow(clippy::too_many_arguments)]
+    fn read(
+        &mut self,
+        probe: &mut impl Probe,
+        core: &Core,
+        sample: &Sample,
+        exes: &mut ExeCache,
+        tab: i32,
+        visible: bool,
+        icons: &mut Vec<(u32, Icon)>,
+    ) {
+        if tab == 3 && visible {
+            let due = self.ports_at.is_none_or(|at| at.elapsed() >= PORTS_EVERY);
+            if due {
+                self.ports_at = Some(Instant::now());
+                if let Err(error) = probe.sockets(&mut self.sockets) {
+                    self.unsupported(&error);
+                    self.sockets.clear();
+                }
+            }
+            if due || self.ports_fresh {
+                self.ports_fresh = false;
+                let rows = tools::port_rows(
+                    &self.sockets,
+                    core.labels(sample),
+                    sample.self_pid,
+                    &self.ports_filter,
+                );
+                self.ui.ports = Some(model::port_rows_ui(&rows));
+            }
+        }
+        if tab == 5 && self.startup_dirty {
+            self.startup_dirty = false;
+            match probe.startup_items(&mut self.startup) {
+                Ok(()) => tools::sort_startup(&mut self.startup),
+                Err(error) => {
+                    self.unsupported(&error);
+                    self.startup.clear();
+                }
+            }
+            let details: Vec<Option<Details>> = self
+                .startup
+                .iter()
+                .map(|item| {
+                    item.exe
+                        .as_ref()
+                        .map(|exe| exes.details_of(probe, exe, icons))
+                })
+                .collect();
+            self.ui.startup = Some(model::startup_rows_ui(&self.startup, &details));
+        }
+        if tab == 5
+            && self
+                .services_again_at
+                .is_some_and(|at| Instant::now() >= at)
+        {
+            self.services_again_at = None;
+            self.services_dirty = true;
+        }
+        if tab == 5 && self.services_dirty {
+            self.services_dirty = false;
+            self.services_fresh = true;
+            self.services_loaded = true;
+            if let Err(error) = probe.services(&mut self.services) {
+                self.unsupported(&error);
+                self.services.clear();
+            }
+        }
+        if tab == 5 && self.services_fresh {
+            self.services_fresh = false;
+            let rows = tools::service_rows(&self.services, &self.service_filter);
+            self.ui.services = Some(model::service_rows_ui(&rows));
+        }
+        if tab == 4
+            && self.locks_again_at.is_some_and(|at| Instant::now() >= at)
+            && let Some(path) = self.lock_path.clone()
+        {
+            self.check(probe, core, sample, path);
+        }
+    }
+
+    /// Who holds `path`: stages the answer for the Files view.
+    fn check(&mut self, probe: &mut impl Probe, core: &Core, sample: &Sample, path: PathBuf) {
+        let status = match probe.lockers(&path, &mut self.lockers) {
+            Ok(()) => 1,
+            Err(ProbeError::NotFound) => 2,
+            Err(ProbeError::IsFolder) => 3,
+            Err(error) => {
+                self.unsupported(&error);
+                4
+            }
+        };
+        if status != 1 {
+            self.lockers.clear();
+        }
+        let rows = tools::lock_rows(&self.lockers, core.labels(sample), sample.self_pid);
+        self.ui.locks = Some(model::LocksUi {
+            rows: model::lock_rows_ui(&rows),
+            status,
+            path: path.to_string_lossy().as_ref().into(),
+        });
+        self.lock_path = Some(path);
+        self.locks_again_at = None;
+    }
+
+    fn set_startup(
+        &mut self,
+        probe: &mut impl Probe,
+        location: StartupLocation,
+        name: &str,
+        enabled: bool,
+    ) -> Option<Notice> {
+        let kind = match probe.set_startup(location, name, enabled) {
+            Ok(()) if enabled => Notice::STARTUP_ENABLED,
+            Ok(()) => Notice::STARTUP_DISABLED,
+            Err(ProbeError::Denied) => Notice::CHANGE_DENIED,
+            Err(_) => Notice::CHANGE_FAILED,
+        };
+        self.startup_dirty = true;
+        Some(Notice {
+            kind,
+            name: name.into(),
+            pid: 0,
+            count: 0,
+        })
+    }
+
+    fn control(&mut self, probe: &mut impl Probe, name: &str, start: bool) -> Option<Notice> {
+        let display = self
+            .services
+            .iter()
+            .find(|s| s.name == name)
+            .map_or(name, |s| s.display_name.as_str())
+            .to_owned();
+        let kind = match probe.control_service(name, start) {
+            Ok(()) if start => Notice::SERVICE_STARTED,
+            Ok(()) => Notice::SERVICE_STOPPED,
+            Err(ProbeError::Denied) => Notice::CHANGE_DENIED,
+            Err(ProbeError::DependentsRunning) => Notice::DEPENDENTS,
+            Err(_) => Notice::CHANGE_FAILED,
+        };
+        self.services_dirty = true;
+        self.services_again_at = Some(Instant::now() + Duration::from_millis(1500));
+        Some(Notice {
+            kind,
+            name: display.into(),
+            pid: 0,
+            count: 0,
+        })
     }
 }
 
@@ -514,11 +855,12 @@ mod tests {
 
     use super::*;
 
-    /// Records actions instead of touching any process.
+    /// Records actions instead of touching any process, service or startup item.
     #[derive(Default)]
     struct FakeProbe {
         acted: Vec<(Pid, Action)>,
         refuse: Option<Pid>,
+        controlled: Vec<(String, bool)>,
     }
 
     impl Probe for FakeProbe {
@@ -529,6 +871,22 @@ mod tests {
             out.clear();
             Ok(())
         }
+        fn control_service(&mut self, name: &str, start: bool) -> Result<()> {
+            self.controlled.push((name.to_owned(), start));
+            match name {
+                "Locked" => Err(ProbeError::Denied),
+                "Needed" => Err(ProbeError::DependentsRunning),
+                _ => Ok(()),
+            }
+        }
+
+        fn set_startup(&mut self, location: StartupLocation, _name: &str, _on: bool) -> Result<()> {
+            match location {
+                StartupLocation::MachineRun => Err(ProbeError::Denied),
+                _ => Ok(()),
+            }
+        }
+
         fn act(&mut self, target: Target, action: Action) -> Result<()> {
             if self.refuse == Some(target.pid) {
                 return Err(ProbeError::Denied);
@@ -608,6 +966,45 @@ mod tests {
             "benchmarks keep the chosen interval"
         );
     }
+    #[test]
+    fn service_and_startup_changes_say_what_happened() {
+        let mut probe = FakeProbe::default();
+        let mut tools = Tools::default();
+        tools.services.push(Service {
+            name: "Spooler".into(),
+            display_name: "Print Spooler".into(),
+            state: vigie_probe::ServiceState::Running,
+            start_type: None,
+            pid: None,
+        });
+        let notice = tools.control(&mut probe, "Spooler", false).unwrap();
+        assert_eq!(
+            (notice.kind, notice.name.as_str()),
+            (Notice::SERVICE_STOPPED, "Print Spooler")
+        );
+        assert!(tools.services_dirty, "read again to show the new state");
+        assert_eq!(
+            tools.control(&mut probe, "Locked", true).unwrap().kind,
+            Notice::CHANGE_DENIED
+        );
+        assert_eq!(
+            tools.control(&mut probe, "Needed", false).unwrap().kind,
+            Notice::DEPENDENTS
+        );
+        assert_eq!(probe.controlled.len(), 3);
+        let off = tools
+            .set_startup(&mut probe, StartupLocation::UserRun, "App", false)
+            .unwrap();
+        assert_eq!(
+            (off.kind, off.name.as_str()),
+            (Notice::STARTUP_DISABLED, "App")
+        );
+        let denied = tools
+            .set_startup(&mut probe, StartupLocation::MachineRun, "Tool", true)
+            .unwrap();
+        assert_eq!(denied.kind, Notice::CHANGE_DENIED);
+    }
+
     #[test]
     fn failures_are_reported() {
         let (mut probe, core, sample) = setup();

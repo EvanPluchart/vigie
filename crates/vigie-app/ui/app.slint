@@ -3,8 +3,9 @@ import { Theme } from "theme.slint";
 import { DiskCard, GpuCard, PerfView, PerformanceView } from "performance.slint";
 import { Graph, GraphData, RangeBar, Spans } from "timeline.slint";
 import { CheckSummary, DiagnosticsView, FindingRow } from "diagnostics.slint";
+import { FilesView, LockRowUi, PortRowUi, PortsView, ServiceRowUi, StartupRowUi, StartupView } from "tools.slint";
 
-export { CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, PerfView }
+export { CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, PerfView, PortRowUi, ServiceRowUi, StartupRowUi }
 
 export struct ProcRow {
     // Identity for model patching (see src/model.rs).
@@ -297,6 +298,36 @@ component Rail inherits Rectangle {
                 clicked => { root.selected(2); }
             }
         }
+        HorizontalLayout {
+            alignment: center;
+            RailItem {
+                label: @tr("Ports");
+                // A plug.
+                icon: "M 9 3 L 9 8 M 15 3 L 15 8 M 6 8 L 18 8 L 18 11 A 6 6 0 0 1 6 11 Z M 12 17 L 12 21";
+                active: root.tab == 3;
+                clicked => { root.selected(3); }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            RailItem {
+                label: @tr("Files");
+                // A padlock.
+                icon: "M 6 11 L 18 11 L 18 20 L 6 20 Z M 8.5 11 L 8.5 8 A 3.5 3.5 0 0 1 15.5 8 L 15.5 11";
+                active: root.tab == 4;
+                clicked => { root.selected(4); }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            RailItem {
+                label: @tr("Startup");
+                // A power symbol.
+                icon: "M 12 3 L 12 11 M 7.2 6.5 A 7 7 0 1 0 16.8 6.5";
+                active: root.tab == 5;
+                clicked => { root.selected(5); }
+            }
+        }
     }
 }
 
@@ -394,6 +425,31 @@ export component AppWindow inherits Window {
     callback process-range-changed(int, int);
     // The selection changed: Rust keeps a history of the selected process.
     callback selection-changed(int, int);
+    // Developer tools (decision 0007). `tools-available` is false where the probe has none.
+    in property <bool> tools-available: true;
+    in property <[PortRowUi]> ports;
+    in property <bool> ports-ready;
+    in-out property <string> ports-filter;
+    in-out property <PortRowUi> ports-selected;
+    callback ports-filter-edited(string);
+    in property <[LockRowUi]> locks;
+    in property <int> locks-status;
+    in property <string> locks-path;
+    in-out property <string> file-path;
+    in property <bool> drop-hover;
+    callback check-file(string);
+    in property <[StartupRowUi]> startup-items;
+    in property <[ServiceRowUi]> services;
+    in property <bool> startup-ready;
+    in property <bool> services-ready;
+    in-out property <int> startup-pane;
+    in-out property <string> service-filter;
+    callback startup-pane-changed(int);
+    callback startup-toggled(int, string, bool);
+    callback startup-refresh();
+    callback service-filter-edited(string);
+    // Start (true) or stop a service, by short name.
+    callback service-control(string, bool);
     in-out property <ProcRow> selected;
     callback show-about();
     callback sort-clicked(int);
@@ -419,6 +475,8 @@ export component AppWindow inherits Window {
     property <int> confirm-start;
     property <int> confirm-count;
     property <bool> searching: root.search-text != "";
+    // Stopping a service (confirm-action 20): its short name.
+    property <string> confirm-service;
 
     // Destructive actions ask first and name their target; the others run at once.
     public function ask(item: ProcRow, action: int) {
@@ -473,7 +531,19 @@ export component AppWindow inherits Window {
             : root.notice-kind == 7 ? @tr("{} (PID {}) has already exited", root.notice-name, root.notice-pid)
             : root.notice-kind == 8 ? @tr("Access denied for {} (PID {}). Restart Vigie as administrator to act on it.", root.notice-name, root.notice-pid)
             : root.notice-kind == 9 ? @tr("Could not act on {} (PID {})", root.notice-name, root.notice-pid)
+            : root.notice-kind == 10 ? @tr("{} will start with Windows", root.notice-name)
+            : root.notice-kind == 11 ? @tr("{} will no longer start with Windows", root.notice-name)
+            : root.notice-kind == 12 ? @tr("Started {}", root.notice-name)
+            : root.notice-kind == 13 ? @tr("Stopped {}", root.notice-name)
+            : root.notice-kind == 14 ? @tr("{} cannot stop while services that depend on it are running", root.notice-name)
+            : root.notice-kind == 15 ? @tr("Access denied: changing {} needs Vigie to run as administrator.", root.notice-name)
+            : root.notice-kind == 16 ? @tr("Could not change {}", root.notice-name)
             : "";
+    }
+
+    // Notices that report a failure (see src/model.rs for the codes).
+    function notice-failed() -> bool {
+        return (root.notice-kind >= 7 && root.notice-kind <= 9) || root.notice-kind >= 14;
     }
 
     function clear-search() {
@@ -506,9 +576,9 @@ export component AppWindow inherits Window {
                 search.focus();
                 return accept;
             }
-            // Ctrl+1 to Ctrl+3 switch views, in rail order.
-            if (event.modifiers.control && (event.text == "1" || event.text == "2" || event.text == "3")) {
-                root.show-tab(event.text == "1" ? 0 : event.text == "2" ? 1 : 2);
+            // Ctrl+1 to Ctrl+6 switch views, in rail order.
+            if (event.modifiers.control && event.text >= "1" && event.text <= "6" && event.text.character-count == 1) {
+                root.show-tab(event.text.to-float() - 1);
                 return accept;
             }
             // Ctrl+H shows or hides the history of the selected process.
@@ -623,10 +693,10 @@ export component AppWindow inherits Window {
                     spacing: Theme.space-2;
                     Cell {
                         // A failed action is said here, next to the buttons that started it.
-                        text: root.notice-kind >= 7 ? root.notice-text()
+                        text: root.notice-failed() ? root.notice-text()
                             : root.has-selection ? @tr("{} · PID {}", root.selected.name, root.selected.pid)
                             : @tr("Select a process to act on it");
-                        color: root.notice-kind >= 7 ? Theme.danger
+                        color: root.notice-failed() ? Theme.danger
                             : root.has-selection ? Theme.text : Theme.text-muted;
                         wrap: word-wrap;
                         horizontal-stretch: 1;
@@ -933,6 +1003,52 @@ export component AppWindow inherits Window {
                     root.confirm-open = true;
                 }
             }
+
+            if root.tab == 3: PortsView {
+                rows: root.ports;
+                icons: root.icons;
+                available: root.tools-available;
+                ready: root.ports-ready;
+                filter <=> root.ports-filter;
+                selected <=> root.ports-selected;
+                filter-edited(text) => { root.ports-filter-edited(text); }
+                end(row) => { root.ask({ name: row.name, pid: row.pid, start: row.start }, 0); }
+            }
+
+            if root.tab == 4: FilesView {
+                rows: root.locks;
+                icons: root.icons;
+                available: root.tools-available;
+                drop-hover: root.drop-hover;
+                status: root.locks-status;
+                checked-path: root.locks-path;
+                path <=> root.file-path;
+                check(path) => { root.check-file(path); }
+                end(row) => { root.ask({ name: row.name, pid: row.pid, start: row.start }, 0); }
+            }
+
+            if root.tab == 5: StartupView {
+                items: root.startup-items;
+                services: root.services;
+                icons: root.icons;
+                available: root.tools-available;
+                items-ready: root.startup-ready;
+                services-ready: root.services-ready;
+                pane <=> root.startup-pane;
+                service-filter <=> root.service-filter;
+                pane-changed(pane) => { root.startup-pane-changed(pane); }
+                toggle(item) => { root.startup-toggled(item.location, item.name, !item.enabled); }
+                refresh => { root.startup-refresh(); }
+                service-filter-edited(text) => { root.service-filter-edited(text); }
+                start-service(service) => { root.service-control(service.name, true); }
+                // Stopping can break what depends on the service: ask first, naming it.
+                stop-service(service) => {
+                    root.confirm-action = 20;
+                    root.confirm-name = service.display;
+                    root.confirm-service = service.name;
+                    root.confirm-open = true;
+                }
+            }
             }
             }
 
@@ -963,10 +1079,11 @@ export component AppWindow inherits Window {
                         }
                     }
                     Cell {
-                        text: root.notice-kind != 0 && root.notice-kind < 7 ? root.notice-text()
+                        // Failures show next to the buttons in the process view, here elsewhere.
+                        text: root.notice-kind != 0 && (root.notice-kind < 7 || root.tab != 0) ? root.notice-text()
                             : root.searching ? @tr("{} of {} processes", root.matching-count, root.process-count)
                             : @tr("{} processes", root.process-count);
-                        color: Theme.text-muted;
+                        color: root.tab != 0 && root.notice-failed() ? Theme.danger : Theme.text-muted;
                         font-size: Theme.font-caption;
                         horizontal-stretch: 1;
                     }
@@ -1001,7 +1118,8 @@ export component AppWindow inherits Window {
                 padding: Theme.space-6;
                 spacing: Theme.space-3;
                 Text {
-                    text: root.confirm-action == 0 ? @tr("End {} (PID {})?", root.confirm-name, root.confirm-pid)
+                    text: root.confirm-action == 20 ? @tr("Stop the service {}?", root.confirm-name)
+                        : root.confirm-action == 0 ? @tr("End {} (PID {})?", root.confirm-name, root.confirm-pid)
                         : root.confirm-action == 1 ? @tr("End {} (PID {}) and its {} child processes?", root.confirm-name, root.confirm-pid, root.confirm-count)
                         : root.confirm-action == 2 ? @tr("Suspend {} (PID {})?", root.confirm-name, root.confirm-pid)
                         : @tr("Set the priority of {} (PID {}) to {}?", root.confirm-name, root.confirm-pid, root.priority-name(root.confirm-action));
@@ -1011,7 +1129,8 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                 }
                 Text {
-                    text: root.confirm-action == 0 ? @tr("Unsaved work in this program will be lost.")
+                    text: root.confirm-action == 20 ? @tr("Programs and services that rely on it may stop working until it starts again.")
+                        : root.confirm-action == 0 ? @tr("Unsaved work in this program will be lost.")
                         : root.confirm-action == 1 ? @tr("Unsaved work in these programs will be lost.")
                         : root.confirm-action == 2 ? @tr("It stops running until you resume it. Suspending a system process can freeze Windows.")
                         : @tr("A high priority can slow down the rest of the system.");
@@ -1028,13 +1147,18 @@ export component AppWindow inherits Window {
                     }
                     Button {
                         primary: true;
-                        text: root.confirm-action == 0 ? @tr("End task")
+                        text: root.confirm-action == 20 ? @tr("Stop service")
+                            : root.confirm-action == 0 ? @tr("End task")
                             : root.confirm-action == 1 ? @tr("End process tree")
                             : root.confirm-action == 2 ? @tr("Suspend")
                             : @tr("Change priority");
                         clicked => {
                             root.confirm-open = false;
-                            root.request-action(root.confirm-pid, root.confirm-start, root.confirm-action);
+                            if (root.confirm-action == 20) {
+                                root.service-control(root.confirm-service, false);
+                            } else {
+                                root.request-action(root.confirm-pid, root.confirm-start, root.confirm-action);
+                            }
                         }
                     }
                 }

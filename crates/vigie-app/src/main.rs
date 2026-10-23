@@ -40,10 +40,16 @@ fn main() -> anyhow::Result<()> {
     app.set_perf_disks(ModelRc::from(Rc::new(VecModel::<DiskCard>::default())));
     app.set_perf_gpus(ModelRc::from(Rc::new(VecModel::<GpuCard>::default())));
     app.set_findings(ModelRc::from(Rc::new(VecModel::<FindingRow>::default())));
+    app.set_ports(ModelRc::from(Rc::new(VecModel::<PortRowUi>::default())));
+    app.set_locks(ModelRc::from(Rc::new(VecModel::<LockRowUi>::default())));
+    app.set_startup_items(ModelRc::from(Rc::new(VecModel::<StartupRowUi>::default())));
+    app.set_services(ModelRc::from(Rc::new(VecModel::<ServiceRowUi>::default())));
     app.set_tab(options.tab);
     app.set_perf_span_index(options.range);
     app.set_history_open(options.history);
-    app.set_search_text(options.filter.as_str().into());
+    if options.tab != 3 {
+        app.set_search_text(options.filter.as_str().into());
+    }
     show_sort(&app, options.sort);
     if let Some(columns) = &options.columns {
         let has = |name: &str| columns.iter().any(|c| c == name);
@@ -131,6 +137,68 @@ fn main() -> anyhow::Result<()> {
         let _ = tx.send(Command::History(open));
     });
     let tx = commands.clone();
+    app.on_ports_filter_edited(move |text| {
+        let _ = tx.send(Command::PortsFilter(text.to_string()));
+    });
+    let tx = commands.clone();
+    app.on_check_file(move |path| {
+        let path = path.trim().trim_matches('"');
+        if !path.is_empty() {
+            let _ = tx.send(Command::CheckFile(path.into()));
+        }
+    });
+    let tx = commands.clone();
+    app.on_startup_pane_changed(move |pane| {
+        let _ = tx.send(Command::StartupPane(pane));
+    });
+    let tx = commands.clone();
+    app.on_startup_refresh(move || {
+        let _ = tx.send(Command::StartupRefresh);
+    });
+    let tx = commands.clone();
+    app.on_startup_toggled(move |location, name, enabled| {
+        if let Some(location) = model::location_from_code(location) {
+            let _ = tx.send(Command::SetStartup {
+                location,
+                name: name.to_string(),
+                enabled,
+            });
+        }
+    });
+    let tx = commands.clone();
+    app.on_service_filter_edited(move |text| {
+        let _ = tx.send(Command::ServiceFilter(text.to_string()));
+    });
+    let tx = commands.clone();
+    app.on_service_control(move |name, start| {
+        let _ = tx.send(Command::ControlService {
+            name: name.to_string(),
+            start,
+        });
+    });
+    // Files dropped anywhere on the window: show who is using them. Every other event goes on
+    // to Slint untouched.
+    let tx = commands.clone();
+    let weak = app.as_weak();
+    app.window().on_winit_window_event(move |_, event| {
+        use slint::winit_030::winit::event::WindowEvent;
+        let Some(app) = weak.upgrade() else {
+            return slint::winit_030::EventResult::Propagate;
+        };
+        match event {
+            WindowEvent::HoveredFile(_) => app.set_drop_hover(true),
+            WindowEvent::HoveredFileCancelled => app.set_drop_hover(false),
+            WindowEvent::DroppedFile(path) => {
+                app.set_drop_hover(false);
+                app.set_file_path(path.to_string_lossy().as_ref().into());
+                app.invoke_show_tab(4);
+                let _ = tx.send(Command::CheckFile(path.clone()));
+            }
+            _ => {}
+        }
+        slint::winit_030::EventResult::Propagate
+    });
+    let tx = commands.clone();
     app.on_group_clicked(move |index| {
         let group = match index {
             0 => Group::Apps,
@@ -188,7 +256,12 @@ fn main() -> anyhow::Result<()> {
     let icon_size = (16.0 * app.window().scale_factor()).round() as u32;
     let settings = Settings {
         sort: options.sort,
-        filter: options.filter,
+        // On the Ports view at start, the search is for ports (below).
+        filter: if options.tab == 3 {
+            String::new()
+        } else {
+            options.filter.clone()
+        },
         interval: options.interval,
         icon_size,
         adaptive: !options.no_adaptive,
@@ -230,6 +303,19 @@ fn main() -> anyhow::Result<()> {
     for pid in options.expand {
         let _ = commands.send(Command::Toggle(pid));
     }
+    // The search box of the view shown at start: processes, or ports.
+    if options.tab == 3 && !options.filter.is_empty() {
+        app.set_ports_filter(options.filter.as_str().into());
+        let _ = commands.send(Command::PortsFilter(options.filter.clone()));
+    }
+    if options.services {
+        app.set_startup_pane(1);
+        let _ = commands.send(Command::StartupPane(1));
+    }
+    if let Some(path) = options.locks {
+        app.set_file_path(path.to_string_lossy().as_ref().into());
+        let _ = commands.send(Command::CheckFile(path));
+    }
 
     app.run().context("running the event loop")?;
     // The callbacks hold senders too: replace them so the sampler sees the channel close.
@@ -243,6 +329,15 @@ fn main() -> anyhow::Result<()> {
     app.on_process_range_changed(|_, _| {});
     app.on_selection_changed(|_, _| {});
     app.on_history_toggled(|_| {});
+    app.on_ports_filter_edited(|_| {});
+    app.on_check_file(|_| {});
+    app.on_startup_pane_changed(|_| {});
+    app.on_startup_refresh(|| {});
+    app.on_startup_toggled(|_, _, _| {});
+    app.on_service_filter_edited(|_| {});
+    app.on_service_control(|_, _| {});
+    app.window()
+        .on_winit_window_event(|_, _| slint::winit_030::EventResult::Propagate);
     app.on_request_action(|_, _, _| {});
     drop(pace_timer);
     let _ = sampler.join();

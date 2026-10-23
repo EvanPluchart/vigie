@@ -6,7 +6,7 @@ use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes|performance|diagnostics] [--sort=cpu|memory|name|pid[:asc]] \
 [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] \
-[--range=1m|10m|1h|6h|24h|7d] [--history]";
+[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=ports|files|startup|services] [--locks=PATH]";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
@@ -19,6 +19,10 @@ pub struct Options {
     pub range: i32,
     /// Opens the history panel of the selected process at start.
     pub history: bool,
+    /// Shows who holds this file at start (opens the Files view).
+    pub locks: Option<std::path::PathBuf>,
+    /// Opens the Services pane of the Startup view (`--tab=services`).
+    pub services: bool,
     /// `None` follows the system theme.
     pub dark: Option<bool>,
     /// Opens the About window at start, for screenshots.
@@ -45,6 +49,8 @@ impl Default for Options {
             tab: 0,
             range: 0,
             history: false,
+            locks: None,
+            services: false,
             dark: None,
             about: false,
             expand: Vec::new(),
@@ -68,6 +74,17 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--tab", Some("processes")) => options.tab = 0,
             ("--tab", Some("performance")) => options.tab = 1,
             ("--tab", Some("diagnostics")) => options.tab = 2,
+            ("--tab", Some("ports")) => options.tab = 3,
+            ("--tab", Some("files")) => options.tab = 4,
+            ("--tab", Some("startup")) => options.tab = 5,
+            ("--tab", Some("services")) => {
+                options.tab = 5;
+                options.services = true;
+            }
+            ("--locks", Some(path)) => {
+                options.locks = Some(path.into());
+                options.tab = 4;
+            }
             ("--range", Some(range)) => {
                 options.range = ["1m", "10m", "1h", "6h", "24h", "7d"]
                     .iter()
@@ -166,6 +183,8 @@ mod tests {
                 tab: 0,
                 range: 0,
                 history: false,
+                locks: None,
+                services: false,
                 dark: Some(true),
                 about: false,
                 expand: Vec::new(),
@@ -182,9 +201,13 @@ mod tests {
         assert!(parse(args(&["--frobnicate"])).is_err());
         assert!(parse(args(&["--sort=size"])).is_err());
         assert!(parse(args(&["--interval=10"])).is_err());
-        assert!(parse(args(&["--tab=ports"])).is_err());
+        assert!(parse(args(&["--tab=network"])).is_err());
         let m3 = parse(args(&["--tab=diagnostics", "--range=6h", "--history"])).unwrap();
         assert_eq!((m3.tab, m3.range, m3.history), (2, 3, true));
         assert!(parse(args(&["--range=2h"])).is_err());
+        let m4 = parse(args(&["--tab=ports"])).unwrap();
+        assert_eq!(m4.tab, 3);
+        let locks = parse(args(&[r"--locks=C:\x.txt"])).unwrap();
+        assert_eq!((locks.tab, locks.locks), (4, Some(r"C:\x.txt".into())));
     }
 }

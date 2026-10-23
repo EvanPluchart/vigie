@@ -6,11 +6,18 @@ use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, 
 use vigie_core::diagnose::{Culprit, Finding, Severity, Suggestion};
 use vigie_core::history::{History, SECOND, Series, graph_paths};
 use vigie_core::perf::{PerfFrame, Performance, Pressure, PressureCause, commit_share};
+use vigie_core::tools::{LockRow, PortRow};
 use vigie_core::tracker::{Tracked, Tracker};
-use vigie_core::{Frame, Group, Row, RowKind};
-use vigie_probe::{Icon, SystemInfo};
+use vigie_core::{Details, Frame, Group, Row, RowKind};
+use vigie_probe::{
+    Icon, LockerKind, Protocol, Service, ServiceState, StartType, StartupItem, StartupLocation,
+    SystemInfo, TcpState,
+};
 
-use crate::{AppWindow, CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, PerfView, ProcRow};
+use crate::{
+    AppWindow, CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, PerfView,
+    PortRowUi, ProcRow, ServiceRowUi, StartupRowUi,
+};
 
 /// Row kinds as `ui/app.slint` reads them.
 const KIND_GROUP: i32 = 0;
@@ -45,6 +52,7 @@ pub struct UiFrame {
     /// Offsets of panned ranges, which grow as time passes (see `Anchored`).
     pub perf_offset: Option<i32>,
     pub process_offset: Option<i32>,
+    pub tools: ToolsUi,
 }
 
 /// The Performance view's data, ready for its models.
@@ -90,6 +98,7 @@ impl UiFrame {
             history_memory: SharedString::new(),
             perf_offset: None,
             process_offset: None,
+            tools: ToolsUi::default(),
             rows: with_rows.then(|| frame.rows.iter().map(proc_row).collect()),
             process_count: frame.process_count.to_string().into(),
             matching_count: frame.matching_count.to_string().into(),
@@ -132,6 +141,14 @@ impl Notice {
     pub const GONE: i32 = 7;
     pub const DENIED: i32 = 8;
     pub const FAILED: i32 = 9;
+    pub const STARTUP_ENABLED: i32 = 10;
+    pub const STARTUP_DISABLED: i32 = 11;
+    pub const SERVICE_STARTED: i32 = 12;
+    pub const SERVICE_STOPPED: i32 = 13;
+    pub const DEPENDENTS: i32 = 14;
+    /// Access denied to a change that is not about a process (a service, a startup item).
+    pub const CHANGE_DENIED: i32 = 15;
+    pub const CHANGE_FAILED: i32 = 16;
 }
 fn proc_row(row: &Row) -> ProcRow {
     let pid = i32::try_from(row.pid).unwrap_or(i32::MAX);
@@ -243,6 +260,7 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
     if let Some(offset) = frame.process_offset {
         app.set_process_offset(offset);
     }
+    apply_tools(&app, frame.tools);
     app.set_diagnostics_badge(frame.badge);
     app.set_history_memory(frame.history_memory);
     app.set_process_count(frame.process_count);
@@ -868,6 +886,192 @@ fn format_bytes_per_s(bytes_per_s: Option<f64>) -> SharedString {
         format!("{:.1} MB/s", bytes / (KB * KB)).into()
     } else {
         format!("{:.0} KB/s", bytes / KB).into()
+    }
+}
+
+/// The Files view's answer.
+pub struct LocksUi {
+    pub rows: Vec<LockRowUi>,
+    /// 1 answered, 2 no such file, 3 a folder, 4 failed (see `ui/tools.slint`).
+    pub status: i32,
+    pub path: SharedString,
+}
+
+/// What the developer tools views get in a frame; `None` leaves a view as it is.
+#[derive(Default)]
+pub struct ToolsUi {
+    pub ports: Option<Vec<PortRowUi>>,
+    pub locks: Option<LocksUi>,
+    pub startup: Option<Vec<StartupRowUi>>,
+    pub services: Option<Vec<ServiceRowUi>>,
+    /// `Some(false)` once a read said the system has no such source.
+    pub available: Option<bool>,
+}
+
+fn icon_index(icon: Option<u32>) -> i32 {
+    icon.and_then(|i| i32::try_from(i).ok()).unwrap_or(-1)
+}
+
+fn start_bits(start_time: u64) -> i32 {
+    (start_time & 0x7fff_ffff) as i32
+}
+
+pub fn port_rows_ui(rows: &[PortRow]) -> Vec<PortRowUi> {
+    rows.iter()
+        .map(|r| PortRowUi {
+            key: format!(
+                "{:?} {} {} {}",
+                r.protocol,
+                r.local,
+                r.remote.map(|a| a.to_string()).unwrap_or_default(),
+                r.pid
+            )
+            .into(),
+            protocol: match r.protocol {
+                Protocol::Tcp => "TCP",
+                Protocol::Udp => "UDP",
+            }
+            .into(),
+            address: r.local.ip().to_string().into(),
+            port: i32::from(r.local.port()),
+            remote: r.remote.map(|a| a.to_string()).unwrap_or_default().into(),
+            state: match r.state {
+                None => -1,
+                Some(TcpState::Listen) => 0,
+                Some(TcpState::Established) => 1,
+                Some(TcpState::CloseWait) => 2,
+                Some(_) => 3,
+            },
+            pid: i32::try_from(r.pid).unwrap_or(i32::MAX),
+            start: r.target.map_or(0, |t| start_bits(t.start_time)),
+            name: r.name.as_str().into(),
+            icon: icon_index(r.icon),
+            can_end: r.can_end,
+            exact: r.exact,
+        })
+        .collect()
+}
+
+pub fn lock_rows_ui(rows: &[LockRow]) -> Vec<LockRowUi> {
+    rows.iter()
+        .map(|r| LockRowUi {
+            name: r.name.as_str().into(),
+            pid: i32::try_from(r.target.pid).unwrap_or(i32::MAX),
+            start: start_bits(r.target.start_time),
+            service: r.service.as_deref().unwrap_or_default().into(),
+            kind: match r.kind {
+                LockerKind::App => 0,
+                LockerKind::Service => 1,
+                LockerKind::Explorer => 2,
+                LockerKind::Console => 3,
+                LockerKind::Critical => 4,
+                LockerKind::Other => 5,
+            },
+            icon: icon_index(r.icon),
+            can_end: r.can_end,
+        })
+        .collect()
+}
+
+/// Location codes shared with `ui/tools.slint`.
+pub fn location_code(location: StartupLocation) -> i32 {
+    match location {
+        StartupLocation::UserRun => 0,
+        StartupLocation::MachineRun => 1,
+        StartupLocation::MachineRun32 => 2,
+        StartupLocation::UserFolder => 3,
+        StartupLocation::CommonFolder => 4,
+    }
+}
+
+pub fn location_from_code(code: i32) -> Option<StartupLocation> {
+    Some(match code {
+        0 => StartupLocation::UserRun,
+        1 => StartupLocation::MachineRun,
+        2 => StartupLocation::MachineRun32,
+        3 => StartupLocation::UserFolder,
+        4 => StartupLocation::CommonFolder,
+        _ => return None,
+    })
+}
+
+/// Startup items with what their programs say about themselves (`details`, by item).
+pub fn startup_rows_ui(items: &[StartupItem], details: &[Option<Details>]) -> Vec<StartupRowUi> {
+    items
+        .iter()
+        .zip(details)
+        .map(|(item, details)| {
+            let details = details.as_ref();
+            StartupRowUi {
+                key: format!("{} {}", location_code(item.location), item.name).into(),
+                title: details
+                    .and_then(|d| d.description.as_deref())
+                    .unwrap_or(&item.name)
+                    .into(),
+                name: item.name.as_str().into(),
+                publisher: details
+                    .and_then(|d| d.publisher.as_deref())
+                    .unwrap_or_default()
+                    .into(),
+                command: item.command.as_str().into(),
+                location: location_code(item.location),
+                enabled: item.enabled,
+                icon: icon_index(details.and_then(|d| d.icon)),
+            }
+        })
+        .collect()
+}
+
+pub fn service_rows_ui(rows: &[&Service]) -> Vec<ServiceRowUi> {
+    rows.iter()
+        .map(|s| ServiceRowUi {
+            name: s.name.as_str().into(),
+            display: s.display_name.as_str().into(),
+            state: match s.state {
+                ServiceState::Running => 0,
+                ServiceState::Starting => 1,
+                ServiceState::Stopping => 2,
+                ServiceState::Paused => 3,
+                ServiceState::Stopped => 4,
+                ServiceState::Other => 5,
+            },
+            start_type: match s.start_type {
+                None => -1,
+                Some(StartType::Automatic) => 0,
+                Some(StartType::AutomaticDelayed) => 1,
+                Some(StartType::Manual) => 2,
+                Some(StartType::Disabled) => 3,
+            },
+            pid: s.pid.and_then(|p| i32::try_from(p).ok()).unwrap_or(0),
+        })
+        .collect()
+}
+
+fn apply_tools(app: &AppWindow, tools: ToolsUi) {
+    if let Some(available) = tools.available {
+        app.set_tools_available(available);
+    }
+    if let Some(ports) = tools.ports {
+        // A selection whose socket closed would offer to end a process that no longer has it.
+        let selected = app.get_ports_selected();
+        if !selected.key.is_empty() && !ports.iter().any(|p| p.key == selected.key) {
+            app.set_ports_selected(PortRowUi::default());
+        }
+        patch_values(&app.get_ports(), ports);
+        app.set_ports_ready(true);
+    }
+    if let Some(locks) = tools.locks {
+        patch_values(&app.get_locks(), locks.rows);
+        app.set_locks_status(locks.status);
+        app.set_locks_path(locks.path);
+    }
+    if let Some(items) = tools.startup {
+        patch_values(&app.get_startup_items(), items);
+        app.set_startup_ready(true);
+    }
+    if let Some(services) = tools.services {
+        patch_values(&app.get_services(), services);
+        app.set_services_ready(true);
     }
 }
 

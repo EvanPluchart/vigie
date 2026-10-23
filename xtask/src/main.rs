@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-const USAGE: &str = "usage: cargo xtask bench-overhead [--seconds=N] [--check] [--tab=processes|performance|diagnostics]";
+const USAGE: &str = "usage: cargo xtask bench-overhead [--seconds=N] [--check] [--tab=processes|performance|diagnostics|ports|files|startup]";
 /// Performance budget from docs/ARCHITECTURE.md.
 const CPU_BUDGET_PERCENT: f64 = 1.0;
 const MEMORY_BUDGET_MB: f64 = 30.0;

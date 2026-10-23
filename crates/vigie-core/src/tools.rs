@@ -24,6 +24,7 @@ pub struct PortRow {
     /// `None` when the process is not in the last sample (it just exited, or PID 0).
     pub target: Option<Target>,
     pub name: String,
+    pub icon: Option<u32>,
     /// Whether "End task" may be offered: never for the system or Vigie itself.
     pub can_end: bool,
     /// The search was a port number and this socket uses it.
@@ -66,6 +67,7 @@ pub fn port_rows<'a>(
                 pid: s.pid,
                 target: label.map(|l| l.target),
                 name: name.to_owned(),
+                icon: label.and_then(|l| l.icon),
                 can_end: s.pid != 0
                     && s.pid != KERNEL_PID
                     && s.pid != self_pid
@@ -94,6 +96,7 @@ pub struct LockRow {
     pub name: String,
     pub service: Option<String>,
     pub kind: LockerKind,
+    pub icon: Option<u32>,
     pub can_end: bool,
 }
 
@@ -120,6 +123,7 @@ pub fn lock_rows<'a>(
                 name: label.map_or_else(|| l.name.clone(), |label| label.name.to_owned()),
                 service: l.service.clone(),
                 kind: l.kind,
+                icon: label.and_then(|label| label.icon),
                 can_end: l.kind != LockerKind::Critical
                     && l.pid != self_pid
                     && label.is_some_and(|label| label.group != Group::System),
@@ -168,6 +172,7 @@ mod tests {
             },
             name,
             group,
+            icon: None,
         }
     }
 

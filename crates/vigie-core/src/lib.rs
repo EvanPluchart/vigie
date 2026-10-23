@@ -173,6 +173,8 @@ pub struct Label<'a> {
     pub target: Target,
     pub name: &'a str,
     pub group: Group,
+    /// Icon id, as in `Row::icon`.
+    pub icon: Option<u32>,
 }
 
 impl Core {
@@ -250,10 +252,8 @@ impl Core {
     pub fn labels<'a>(&'a self, sample: &'a Sample) -> impl Iterator<Item = Label<'a>> + 'a {
         sample.processes.iter().enumerate().map(move |(i, p)| {
             let group = self.groups.get(i).copied().unwrap_or(Group::All);
-            let description = self
-                .details
-                .get(&(p.pid, p.start_time))
-                .and_then(|d| d.description.as_deref());
+            let details = self.details.get(&(p.pid, p.start_time));
+            let description = details.and_then(|d| d.description.as_deref());
             Label {
                 target: Target {
                     pid: p.pid,
@@ -264,6 +264,7 @@ impl Core {
                     _ => &p.name,
                 },
                 group,
+                icon: details.and_then(|d| d.icon),
             }
         })
     }

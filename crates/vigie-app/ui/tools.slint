@@ -1,0 +1,589 @@
+// Developer tools (decision 0007): ports, who holds a file, startup items and services.
+
+import { Button, LineEdit, ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct PortRowUi {
+    // Stable identity for patching and selection.
+    key: string,
+    // "TCP" or "UDP", and the local address without its port.
+    protocol: string,
+    address: string,
+    port: int,
+    // "203.0.113.5:443", or empty.
+    remote: string,
+    // -1 UDP, 0 listening, 1 established, 2 close wait, 3 other.
+    state: int,
+    pid: int,
+    start: int,
+    name: string,
+    // Index in AppWindow.icons, or -1.
+    icon: int,
+    can-end: bool,
+    exact: bool,
+}
+
+export struct LockRowUi {
+    name: string,
+    pid: int,
+    start: int,
+    service: string,
+    // 0 app, 1 service, 2 explorer, 3 console, 4 critical, 5 other.
+    kind: int,
+    icon: int,
+    can-end: bool,
+}
+
+export struct StartupRowUi {
+    key: string,
+    // Product name when the program says it, else the registry value or file name.
+    title: string,
+    // Registry value or file name: identifies the item for enabling and disabling.
+    name: string,
+    publisher: string,
+    command: string,
+    // 0 user Run key, 1 machine Run key, 2 machine Run key (32-bit), 3 user folder,
+    // 4 all users' folder.
+    location: int,
+    enabled: bool,
+    icon: int,
+}
+
+export struct ServiceRowUi {
+    name: string,
+    display: string,
+    // 0 running, 1 starting, 2 stopping, 3 paused, 4 stopped, 5 other.
+    state: int,
+    // -1 unknown, 0 automatic, 1 automatic (delayed), 2 manual, 3 disabled.
+    start-type: int,
+    pid: int,
+}
+
+component Cell inherits Text {
+    vertical-alignment: center;
+    overflow: elide;
+    color: Theme.text;
+    font-size: Theme.font-body;
+}
+
+component Head inherits Cell {
+    color: Theme.text-muted;
+    font-size: Theme.font-caption;
+    font-weight: Theme.weight-strong;
+}
+
+component ViewHeader inherits HorizontalLayout {
+    in property <string> title;
+    padding: Theme.space-3;
+    padding-left: Theme.space-4;
+    padding-right: Theme.space-4;
+    spacing: Theme.space-2;
+    Text {
+        text: root.title;
+        color: Theme.text;
+        font-size: Theme.font-section;
+        font-weight: Theme.weight-strong;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+    }
+    @children
+}
+
+component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.border;
+}
+
+// A 16 px process icon, or the generic rounded square.
+component SmallIcon inherits Rectangle {
+    in property <image> source;
+    in property <bool> has-icon;
+    width: 16px;
+    if root.has-icon: Image {
+        source: root.source;
+        width: 16px;
+        height: 16px;
+        y: (parent.height - self.height) / 2;
+        image-rendering: smooth;
+    }
+    if !root.has-icon: Rectangle {
+        width: 12px;
+        height: 12px;
+        x: 2px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 3px;
+        border-width: 1px;
+        border-color: Theme.text-muted.with-alpha(0.6);
+    }
+}
+
+component Unavailable inherits Text {
+    text: @tr("Not available on this system yet.");
+    color: Theme.text-muted;
+    font-size: Theme.font-section;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+}
+
+// ---------------------------------------------------------------- Ports
+
+export component PortsView inherits Rectangle {
+    in property <[PortRowUi]> rows;
+    in property <[image]> icons;
+    in property <bool> available: true;
+    in property <bool> ready;
+    in-out property <string> filter;
+    callback filter-edited(string);
+    // Ask to end the process of a row (the window confirms first).
+    callback end(PortRowUi);
+    // A copy of the selected row: the action checks the process is still the same one. Rust
+    // clears it when the row leaves the list.
+    in-out property <PortRowUi> selected;
+
+    function state-text(state: int) -> string {
+        return state == -1 ? "" : state == 0 ? @tr("Listening") : state == 1 ? @tr("Connected")
+            : state == 2 ? @tr("Closing") : @tr("Other");
+    }
+
+    VerticalLayout {
+        ViewHeader {
+            title: @tr("Ports");
+            LineEdit {
+                width: 300px;
+                placeholder-text: @tr("Port, process, PID or address");
+                text <=> root.filter;
+                edited(text) => { root.filter-edited(text); }
+            }
+        }
+        Rectangle {
+            height: 44px;
+            background: Theme.surface;
+            Divider { y: 0; }
+            Divider { y: parent.height - 1px; }
+            HorizontalLayout {
+                padding-left: Theme.space-4;
+                padding-right: Theme.space-4;
+                padding-top: Theme.space-1;
+                padding-bottom: Theme.space-1;
+                spacing: Theme.space-2;
+                property <PortRowUi> current: root.selected;
+                Cell {
+                    horizontal-stretch: 1;
+                    text: parent.current.key == "" ? @tr("Select a port to act on its process")
+                        : @tr("{} · PID {} · {} {}", parent.current.name, parent.current.pid, parent.current.protocol, parent.current.port);
+                    color: parent.current.key == "" ? Theme.text-muted : Theme.text;
+                }
+                Button {
+                    text: @tr("End task");
+                    primary: true;
+                    enabled: parent.current.key != "" && parent.current.can-end;
+                    clicked => { root.end(parent.current); }
+                }
+            }
+        }
+        HorizontalLayout {
+            height: Theme.bar-height;
+            padding-left: Theme.space-4;
+            padding-right: Theme.space-4;
+            spacing: Theme.space-3;
+            Head { text: @tr("Process"); horizontal-stretch: 1; }
+            Head { text: @tr("PID"); width: 64px; horizontal-alignment: right; }
+            Head { text: @tr("Protocol"); width: 56px; }
+            Head { text: @tr("Local address"); width: 150px; }
+            Head { text: @tr("Port"); width: 56px; horizontal-alignment: right; }
+            Head { text: @tr("Remote"); width: 170px; }
+            Head { text: @tr("State"); width: 80px; }
+        }
+        Divider { }
+        if !root.available: Unavailable { vertical-stretch: 1; }
+        if root.available && root.ready && root.rows.length == 0: Text {
+            vertical-stretch: 1;
+            text: root.filter == "" ? @tr("No open ports.") : @tr("Nothing uses “{}”.", root.filter);
+            color: Theme.text-muted;
+            font-size: Theme.font-section;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if root.available && root.rows.length > 0: ListView {
+            vertical-stretch: 1;
+            for row in root.rows: Rectangle {
+                height: Theme.row-height;
+                property <bool> is-selected: row.key == root.selected.key;
+                background: self.is-selected ? Theme.selection : touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+                touch := TouchArea {
+                    clicked => { root.selected = row; }
+                }
+                HorizontalLayout {
+                    padding-left: Theme.space-4;
+                    padding-right: Theme.space-4;
+                    spacing: Theme.space-3;
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        spacing: Theme.space-2;
+                        SmallIcon { has-icon: row.icon >= 0; source: root.icons[row.icon]; }
+                        Cell {
+                            text: row.name != "" ? row.name : row.pid == 0 ? @tr("System (closing)") : @tr("Exited process");
+                            color: row.name != "" ? Theme.text : Theme.text-muted;
+                        }
+                    }
+                    Cell { text: row.pid; width: 64px; horizontal-alignment: right; color: Theme.text-muted; }
+                    Cell { text: row.protocol; width: 56px; color: Theme.text-muted; }
+                    Cell { text: row.address; width: 150px; }
+                    Cell {
+                        text: row.port;
+                        width: 56px;
+                        horizontal-alignment: right;
+                        font-weight: row.exact ? Theme.weight-strong : Theme.weight-regular;
+                        color: row.exact ? Theme.accent : Theme.text;
+                    }
+                    Cell { text: row.remote; width: 170px; color: Theme.text-muted; }
+                    Cell { text: root.state-text(row.state); width: 80px; color: row.state == 0 ? Theme.accent : Theme.text-muted; }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Files
+
+export component FilesView inherits Rectangle {
+    in property <[LockRowUi]> rows;
+    in property <[image]> icons;
+    in property <bool> available: true;
+    // A file is being dragged over the window.
+    in property <bool> drop-hover;
+    // 0 nothing asked yet, 1 answered, 2 no such file, 3 a folder, 4 failed.
+    in property <int> status;
+    // The path the answer is about.
+    in property <string> checked-path;
+    in-out property <string> path;
+    callback check(string);
+    callback end(LockRowUi);
+
+    function kind-text(kind: int, service: string) -> string {
+        return kind == 1 ? @tr("Service {}", service) : kind == 2 ? @tr("Desktop shell")
+            : kind == 3 ? @tr("Console program") : kind == 4 ? @tr("Critical system process")
+            : kind == 0 ? @tr("App") : "";
+    }
+
+    VerticalLayout {
+        ViewHeader { title: @tr("Who is using this file?"); }
+        Divider { }
+        VerticalLayout {
+            padding: Theme.space-4;
+            spacing: Theme.space-3;
+            vertical-stretch: 1;
+            // The drop zone; files can be dropped anywhere on the window.
+            Rectangle {
+                height: 120px;
+                border-radius: Theme.radius-panel;
+                border-width: root.drop-hover ? 2px : 1px;
+                border-color: root.drop-hover ? Theme.accent : Theme.border;
+                background: root.drop-hover ? Theme.selection : Theme.surface;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: Theme.space-1;
+                    Text {
+                        text: root.drop-hover ? @tr("Drop to see who is using it") : @tr("Drop a file here");
+                        color: Theme.text;
+                        font-size: Theme.font-section;
+                        font-weight: Theme.weight-strong;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: @tr("Vigie lists the programs that keep it open, so you can close them before deleting, moving or saving it.");
+                        color: Theme.text-muted;
+                        font-size: Theme.font-caption;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: Theme.space-2;
+                path-edit := LineEdit {
+                    horizontal-stretch: 1;
+                    placeholder-text: @tr("Or paste the path of a file");
+                    text <=> root.path;
+                    accepted(text) => { root.check(text); }
+                }
+                Button {
+                    text: @tr("Check");
+                    enabled: root.path != "";
+                    clicked => { root.check(root.path); }
+                }
+            }
+            if !root.available: Unavailable { }
+            if root.available && root.status >= 1: Text {
+                text: root.status == 2 ? @tr("No file at “{}”.", root.checked-path)
+                    : root.status == 3 ? @tr("“{}” is a folder. Only files can be checked; drop one of the files inside.", root.checked-path)
+                    : root.status == 4 ? @tr("Could not check “{}”.", root.checked-path)
+                    : root.rows.length == 0 ? @tr("No program is using “{}”.", root.checked-path)
+                    : @tr("Programs using “{}”:", root.checked-path);
+                color: root.status >= 2 ? Theme.danger : Theme.text;
+                font-size: Theme.font-body;
+                wrap: word-wrap;
+            }
+            for row in root.rows: Rectangle {
+                height: 40px;
+                background: Theme.surface;
+                border-radius: Theme.radius-control;
+                border-width: 1px;
+                border-color: Theme.border;
+                HorizontalLayout {
+                    padding-left: Theme.space-3;
+                    padding-right: Theme.space-3;
+                    spacing: Theme.space-3;
+                    SmallIcon { has-icon: row.icon >= 0; source: root.icons[row.icon]; }
+                    Cell { text: row.name; horizontal-stretch: 1; }
+                    Cell { text: root.kind-text(row.kind, row.service); color: Theme.text-muted; width: 180px; }
+                    Cell { text: @tr("PID {}", row.pid); color: Theme.text-muted; width: 80px; horizontal-alignment: right; }
+                    Button {
+                        text: @tr("End task");
+                        enabled: row.can-end;
+                        y: (parent.height - self.height) / 2;
+                        clicked => { root.end(row); }
+                    }
+                }
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Startup and services
+
+export component StartupView inherits Rectangle {
+    in property <[StartupRowUi]> items;
+    in property <[ServiceRowUi]> services;
+    in property <[image]> icons;
+    in property <bool> available: true;
+    in property <bool> items-ready;
+    in property <bool> services-ready;
+    // 0 startup apps, 1 services.
+    in-out property <int> pane;
+    in-out property <string> service-filter;
+    callback pane-changed(int);
+    callback toggle(StartupRowUi);
+    callback refresh();
+    callback service-filter-edited(string);
+    callback start-service(ServiceRowUi);
+    // Ask to stop (the window confirms first).
+    callback stop-service(ServiceRowUi);
+    property <int> selected-service: -1;
+
+    function location-text(location: int) -> string {
+        return location == 0 ? @tr("Registry (you)") : location == 1 ? @tr("Registry (all users)")
+            : location == 2 ? @tr("Registry (all users, 32-bit)") : location == 3 ? @tr("Startup folder (you)")
+            : @tr("Startup folder (all users)");
+    }
+
+    function state-text(state: int) -> string {
+        return state == 0 ? @tr("Running") : state == 1 ? @tr("Starting") : state == 2 ? @tr("Stopping")
+            : state == 3 ? @tr("Paused") : state == 4 ? @tr("Stopped") : @tr("Other");
+    }
+
+    function start-text(start: int) -> string {
+        return start == 0 ? @tr("Automatic") : start == 1 ? @tr("Automatic (delayed)") : start == 2 ? @tr("Manual")
+            : start == 3 ? @tr("Disabled") : "—";
+    }
+
+    VerticalLayout {
+        ViewHeader {
+            title: @tr("Startup");
+            for label[i] in [@tr("Startup apps"), @tr("Services")]: Rectangle {
+                width: tab-text.preferred-width + 2 * Theme.space-3;
+                height: 28px;
+                y: (parent.height - self.height) / 2;
+                border-radius: Theme.radius-small;
+                background: i == root.pane ? Theme.selection : tab-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+                tab-text := Text {
+                    text: label;
+                    color: i == root.pane ? Theme.text : Theme.text-muted;
+                    font-size: Theme.font-body;
+                    font-weight: i == root.pane ? Theme.weight-strong : Theme.weight-regular;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                tab-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.pane = i;
+                        root.pane-changed(i);
+                    }
+                }
+            }
+            Button {
+                text: @tr("Refresh");
+                clicked => { root.refresh(); }
+            }
+        }
+        Divider { }
+        if !root.available: Unavailable { vertical-stretch: 1; }
+
+        // Startup apps.
+        if root.available && root.pane == 0: VerticalLayout {
+            vertical-stretch: 1;
+            HorizontalLayout {
+                height: Theme.bar-height;
+                padding-left: Theme.space-4;
+                padding-right: Theme.space-4;
+                spacing: Theme.space-3;
+                Head { text: @tr("Name"); horizontal-stretch: 1; }
+                Head { text: @tr("Publisher"); width: 170px; }
+                Head { text: @tr("Registered in"); width: 170px; }
+                Head { text: @tr("Status"); width: 70px; }
+                Rectangle { width: 84px; }
+            }
+            Divider { }
+            if !root.items-ready: Text {
+                text: @tr("Reading…");
+                color: Theme.text-muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                vertical-stretch: 1;
+            }
+            if root.items-ready: ListView {
+                vertical-stretch: 1;
+                for item in root.items: Rectangle {
+                    height: 36px;
+                    background: row-touch.has-hover ? Theme.text.with-alpha(0.04) : transparent;
+                    row-touch := TouchArea { }
+                    HorizontalLayout {
+                        padding-left: Theme.space-4;
+                        padding-right: Theme.space-4;
+                        spacing: Theme.space-3;
+                        HorizontalLayout {
+                            horizontal-stretch: 1;
+                            spacing: Theme.space-2;
+                            SmallIcon { has-icon: item.icon >= 0; source: root.icons[item.icon]; }
+                            Cell { text: item.title; color: item.enabled ? Theme.text : Theme.text-muted; }
+                        }
+                        Cell { text: item.publisher; width: 170px; color: Theme.text-muted; }
+                        Cell { text: root.location-text(item.location); width: 170px; color: Theme.text-muted; }
+                        Cell {
+                            text: item.enabled ? @tr("Enabled") : @tr("Disabled");
+                            width: 70px;
+                            color: item.enabled ? Theme.accent : Theme.text-muted;
+                        }
+                        Button {
+                            width: 84px;
+                            y: (parent.height - self.height) / 2;
+                            text: item.enabled ? @tr("Disable") : @tr("Enable");
+                            clicked => { root.toggle(item); }
+                        }
+                    }
+                }
+            }
+            Divider { }
+            HorizontalLayout {
+                padding: Theme.space-2;
+                padding-left: Theme.space-4;
+                padding-right: Theme.space-4;
+                Text {
+                    text: @tr("Lists the Run keys and the startup folders. Packaged apps that start with Windows and scheduled tasks are not listed yet. Disabling keeps the entry: enable it again at any time.");
+                    color: Theme.text-muted;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        // Services.
+        if root.available && root.pane == 1: VerticalLayout {
+            vertical-stretch: 1;
+            Rectangle {
+                height: 44px;
+                background: Theme.surface;
+                Divider { y: parent.height - 1px; }
+                HorizontalLayout {
+                    padding-left: Theme.space-4;
+                    padding-right: Theme.space-4;
+                    padding-top: Theme.space-1;
+                    padding-bottom: Theme.space-1;
+                    spacing: Theme.space-2;
+                    property <ServiceRowUi> current: root.selected-service >= 0 && root.selected-service < root.services.length ? root.services[root.selected-service] : { name: "" };
+                    LineEdit {
+                        width: 240px;
+                        placeholder-text: @tr("Search services");
+                        text <=> root.service-filter;
+                        edited(text) => {
+                            root.selected-service = -1;
+                            root.service-filter-edited(text);
+                        }
+                    }
+                    Cell {
+                        horizontal-stretch: 1;
+                        text: parent.current.name == "" ? @tr("Select a service to start or stop it") : parent.current.display;
+                        color: parent.current.name == "" ? Theme.text-muted : Theme.text;
+                    }
+                    Button {
+                        text: @tr("Start");
+                        enabled: parent.current.name != "" && parent.current.state == 4 && parent.current.start-type != 3;
+                        clicked => { root.start-service(parent.current); }
+                    }
+                    Button {
+                        text: @tr("Stop");
+                        enabled: parent.current.name != "" && parent.current.state == 0;
+                        clicked => { root.stop-service(parent.current); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                height: Theme.bar-height;
+                padding-left: Theme.space-4;
+                padding-right: Theme.space-4;
+                spacing: Theme.space-3;
+                Head { text: @tr("Name"); horizontal-stretch: 1; }
+                Head { text: @tr("Service"); width: 160px; }
+                Head { text: @tr("Status"); width: 80px; }
+                Head { text: @tr("Startup type"); width: 140px; }
+                Head { text: @tr("PID"); width: 64px; horizontal-alignment: right; }
+            }
+            Divider { }
+            if !root.services-ready: Text {
+                text: @tr("Reading…");
+                color: Theme.text-muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                vertical-stretch: 1;
+            }
+            if root.services-ready: ListView {
+                vertical-stretch: 1;
+                for service[i] in root.services: Rectangle {
+                    height: Theme.row-height;
+                    background: i == root.selected-service ? Theme.selection : service-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+                    service-touch := TouchArea {
+                        clicked => { root.selected-service = i; }
+                    }
+                    HorizontalLayout {
+                        padding-left: Theme.space-4;
+                        padding-right: Theme.space-4;
+                        spacing: Theme.space-3;
+                        Cell { text: service.display; horizontal-stretch: 1; }
+                        Cell { text: service.name; width: 160px; color: Theme.text-muted; }
+                        Cell {
+                            text: root.state-text(service.state);
+                            width: 80px;
+                            color: service.state == 0 ? Theme.accent : Theme.text-muted;
+                        }
+                        Cell { text: root.start-text(service.start-type); width: 140px; color: Theme.text-muted; }
+                        Cell { text: service.pid > 0 ? service.pid : ""; width: 64px; horizontal-alignment: right; color: Theme.text-muted; }
+                    }
+                }
+            }
+            Divider { }
+            HorizontalLayout {
+                padding: Theme.space-2;
+                padding-left: Theme.space-4;
+                padding-right: Theme.space-4;
+                Text {
+                    text: @tr("Starting and stopping most services needs Vigie to run as administrator.");
+                    color: Theme.text-muted;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
