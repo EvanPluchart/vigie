@@ -14,7 +14,7 @@ use vigie_probe::{
 };
 
 use crate::AppWindow;
-use crate::model::{self, Notice, Range, Timeline, UiFrame};
+use crate::model::{self, Anchored, Notice, Range, Timeline, UiFrame};
 
 /// What the UI asks of the sampler. Sorting and filtering run here, not on the UI thread.
 #[derive(Debug)]
@@ -107,9 +107,11 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
     let mut views = Views {
         tab: settings.tab,
         info: probe.system_info(),
-        range: settings.range,
-        process_range: settings.process_range,
+        range: Anchored::new(settings.range, 0),
+        process_range: Anchored::new(settings.process_range, 0),
         history_open: settings.history_open,
+        // Started on the Diagnostics view: send its state with the first frame.
+        diagnosis_fresh: settings.tab == 2,
         ..Views::default()
     };
     loop {
@@ -168,10 +170,15 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                                 views.timeline.invalidate();
                                 if tab == 2 {
                                     views.diagnose(&core, sample.logical_cores, true);
+                                    views.diagnosis_fresh = true;
                                 }
                             }
-                            Command::Range(range) => views.range = range,
-                            Command::ProcessRange(range) => views.process_range = range,
+                            Command::Range(range) => {
+                                views.range = Anchored::new(range, sample.at_ns);
+                            }
+                            Command::ProcessRange(range) => {
+                                views.process_range = Anchored::new(range, sample.at_ns);
+                            }
                             Command::Select(process) => {
                                 views.selected = process;
                                 core.select(process);
@@ -310,15 +317,17 @@ struct Views {
     gpus_at: Option<Instant>,
     /// First sample, for how long history has been recorded.
     started_ns: Option<u64>,
-    range: Range,
+    range: Anchored,
     timeline: Timeline,
-    process_range: Range,
+    process_range: Anchored,
     process_timeline: Timeline,
     history_open: bool,
     selected: Option<(Pid, u32)>,
     diagnostics: Diagnostics,
     findings: Vec<Finding>,
     diagnosed_ns: Option<u64>,
+    /// The findings changed since the Diagnostics view last got them.
+    diagnosis_fresh: bool,
 }
 
 impl Views {
@@ -336,6 +345,7 @@ impl Views {
         if core.tracker().iter().next().is_some() {
             self.diagnosed_ns = Some(last.at_ns);
         }
+        self.diagnosis_fresh = true;
         self.findings = self.diagnostics.run(&Input {
             now_ns: last.at_ns,
             perf: &self.perf,
@@ -385,16 +395,18 @@ fn send(
     }
     frame.history_memory =
         model::format_kilobytes(views.perf.history_bytes() + core.tracker().bytes());
-    if views.tab == 2
-        && let Some(last) = &views.last
-    {
-        frame.diagnostics = Some(model::diagnostics_ui(
-            &views.findings,
-            &views.perf,
-            last,
-            core.tracker(),
-            age,
-        ));
+    // Only when the rules ran (or the view opened): the cards are left alone otherwise.
+    if views.tab == 2 && views.diagnosis_fresh {
+        views.diagnosis_fresh = false;
+        frame.diagnostics = Some(match &views.last {
+            Some(last) => {
+                model::diagnostics_ui(&views.findings, &views.perf, last, core.tracker(), age)
+            }
+            None => model::DiagUi::unavailable(),
+        });
+    }
+    if views.tab == 1 {
+        frame.perf_offset = views.range.shown_offset(sample.at_ns);
     }
     if views.tab == 0 && views.history_open {
         let tracked = views
@@ -407,6 +419,7 @@ fn send(
             views.process_range,
             &mut views.process_timeline,
         );
+        frame.process_offset = views.process_range.shown_offset(sample.at_ns);
     }
     let window = window.clone();
     slint::invoke_from_event_loop(move || model::apply(&window, frame)).is_ok()

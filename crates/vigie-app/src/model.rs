@@ -42,6 +42,9 @@ pub struct UiFrame {
     pub process: Option<ProcessUi>,
     /// Memory held by the histories, for the About window.
     pub history_memory: SharedString,
+    /// Offsets of panned ranges, which grow as time passes (see `Anchored`).
+    pub perf_offset: Option<i32>,
+    pub process_offset: Option<i32>,
 }
 
 /// The Performance view's data, ready for its models.
@@ -85,6 +88,8 @@ impl UiFrame {
             badge: 0,
             process: None,
             history_memory: SharedString::new(),
+            perf_offset: None,
+            process_offset: None,
             rows: with_rows.then(|| frame.rows.iter().map(proc_row).collect()),
             process_count: frame.process_count.to_string().into(),
             matching_count: frame.matching_count.to_string().into(),
@@ -218,8 +223,11 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
         }
     }
     if let Some(diagnostics) = frame.diagnostics {
-        app.set_findings(ModelRc::new(VecModel::from(diagnostics.findings)));
+        // Patched, not replaced: replacing would rebuild every card each time and lose a
+        // click in progress.
+        patch_values(&app.get_findings(), diagnostics.findings);
         app.set_checks(diagnostics.checks);
+        app.set_diagnostics_available(diagnostics.available);
         app.set_diagnostics_ready(true);
     }
     if let Some(process) = frame.process {
@@ -228,6 +236,12 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
         app.set_process_tracked(process.tracked);
         app.set_process_history_age(process.age_s);
         app.set_process_memory_scale(process.memory_scale);
+    }
+    if let Some(offset) = frame.perf_offset {
+        app.set_perf_offset(offset);
+    }
+    if let Some(offset) = frame.process_offset {
+        app.set_process_offset(offset);
     }
     app.set_diagnostics_badge(frame.badge);
     app.set_history_memory(frame.history_memory);
@@ -286,6 +300,49 @@ impl Range {
         Self {
             span_s: Self::SPANS[span],
             offset_s: u64::try_from(offset_s).unwrap_or(0),
+        }
+    }
+}
+
+/// A range as the user set it. Panned back, its end stays at the same moment, so what the user
+/// looks at does not slide away as time passes; at "now" it follows the present.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Anchored {
+    range: Range,
+    end_ns: Option<u64>,
+}
+
+impl Anchored {
+    pub fn new(range: Range, now_ns: u64) -> Self {
+        Self {
+            range,
+            end_ns: (range.offset_s > 0).then(|| now_ns.saturating_sub(range.offset_s * SECOND)),
+        }
+    }
+
+    /// The range at `now_ns`: the offset grows with time while anchored.
+    pub fn at(&self, now_ns: u64) -> Range {
+        match self.end_ns {
+            Some(end) => Range {
+                span_s: self.range.span_s,
+                offset_s: now_ns.saturating_sub(end) / SECOND,
+            },
+            None => self.range,
+        }
+    }
+
+    /// The offset the UI should show, while anchored.
+    pub fn shown_offset(&self, now_ns: u64) -> Option<i32> {
+        self.end_ns
+            .map(|_| i32::try_from(self.at(now_ns).offset_s).unwrap_or(i32::MAX))
+    }
+
+    /// What decides whether graphs must be drawn again: the newest bucket at "now"; nothing
+    /// but the anchor itself in the past.
+    fn key(&self, newest_bucket: u64) -> (u64, Range) {
+        match self.end_ns {
+            Some(end) => (end, self.range),
+            None => (newest_bucket, self.range),
         }
     }
 }
@@ -424,15 +481,16 @@ pub fn perf_ui(
     frame: &PerfFrame,
     perf: &Performance,
     info: &SystemInfo,
-    range: Range,
+    window: Anchored,
     history_age_s: u64,
     timeline: &mut Timeline,
 ) -> PerfUi {
     let now = frame.at_ns;
+    let range = window.at(now);
     let tier = perf.cpu.tier_for(range.span_s);
     let shape = perf.disks.len() << 8 | perf.gpus.len();
-    let bucket = perf.cpu.newest_bucket(tier).unwrap_or(0);
-    let graphs = timeline.changed((bucket, range, shape)).then(|| {
+    let (bucket, key_range) = window.key(perf.cpu.newest_bucket(tier).unwrap_or(0));
+    let graphs = timeline.changed((bucket, key_range, shape)).then(|| {
         let network = timeline.network(perf, now, range);
         PerfGraphs {
             cpu: timeline.graph(&perf.cpu, now, range, Some(100.0), 0.0).0,
@@ -549,9 +607,10 @@ pub struct ProcessUi {
 pub fn process_ui(
     tracked: Option<&Tracked>,
     now: u64,
-    range: Range,
+    window: Anchored,
     timeline: &mut Timeline,
 ) -> Option<ProcessUi> {
+    let range = window.at(now);
     let Some(t) = tracked else {
         // Not tracked (yet): empty graphs, once.
         return timeline.changed((0, range, 0)).then(|| ProcessUi {
@@ -563,10 +622,10 @@ pub fn process_ui(
         });
     };
     let tier = t.cpu.tier_for(range.span_s);
-    let bucket = t.cpu.newest_bucket(tier).unwrap_or(0);
+    let (bucket, key_range) = window.key(t.cpu.newest_bucket(tier).unwrap_or(0));
     // The key includes the process, so a new selection draws at once.
     let identity = (t.key.0 as usize) << 1 | 1;
-    if !timeline.changed((bucket, range, identity)) {
+    if !timeline.changed((bucket, key_range, identity)) {
         return None;
     }
     let (cpu, _) = timeline.graph(&t.cpu, now, range, None, 5.0);
@@ -583,8 +642,20 @@ pub fn process_ui(
 
 /// The Diagnostics view, and the rail badge.
 pub struct DiagUi {
+    /// False where the probe has no machine-wide figures to diagnose from.
+    pub available: bool,
     pub findings: Vec<FindingRow>,
     pub checks: CheckSummary,
+}
+
+impl DiagUi {
+    pub fn unavailable() -> Self {
+        Self {
+            available: false,
+            findings: Vec::new(),
+            checks: CheckSummary::default(),
+        }
+    }
 }
 
 /// Highest severity worth a badge: 0 none, 1 warning, 2 critical.
@@ -612,6 +683,7 @@ pub fn diagnostics_ui(
         .filter_map(|h| h.mean_over(now, 60).map(|(m, _)| m))
         .fold(None, |a: Option<f32>, m| Some(a.map_or(m, |a| a.max(m))));
     DiagUi {
+        available: true,
         findings: rows,
         checks: CheckSummary {
             cpu: format_percent(perf.cpu.mean_over(now, 120).map(|(m, _)| m)),
@@ -1080,6 +1152,14 @@ mod tests {
                 span_s: 604_800,
                 offset_s: 0
             }
+        );
+        // Panned back 5 minutes at t = 1000 s: ten seconds later it looks 310 s back.
+        let panned = Anchored::new(Range::new(1, 300), 1000 * SECOND);
+        assert_eq!(panned.at(1010 * SECOND).offset_s, 310);
+        assert_eq!(panned.shown_offset(1010 * SECOND), Some(310));
+        assert_eq!(
+            Anchored::new(Range::new(1, 0), 5).shown_offset(99 * SECOND),
+            None
         );
     }
 }

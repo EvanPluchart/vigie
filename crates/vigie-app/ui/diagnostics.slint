@@ -156,6 +156,8 @@ export component DiagnosticsView inherits Rectangle {
     in property <CheckSummary> checks;
     // False until the first run.
     in property <bool> ready;
+    // False where the system gives no machine-wide figures to diagnose from.
+    in property <bool> available: true;
     callback end(FindingRow);
     callback show-performance();
 
@@ -187,8 +189,9 @@ export component DiagnosticsView inherits Rectangle {
                 padding: Theme.space-4;
                 spacing: Theme.space-3;
                 alignment: start;
-                if !root.ready: Text {
-                    text: @tr("Measuring…");
+                if !root.ready || !root.available: Text {
+                    text: root.ready ? @tr("Diagnostics need the performance figures, which are not available on this system yet.") : @tr("Measuring…");
+                    wrap: word-wrap;
                     color: Theme.text-muted;
                     font-size: Theme.font-section;
                 }
@@ -198,7 +201,7 @@ export component DiagnosticsView inherits Rectangle {
                     show-performance => { root.show-performance(); }
                 }
                 // All clear: say so, and what was looked at.
-                if root.ready && root.findings.length == 0: Rectangle {
+                if root.ready && root.available && root.findings.length == 0: Rectangle {
                     background: Theme.surface;
                     border-radius: Theme.radius-panel;
                     border-width: 1px;

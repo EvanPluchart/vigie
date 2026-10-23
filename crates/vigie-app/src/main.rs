@@ -39,6 +39,7 @@ fn main() -> anyhow::Result<()> {
     app.set_perf_cores(ModelRc::from(Rc::new(VecModel::<f32>::default())));
     app.set_perf_disks(ModelRc::from(Rc::new(VecModel::<DiskCard>::default())));
     app.set_perf_gpus(ModelRc::from(Rc::new(VecModel::<GpuCard>::default())));
+    app.set_findings(ModelRc::from(Rc::new(VecModel::<FindingRow>::default())));
     app.set_tab(options.tab);
     app.set_perf_span_index(options.range);
     app.set_history_open(options.history);

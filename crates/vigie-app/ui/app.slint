@@ -376,6 +376,7 @@ export component AppWindow inherits Window {
     in property <[FindingRow]> findings;
     in property <CheckSummary> checks;
     in property <bool> diagnostics-ready;
+    in property <bool> diagnostics-available: true;
     // Highest severity among the findings worth a look: 0 none, 1 warning, 2 critical.
     in property <int> diagnostics-badge;
     in property <string> history-memory;
@@ -919,6 +920,7 @@ export component AppWindow inherits Window {
                 findings: root.findings;
                 checks: root.checks;
                 ready: root.diagnostics-ready;
+                available: root.diagnostics-available;
                 show-performance => { root.show-tab(1); }
                 // The same confirmation as the table: it names the process and checks it is
                 // still the one the finding named.

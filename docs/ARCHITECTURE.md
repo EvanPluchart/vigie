@@ -39,7 +39,7 @@ pub trait Probe: Send {
 
 * **CPU %** comes from deltas between two samples (CPU time / wall time / logical cores). The first sample of a process shows no CPU % rather than a wrong one.
 * **Process tree and app grouping:** children are attached to their parent; processes are grouped into apps by executable path and window ownership (Windows), bundle (macOS) or `.desktop` file (Linux).
-* **History:** fixed-size ring buffers per metric, in three tiers: 1 s for 10 min, 10 s for 6 h, 1 min for 7 days. Per-process history only for the top consumers of each tier, to keep memory bounded. Memory cost of the history is computed and shown in the About window.
+* **History** (decision 0006): buckets keyed by time in three tiers (1 s for 10 min, 10 s for 6 h, 1 min for 7 days), mean and peak, gaps left empty. Per-process history for 32 processes at most (top consumers and the selected one). Memory cost is computed and shown in the About window. In memory only: it restarts empty at each launch.
 * **Diagnostics** ("why is my computer slow?") are pure functions over the current sample and the history: memory pressure, a process growing without bound, sustained CPU, disk saturation. Each one returns a finding with evidence and a suggested action.
 * **Alerts** are rules (`metric`, `threshold`, `duration`, `scope`) evaluated on each tick.
 
@@ -74,7 +74,7 @@ UI callbacks (sort, filter, kill, suspend) ──> command channel ──> sampl
 
 * Code, comments and commit messages in English.
 * No `unwrap()` on anything that depends on the OS. A probe failure for one process skips that process, it never fails the tick.
-* Test flags on the binary, for screenshots and agents: `vigie [--tab=processes|performance] [--sort=cpu|memory|name|pid[:asc]] [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID] [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive]`.
+* Test flags on the binary, for screenshots and agents: `vigie [--tab=processes|performance] [--sort=cpu|memory|name|pid[:asc]] [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID] [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] [--tab=diagnostics] [--range=1m|10m|1h|6h|24h|7d] [--history]`.
 
 ## Performance budget
 
