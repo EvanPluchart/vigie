@@ -3,12 +3,14 @@
 
 pub mod history;
 pub mod perf;
+pub mod tracker;
 mod tree;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub use tree::Group;
+use tracker::{Candidate, Tracker};
 use tree::{Entry, Figures, Node};
 pub use vigie_probe::{Pid, ProcSample, Sample, Target};
 
@@ -157,6 +159,8 @@ pub struct Core {
     collapsed_groups: HashSet<Group>,
     /// Real parent links of the last sample (start times checked), for ending a whole tree.
     children: HashMap<Pid, Vec<Pid>>,
+    /// History of the top consumers and of the selected process.
+    tracker: Tracker,
 }
 
 impl Core {
@@ -229,6 +233,18 @@ impl Core {
         order
     }
 
+    /// Per-process histories.
+    pub fn tracker(&self) -> &Tracker {
+        &self.tracker
+    }
+
+    /// Keeps a history of this process while the user has it selected (`None`: nothing
+    /// selected). Unknown or stale processes are ignored.
+    pub fn select(&mut self, process: Option<(Pid, u32)>) {
+        let target = process.and_then(|(pid, bits)| self.identify(pid, bits));
+        self.tracker.pin(target.map(|t| (t.pid, t.start_time)));
+    }
+
     /// PIDs in `sample` whose details were never set: ask the probe for these.
     pub fn missing_details(&self, sample: &Sample) -> Vec<Pid> {
         sample
@@ -276,6 +292,8 @@ impl Core {
                 },
             );
             self.starts.insert(p.pid, p.start_time);
+            self.tracker
+                .record(key, sample.at_ns, cpu_percent, p.memory_bytes);
             if p.pid == sample.self_pid {
                 frame.self_cpu_percent = cpu_percent;
                 frame.self_memory_bytes = p.memory_bytes;
@@ -302,6 +320,8 @@ impl Core {
             .retain(|(pid, start)| starts.get(pid) == Some(start));
         self.details
             .retain(|(pid, start), _| starts.get(pid) == Some(start));
+        self.tracker
+            .retain(|(pid, start)| starts.get(&pid) == Some(&start));
 
         let filter = self.filter.as_str();
         let details = &self.details;
@@ -315,6 +335,33 @@ impl Core {
         );
         frame.matching_count = tree.matching;
         let total_memory = sample.memory_total_bytes;
+        let display_name = |node: usize| -> &str {
+            let p = nodes[node].p;
+            // Apps read best by their product name ("Brave Browser"); the rest by file name.
+            match details
+                .get(&(p.pid, p.start_time))
+                .and_then(|d| d.description.as_deref())
+            {
+                Some(description) if tree.group[node] == Group::Apps => description,
+                _ => &p.name,
+            }
+        };
+        if self.tracker.wants_round(sample.at_ns) {
+            let candidates: Vec<Candidate> = nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| n.p.pid != sample.self_pid)
+                .map(|(i, n)| Candidate {
+                    key: (n.p.pid, n.p.start_time),
+                    name: display_name(i),
+                    group: tree.group[i],
+                    cpu: n.cpu,
+                    memory: n.p.memory_bytes,
+                })
+                .collect();
+            self.tracker
+                .round(sample.at_ns, total_memory, &candidates);
+        }
         let row = |kind, node: usize, depth, figures: Figures, count, expanded| {
             let p = nodes[node].p;
             Row {
@@ -333,14 +380,7 @@ impl Core {
                 kind,
                 pid: p.pid,
                 start_time: p.start_time,
-                // Apps read best by their product name ("Brave Browser"); the rest by file name.
-                name: match details
-                    .get(&(p.pid, p.start_time))
-                    .and_then(|d| d.description.as_deref())
-                {
-                    Some(description) if tree.group[node] == Group::Apps => description.to_owned(),
-                    _ => p.name.clone(),
-                },
+                name: display_name(node).to_owned(),
                 cpu_percent: figures.cpu,
                 memory_bytes: figures.memory,
                 cpu_heat: figures.cpu.map_or(0, |c| heat(c, CPU_HEAT)),
