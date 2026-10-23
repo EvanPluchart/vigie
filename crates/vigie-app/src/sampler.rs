@@ -184,6 +184,13 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                 };
                 views.started_ns.get_or_insert(sample.at_ns);
                 views.read_session_users(&mut probe, &sample);
+                if views
+                    .maintenance_at
+                    .is_none_or(|at| at.elapsed() >= MAINTENANCE_EVERY)
+                {
+                    views.maintenance = probe.maintenance();
+                    views.maintenance_at = Some(Instant::now());
+                }
                 views.diagnose(&core, sample.logical_cores, false);
                 views.tools.read(
                     &mut probe,
@@ -465,6 +472,8 @@ impl Views {
 
 /// How often GPU counters are read while the Performance view is hidden, for the history.
 const GPU_BACKGROUND: Duration = Duration::from_secs(10);
+/// How often the pending restart and free disk space are read (decision 0010).
+const MAINTENANCE_EVERY: Duration = Duration::from_secs(60);
 /// How often the diagnostics run (decision 0006).
 const DIAGNOSE_EVERY_NS: u64 = 5 * SECOND;
 
@@ -480,6 +489,9 @@ struct Views {
     users_expanded: std::collections::HashSet<u32>,
     session_users: HashMap<u32, vigie_probe::SessionUser>,
     session_users_at: Option<Instant>,
+    /// Upkeep signals for the diagnostics, read every minute.
+    maintenance: Option<vigie_probe::Maintenance>,
+    maintenance_at: Option<Instant>,
     perf: Performance,
     system: SystemSample,
     info: SystemInfo,
@@ -533,6 +545,7 @@ impl Views {
             last,
             tracker: core.tracker(),
             logical_cores,
+            maintenance: self.maintenance.as_ref(),
         });
         if let Some(rules) = self.alert_rules {
             let due = self

@@ -327,6 +327,12 @@ FR = {
     "Handles": "Handles",
     "I/O": "E/S",
     "Reset column widths": "Rétablir la largeur des colonnes",
+    "A restart is waiting to finish installing updates": "Un redémarrage est nécessaire pour terminer l’installation des mises à jour",
+    "Drive {} is almost full": "Le lecteur {} est presque plein",
+    "Windows installed updates that only take effect after a restart. Until then, some fixes are not applied and the system may run slower.": "Windows a installé des mises à jour qui ne s’appliquent qu’après un redémarrage. D’ici là, certains correctifs ne sont pas actifs et le système peut être plus lent.",
+    "Only {} free ({}). Windows needs room for updates, the page file and temporary files; with too little, programs and updates fail.": "Seulement {} libres ({}). Windows a besoin de place pour les mises à jour, le fichier d’échange et les fichiers temporaires ; sans elle, programmes et mises à jour échouent.",
+    "Suggestion: free up space with Storage Sense, or move large files elsewhere.": "Suggestion : libérez de l’espace avec l’Assistant Stockage, ou déplacez les gros fichiers ailleurs.",
+    "Open storage settings": "Ouvrir les paramètres de stockage",
 }
 
 

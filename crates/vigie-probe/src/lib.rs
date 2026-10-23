@@ -14,6 +14,8 @@ mod windows_gpu;
 #[cfg(windows)]
 mod windows_locks;
 #[cfg(windows)]
+mod windows_maintenance;
+#[cfg(windows)]
 mod windows_net;
 #[cfg(windows)]
 mod windows_services;
@@ -360,6 +362,21 @@ pub struct Service {
     pub pid: Option<Pid>,
 }
 
+/// Upkeep signals for the diagnostics, read without any network access.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Maintenance {
+    /// Installed updates wait for a restart to finish.
+    pub restart_for_updates: bool,
+    pub system_drive: Option<DriveSpace>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DriveSpace {
+    pub letter: char,
+    pub free_bytes: u64,
+    pub total_bytes: u64,
+}
+
 /// The account signed in to a login session (Task Manager's Users tab).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionUser {
@@ -437,6 +454,11 @@ pub trait Probe: Send {
     /// Starts (`true`) or stops a service by its short name. Callers confirm stopping first.
     fn control_service(&mut self, _name: &str, _start: bool) -> Result<()> {
         Err(ProbeError::Unsupported)
+    }
+    /// Upkeep signals (pending restart, free space on the system drive). A few registry and
+    /// file system reads: call it every minute or so, not every tick.
+    fn maintenance(&mut self) -> Option<Maintenance> {
+        None
     }
     /// Who is signed in to a login session. Cheap, but cache it: names rarely change.
     fn session_user(&mut self, _session: u32) -> Option<SessionUser> {

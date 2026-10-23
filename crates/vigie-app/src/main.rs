@@ -162,6 +162,9 @@ fn main() -> anyhow::Result<()> {
     app.on_search_online(|query| {
         vigie_shell::desktop::search_online(&query);
     });
+    app.on_open_storage_settings(|| {
+        vigie_shell::desktop::open_storage_settings();
+    });
     let nav = app.global::<MenuNav>();
     nav.on_next(|items, start, step| {
         let entries: Vec<MenuEntry> = items.iter().collect();

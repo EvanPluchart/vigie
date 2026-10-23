@@ -808,6 +808,10 @@ impl Probe for WindowsProbe {
         Ok(())
     }
 
+    fn maintenance(&mut self) -> Option<crate::Maintenance> {
+        Some(crate::windows_maintenance::read())
+    }
+
     fn session_user(&mut self, session: u32) -> Option<crate::SessionUser> {
         session_user(session)
     }

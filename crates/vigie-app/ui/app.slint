@@ -613,6 +613,7 @@ export component AppWindow inherits Window {
     callback reveal-path(string);
     callback show-properties(string);
     callback search-online(string);
+    callback open-storage-settings();
     // "Go to process": the PID to select once its row arrives (-1 for none), see src/model.rs.
     in-out property <int> pending-select: -1;
     in-out property <int> pending-tries;
@@ -1600,6 +1601,7 @@ export component AppWindow inherits Window {
                 ready: root.diagnostics-ready;
                 available: root.diagnostics-available;
                 show-performance => { root.show-tab(1); }
+                free-space => { root.open-storage-settings(); }
                 // The same confirmation as the table: it names the process and checks it is
                 // still the one the finding named.
                 end(f) => {

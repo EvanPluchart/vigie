@@ -442,6 +442,12 @@ msgstr "Le disque {} est saturé"
 msgid "Disk {} ({}) is saturated"
 msgstr "Le disque {} ({}) est saturé"
 
+msgid "A restart is waiting to finish installing updates"
+msgstr "Un redémarrage est nécessaire pour terminer l’installation des mises à jour"
+
+msgid "Drive {} is almost full"
+msgstr "Le lecteur {} est presque plein"
+
 msgid "Your computer has been running for {} days"
 msgstr "Votre ordinateur tourne depuis {} jours"
 
@@ -463,6 +469,12 @@ msgstr "De {} à {} en {}, sans relâche. Un programme qui ne rend jamais de mé
 msgid "Busy {} of the time over the last minute. Programs that read or write files wait for it."
 msgstr "Occupé {} du temps sur la dernière minute. Les programmes qui lisent ou écrivent des fichiers l’attendent."
 
+msgid "Windows installed updates that only take effect after a restart. Until then, some fixes are not applied and the system may run slower."
+msgstr "Windows a installé des mises à jour qui ne s’appliquent qu’après un redémarrage. D’ici là, certains correctifs ne sont pas actifs et le système peut être plus lent."
+
+msgid "Only {} free ({}). Windows needs room for updates, the page file and temporary files; with too little, programs and updates fail."
+msgstr "Seulement {} libres ({}). Windows a besoin de place pour les mises à jour, le fichier d’échange et les fichiers temporaires ; sans elle, programmes et mises à jour échouent."
+
 msgid "Some slowdowns and pending updates only clear with a restart."
 msgstr "Certains ralentissements et mises à jour en attente ne disparaissent qu’avec un redémarrage."
 
@@ -478,6 +490,9 @@ msgstr "Suggestion : fermez les programmes dont vous n’avez pas besoin."
 msgid "Vigie cannot tell yet which program uses the disk. Check the disk activity over time."
 msgstr "Vigie ne sait pas encore quel programme utilise le disque. Regardez l’activité du disque dans le temps."
 
+msgid "Suggestion: free up space with Storage Sense, or move large files elsewhere."
+msgstr "Suggestion : libérez de l’espace avec l’Assistant Stockage, ou déplacez les gros fichiers ailleurs."
+
 msgid "Suggestion: restart (not shut down: with fast startup, shutting down keeps the system running)."
 msgstr "Suggestion : redémarrez (pas d’arrêt : avec le démarrage rapide, l’arrêt garde le système en marche)."
 
@@ -486,6 +501,9 @@ msgstr "Fin de tâche…"
 
 msgid "Open Performance"
 msgstr "Ouvrir Performances"
+
+msgid "Open storage settings"
+msgstr "Ouvrir les paramètres de stockage"
 
 msgid "Why is my computer slow?"
 msgstr "Pourquoi mon ordinateur est-il lent ?"

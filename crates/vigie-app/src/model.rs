@@ -851,6 +851,17 @@ fn finding_row(finding: &Finding) -> FindingRow {
             row.kind = 5;
             row.a = days.to_string().into();
         }
+        Finding::RestartPending => row.kind = 6,
+        Finding::LowDiskSpace {
+            letter,
+            free,
+            total,
+        } => {
+            row.kind = 7;
+            row.a = format!("{letter}:").into();
+            row.b = format_memory(*free);
+            row.c = format_percent(Some((*free as f64 / (*total).max(1) as f64 * 100.0) as f32));
+        }
     }
     let target = |row: &mut FindingRow, c: &Culprit| {
         row.name = c.name.as_str().into();
@@ -869,6 +880,7 @@ fn finding_row(finding: &Finding) -> FindingRow {
         Suggestion::ClosePrograms => 2,
         Suggestion::ShowPerformance => 3,
         Suggestion::Restart => 4,
+        Suggestion::FreeSpace => 5,
     };
     // Findings about one process name it in their title.
     if let Finding::CpuHog { culprit, .. } | Finding::MemoryGrowth { culprit, .. } = finding {

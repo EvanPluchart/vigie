@@ -74,6 +74,18 @@ pub mod desktop {
         }
     }
 
+    /// Opens the system's storage settings (Storage Sense on Windows).
+    pub fn open_storage_settings() -> bool {
+        #[cfg(windows)]
+        {
+            crate::desktop_windows::open_url("ms-settings:storagesense")
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+
     /// A Bing search for `query`, as Task Manager uses, with the query percent-encoded.
     pub fn search_url(query: &str) -> String {
         let mut url = String::from("https://www.bing.com/search?q=");

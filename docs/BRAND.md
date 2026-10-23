@@ -91,6 +91,9 @@ Contrast checks: lagoon on ink 8.7:1, ink on lagoon 8.7:1, deep lagoon on white 
   * Danger buttons: the same tint in the danger colour, for actions that end or stop something.
   * Fields: the surface colour, a border that turns lagoon on focus, a magnifying glass and a clear button when they search.
   * Disabled controls fade to 40 %.
+  * Switches: a white knob on the lagoon track when on, on a faint ink track when off.
+  * Buttons sit centred in their bar: 6 px above and below in the 44 px command bars.
+* **Menus** (`ui/menu.slint`): Vigie's own, never the native ones, which stay light on the dark theme. They use the raised surface, a 10 px radius and a soft shadow. Entries are 30 px high, with the lagoon tint under the current one and the danger colour for entries that end something. A check column keeps titles aligned, and shortcuts are muted on the right.
 * **Icons:** line icons, 1.6 px stroke at 18 px, round caps and joins, echoing the round ends of the arms.
 * **Voice:** short and factual. "Vigie uses 0.4 % CPU", not "Everything is fine!". English source strings, French first translation.
 

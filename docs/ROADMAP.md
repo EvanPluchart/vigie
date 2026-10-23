@@ -17,7 +17,7 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 
 * **D1 — Identity (done, approved 2026-10-22):** logo and app icon (readable at 16 px in the taskbar and the tray), palette, typography, art direction, short brand guide in `docs/BRAND.md`, masters in `assets/brand/`.
 * **D2 — Interface art direction (done 2026-10-22, `ui/theme.slint`):** design tokens as a Slint global (colours for dark and light, type scale, spacing, radii), table density, heat colours, status bar; applied over the native styles without fighting them.
-* **D3 — UX pass per milestone (M1: `docs/ux/audit-m1.md`, M2: `docs/ux/audit-m2.md`, M3: `docs/ux/audit-m3.md`, M4: `docs/ux/audit-m4.md`, M5: `docs/ux/audit-m5.md`):** each milestone ends with a screenshot review of its views (empty, loading, error and privilege-limited states included) and a list of fixes.
+* **D3 — UX pass per milestone (M1: `docs/ux/audit-m1.md`, M2: `docs/ux/audit-m2.md`, M3: `docs/ux/audit-m3.md`, M4: `docs/ux/audit-m4.md`, M5: `docs/ux/audit-m5.md`, M6: `docs/ux/audit-m6.md`, M7: `docs/ux/audit-m7.md`):** each milestone ends with a screenshot review of its views (empty, loading, error and privilege-limited states included) and a list of fixes.
 
 **Done when:** each item has its screenshots and its decision recorded; D2 lands before M1 is called done.
 
@@ -73,6 +73,15 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 * Landing page on GitHub Pages (French and English).
 
 **Status (2026-10-23):** version 0.1.0. The Windows installer is built and tested here (install, launch, uninstall, nothing left). The macOS `.dmg` and the Linux AppImage are built by the release workflow, unsigned until certificates exist. Replacing Task Manager is waiting for the author's manual check. The landing page is in `site/` (French and English, `site/DESIGN.md`), to publish with `pages.yml`. Flatpak is deferred (decision 0009). Audit in `docs/ux/audit-m6.md`.
+
+## M7 — First-use feedback
+
+* Vigie's own context menus everywhere, with Task Manager's entries and shortcuts.
+* Details and Users views; group by type, expand all, collapse all.
+* Resizable columns, more columns (status, user name, description, threads, handles, I/O), resizable history panel.
+* Upkeep findings: restart pending for updates, system drive almost full.
+
+**Status (2026-10-23):** done on Windows (decision 0010, audit in `docs/ux/audit-m7.md`, which maps each remark of the author's first test to its fix). Network per process and history across restarts stay open.
 
 ## Later, maybe
 

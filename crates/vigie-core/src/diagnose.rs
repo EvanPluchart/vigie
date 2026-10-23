@@ -36,6 +36,17 @@ const DISK_RAISE: f32 = 90.0;
 const DISK_CLEAR: f32 = 70.0;
 /// Uptime after which a restart is worth suggesting.
 const LONG_UPTIME_S: u64 = 14 * 24 * 3600;
+/// System drive: raise below 10 % free (and under 20 GB, so a huge drive with room is left
+/// alone) or under 5 GB whatever the size; clear above 12 % (or 24 GB) and 8 GB. Critical
+/// under 2 GB.
+const SPACE_RAISE_SHARE: f64 = 0.10;
+const SPACE_RAISE_CAP: u64 = 20 * GB;
+const SPACE_RAISE_FLOOR: u64 = 5 * GB;
+const SPACE_CLEAR_SHARE: f64 = 0.12;
+const SPACE_CLEAR_CAP: u64 = 24 * GB;
+const SPACE_CLEAR_FLOOR: u64 = 8 * GB;
+const SPACE_CRITICAL: u64 = 2 * GB;
+const GB: u64 = 1024 * 1024 * 1024;
 /// Least share of a window that must have values for a mean to count.
 const MIN_COVERAGE: f32 = 0.5;
 /// Processes named as evidence, at most.
@@ -72,6 +83,8 @@ pub enum Suggestion {
     ShowPerformance,
     /// Restart the computer (a real restart: fast startup keeps the kernel running).
     Restart,
+    /// Free up space (the system's storage settings).
+    FreeSpace,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -113,6 +126,14 @@ pub enum Finding {
     LongUptime {
         days: u64,
     },
+    /// Installed updates finish only after a restart.
+    RestartPending,
+    /// Little free space left on the drive Windows runs from.
+    LowDiskSpace {
+        letter: char,
+        free: u64,
+        total: u64,
+    },
 }
 
 impl Finding {
@@ -120,6 +141,8 @@ impl Finding {
         match self {
             Finding::CpuSaturated { .. } => Severity::Critical,
             Finding::MemoryPressure { level, .. } if *level == Pressure::High => Severity::Critical,
+            Finding::LowDiskSpace { free, .. } if *free < SPACE_CRITICAL => Severity::Critical,
+            Finding::LowDiskSpace { .. } | Finding::RestartPending => Severity::Warning,
             Finding::CpuHog { .. }
             | Finding::MemoryPressure { .. }
             | Finding::MemoryGrowth { .. }
@@ -145,7 +168,8 @@ impl Finding {
                 end_or_leave(culprit)
             }
             Finding::DiskBusy { .. } => Suggestion::ShowPerformance,
-            Finding::LongUptime { .. } => Suggestion::Restart,
+            Finding::LongUptime { .. } | Finding::RestartPending => Suggestion::Restart,
+            Finding::LowDiskSpace { .. } => Suggestion::FreeSpace,
         }
     }
 
@@ -154,8 +178,8 @@ impl Finding {
         match self {
             Finding::CpuSaturated { .. } | Finding::CpuHog { .. } => Area::Cpu,
             Finding::MemoryPressure { .. } | Finding::MemoryGrowth { .. } => Area::Memory,
-            Finding::DiskBusy { .. } => Area::Disk,
-            Finding::LongUptime { .. } => Area::System,
+            Finding::DiskBusy { .. } | Finding::LowDiskSpace { .. } => Area::Disk,
+            Finding::LongUptime { .. } | Finding::RestartPending => Area::System,
         }
     }
 
@@ -168,6 +192,8 @@ impl Finding {
             Finding::MemoryGrowth { culprit, .. } => Id::Growth(key(culprit)),
             Finding::DiskBusy { index, .. } => Id::Disk(*index),
             Finding::LongUptime { .. } => Id::Uptime,
+            Finding::RestartPending => Id::Restart,
+            Finding::LowDiskSpace { .. } => Id::Space,
         }
     }
 }
@@ -200,6 +226,8 @@ enum Id {
     Growth(ProcKey),
     Disk(u32),
     Uptime,
+    Restart,
+    Space,
 }
 
 /// What the rules read.
@@ -209,6 +237,8 @@ pub struct Input<'a> {
     pub last: &'a PerfFrame,
     pub tracker: &'a Tracker,
     pub logical_cores: u32,
+    /// Upkeep signals, when the system gives them.
+    pub maintenance: Option<&'a vigie_probe::Maintenance>,
 }
 
 /// Runs the rules and remembers which findings are raised, for hysteresis.
@@ -337,9 +367,22 @@ impl Diagnostics {
             }
         }
 
-        if input.last.uptime_s >= LONG_UPTIME_S {
+        // A pending restart says more than a long uptime, which it would repeat.
+        let restart = input.maintenance.is_some_and(|m| m.restart_for_updates);
+        if restart {
+            findings.push(Finding::RestartPending);
+        } else if input.last.uptime_s >= LONG_UPTIME_S {
             findings.push(Finding::LongUptime {
                 days: input.last.uptime_s / 86_400,
+            });
+        }
+        if let Some(drive) = input.maintenance.and_then(|m| m.system_drive)
+            && low_space(drive.free_bytes, drive.total_bytes, raised(Id::Space))
+        {
+            findings.push(Finding::LowDiskSpace {
+                letter: drive.letter,
+                free: drive.free_bytes,
+                total: drive.total_bytes,
             });
         }
 
@@ -347,6 +390,19 @@ impl Diagnostics {
         // Stable: rules already run in a sensible order within a severity.
         findings.sort_by_key(|f| std::cmp::Reverse(f.severity()));
         findings
+    }
+}
+
+/// Free space is low: raise or, once raised, not yet back above the clearing level.
+fn low_space(free: u64, total: u64, raised: bool) -> bool {
+    if total == 0 {
+        return false;
+    }
+    let share = free as f64 / total as f64;
+    if raised {
+        (share < SPACE_CLEAR_SHARE && free < SPACE_CLEAR_CAP) || free < SPACE_CLEAR_FLOOR
+    } else {
+        (share < SPACE_RAISE_SHARE && free < SPACE_RAISE_CAP) || free < SPACE_RAISE_FLOOR
     }
 }
 
@@ -493,6 +549,7 @@ mod tests {
                 last: &self.last,
                 tracker: &self.tracker,
                 logical_cores: 8,
+                maintenance: None,
             })
         }
     }
@@ -530,6 +587,67 @@ mod tests {
     }
 
     #[test]
+    fn pending_restart_and_low_disk_space() {
+        let mut w = World::new();
+        w.tick(5.0, 8 * GB, 1.0, &[]);
+        let run = |w: &mut World, maintenance: &vigie_probe::Maintenance| {
+            w.diagnostics.run(&Input {
+                now_ns: w.now,
+                perf: &w.perf,
+                last: &w.last,
+                tracker: &w.tracker,
+                logical_cores: 8,
+                maintenance: Some(maintenance),
+            })
+        };
+        let drive = |free: u64| vigie_probe::Maintenance {
+            restart_for_updates: true,
+            system_drive: Some(vigie_probe::DriveSpace {
+                letter: 'C',
+                free_bytes: free,
+                total_bytes: 500 * GB,
+            }),
+        };
+        // 4 GB free of 500: under the 5 GB floor. And updates wait for a restart.
+        let findings = run(&mut w, &drive(4 * GB));
+        assert!(findings.contains(&Finding::RestartPending));
+        assert!(matches!(
+            findings
+                .iter()
+                .find(|f| matches!(f, Finding::LowDiskSpace { .. })),
+            Some(Finding::LowDiskSpace { letter: 'C', .. })
+        ));
+        assert_eq!(
+            findings
+                .iter()
+                .find(|f| matches!(f, Finding::LowDiskSpace { .. }))
+                .map(Finding::suggestion),
+            Some(Suggestion::FreeSpace)
+        );
+        // 7 GB stays raised (clears above 8 GB); 30 GB (6 %, but over the 20 GB cap) clears,
+        // and does not raise again.
+        assert!(
+            run(&mut w, &drive(7 * GB))
+                .iter()
+                .any(|f| matches!(f, Finding::LowDiskSpace { .. }))
+        );
+        assert!(
+            !run(&mut w, &drive(30 * GB))
+                .iter()
+                .any(|f| matches!(f, Finding::LowDiskSpace { .. }))
+        );
+        assert_eq!(
+            Finding::LowDiskSpace {
+                letter: 'C',
+                free: GB,
+                total: 500 * GB
+            }
+            .severity(),
+            Severity::Critical
+        );
+    }
+
+    #[test]
     fn saturation_names_the_busiest_and_clears_with_hysteresis() {
         let mut w = World::new();
         let procs = [(1, 70.0, GB, Group::Apps), (2, 20.0, GB, Group::System)];
@@ -556,6 +674,7 @@ mod tests {
                     last: &w.last,
                     tracker: &w.tracker,
                     logical_cores: 8,
+                    maintenance: None,
                 })
                 .iter()
                 .all(|f| !matches!(f, Finding::CpuSaturated { .. }))

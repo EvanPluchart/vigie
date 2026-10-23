@@ -9,7 +9,8 @@ import { Theme } from "theme.slint";
 export struct FindingRow {
     // 0 CPU saturated (a: mean, b: window), 1 one process on a full core (a: cores, b: window),
     // 2 memory pressure (a: available %, b: commit %), 3 memory growing (a: from, b: to,
-    // c: over), 4 disk busy (a: mean, b: disk index, c: drive letters), 5 long uptime (a: days).
+    // c: over), 4 disk busy (a: mean, b: disk index, c: drive letters), 5 long uptime (a: days),
+    // 6 restart pending for updates, 7 low disk space (a: drive, b: free, c: free share).
     kind: int,
     // 0 info, 1 warning, 2 critical.
     severity: int,
@@ -21,7 +22,8 @@ export struct FindingRow {
     c: string,
     // Processes named as evidence, one per line: "name · PID 123 · 45 % · 1.2 GB".
     evidence: string,
-    // 0 end the process, 1 leave it (system), 2 close programs, 3 open Performance, 4 restart.
+    // 0 end the process, 1 leave it (system), 2 close programs, 3 open Performance, 4 restart,
+    // 5 free up space.
     suggestion: int,
     // The process the suggestion is about.
     name: string,
@@ -46,6 +48,7 @@ component FindingCard inherits Rectangle {
     in property <FindingRow> item;
     callback end(FindingRow);
     callback show-performance();
+    callback free-space();
     background: Theme.surface;
     border-radius: Theme.radius-panel;
     border-width: 1px;
@@ -71,6 +74,8 @@ component FindingCard inherits Rectangle {
                 : root.item.kind == 2 ? (root.item.cause == 1 ? @tr("Committed memory is near its limit") : @tr("Memory is running low"))
                 : root.item.kind == 3 ? @tr("{} keeps using more memory", root.item.name)
                 : root.item.kind == 4 ? (root.item.c == "" ? @tr("Disk {} is saturated", root.item.b) : @tr("Disk {} ({}) is saturated", root.item.b, root.item.c))
+                : root.item.kind == 6 ? @tr("A restart is waiting to finish installing updates")
+                : root.item.kind == 7 ? @tr("Drive {} is almost full", root.item.a)
                 : @tr("Your computer has been running for {} days", root.item.a);
         }
         Text {
@@ -84,6 +89,8 @@ component FindingCard inherits Rectangle {
                     : @tr("Only {} % of memory is available; the system moves memory to disk, which is slow.", root.item.a))
                 : root.item.kind == 3 ? @tr("From {} to {} over {}, steadily. A program that never gives memory back often has a leak.", root.item.a, root.item.b, root.item.c)
                 : root.item.kind == 4 ? @tr("Busy {} of the time over the last minute. Programs that read or write files wait for it.", root.item.a)
+                : root.item.kind == 6 ? @tr("Windows installed updates that only take effect after a restart. Until then, some fixes are not applied and the system may run slower.")
+                : root.item.kind == 7 ? @tr("Only {} free ({}). Windows needs room for updates, the page file and temporary files; with too little, programs and updates fail.", root.item.b, root.item.c)
                 : @tr("Some slowdowns and pending updates only clear with a restart.");
         }
         if root.item.evidence != "": Text {
@@ -105,6 +112,7 @@ component FindingCard inherits Rectangle {
                     : root.item.suggestion == 1 ? @tr("{} is part of the system: ending it could crash the computer. If this lasts, restart.", root.item.name)
                     : root.item.suggestion == 2 ? @tr("Suggestion: close the programs you do not need.")
                     : root.item.suggestion == 3 ? @tr("Vigie cannot tell yet which program uses the disk. Check the disk activity over time.")
+                    : root.item.suggestion == 5 ? @tr("Suggestion: free up space with Storage Sense, or move large files elsewhere.")
                     : @tr("Suggestion: restart (not shut down: with fast startup, shutting down keeps the system running).");
             }
             if root.item.suggestion == 0: VButton {
@@ -116,6 +124,11 @@ component FindingCard inherits Rectangle {
                 kind: 1;
                 text: @tr("Open Performance");
                 clicked => { root.show-performance(); }
+            }
+            if root.item.suggestion == 5: VButton {
+                kind: 1;
+                text: @tr("Open storage settings");
+                clicked => { root.free-space(); }
             }
         }
     }
@@ -163,6 +176,7 @@ export component DiagnosticsView inherits Rectangle {
     in property <bool> available: true;
     callback end(FindingRow);
     callback show-performance();
+    callback free-space();
 
     VerticalLayout {
         HorizontalLayout {
@@ -202,6 +216,7 @@ export component DiagnosticsView inherits Rectangle {
                     item: item;
                     end(f) => { root.end(f); }
                     show-performance => { root.show-performance(); }
+                    free-space => { root.free-space(); }
                 }
                 // All clear: say so, and what was looked at.
                 if root.ready && root.available && root.findings.length == 0: Rectangle {
