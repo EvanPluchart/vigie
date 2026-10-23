@@ -529,6 +529,13 @@ fn main() -> anyhow::Result<()> {
     slint::run_event_loop_until_quit().context("running the event loop")?;
     let _ = app.hide();
     desktop::uninstall();
+    let _ = commands.send(Command::Quit);
+    // Last resort: whatever happens to the sampler, the process ends, releasing the single
+    // instance (a Vigie that never exits blocks every later launch, Ctrl+Shift+Esc included).
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        std::process::exit(0);
+    });
     // The callbacks hold senders too: replace them so the sampler sees the channel close.
     drop(commands);
     app.on_sort_clicked(|_| {});
