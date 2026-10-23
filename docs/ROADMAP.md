@@ -81,7 +81,7 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 * Resizable columns, more columns (status, user name, description, threads, handles, I/O), resizable history panel.
 * Upkeep findings: restart pending for updates, system drive almost full.
 
-**Status (2026-10-23):** done on Windows (decision 0010, audit in `docs/ux/audit-m7.md`, which maps each remark of the author's first test to its fix). Network per process and history across restarts stay open.
+**Status (2026-10-23):** done on Windows (decision 0010, audit in `docs/ux/audit-m7.md`, which maps each remark of the author's first test to its fix). Network per process and history across restarts stay open. 0.1.1 (2026-10-24) fixes a Vigie that kept running unseen after its window closed, which then blocked every later launch, Ctrl+Shift+Esc included.
 
 ## Later, maybe
 

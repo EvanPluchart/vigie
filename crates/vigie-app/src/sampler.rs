@@ -36,6 +36,10 @@ pub enum Command {
     ToggleUser(u32),
     /// An I/O column is on screen: read I/O counters every tick.
     IoShown(bool),
+    /// The window closed: stop now. Not waiting for every sender to drop, which any new
+    /// callback holding one would prevent (a Vigie left running unseen, holding the single
+    /// instance, so neither Vigie nor Task Manager would open again).
+    Quit,
     /// The Processes view groups by type (sections and trees) or shows one flat list.
     Grouped(bool),
     ExpandAll,
@@ -233,6 +237,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                             }
                             Command::ExpandAll => core.expand_all(),
                             Command::IoShown(shown) => probe.set_io_every_tick(shown),
+                            Command::Quit => return,
                             Command::ToggleUser(session) => {
                                 if !views.users_expanded.remove(&session) {
                                     views.users_expanded.insert(session);
