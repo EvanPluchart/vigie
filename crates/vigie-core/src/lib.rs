@@ -4,6 +4,7 @@
 pub mod diagnose;
 pub mod history;
 pub mod perf;
+pub mod settings;
 pub mod tools;
 pub mod tracker;
 mod tree;

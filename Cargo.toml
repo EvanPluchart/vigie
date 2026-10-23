@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/vigie-probe", "crates/vigie-core", "crates/vigie-app", "xtask"]
+members = ["crates/vigie-probe", "crates/vigie-core", "crates/vigie-shell", "crates/vigie-app", "xtask"]
 
 [workspace.package]
 version = "0.0.0"
@@ -12,6 +12,7 @@ repository = "https://github.com/EvanPluchart/vigie"
 [workspace.dependencies]
 vigie-probe = { path = "crates/vigie-probe" }
 vigie-core = { path = "crates/vigie-core" }
+vigie-shell = { path = "crates/vigie-shell" }
 
 # Slint is pinned to an exact version and upgraded only on purpose (decision 0001).
 # Software renderer on winit: about 26 MB of RSS against 136 MB with femtovg (decision 0003).
