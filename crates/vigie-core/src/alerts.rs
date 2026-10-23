@@ -144,10 +144,10 @@ impl Alerts {
                 window_s: rules.cpu_window_s,
                 culprit: culprit(saturated),
             })
-        } else if let Some(f) = saturated.filter(|_| !self.critical_cpu) {
-            Some(Alert::Critical(f.clone()))
         } else {
-            None
+            saturated
+                .filter(|_| !self.critical_cpu)
+                .map(|f| Alert::Critical(f.clone()))
         };
         self.critical_cpu = saturated.is_some();
         let memory_alert = if let Some(percent) = memory_edge {
@@ -155,10 +155,10 @@ impl Alerts {
                 percent,
                 culprit: culprit(pressure),
             })
-        } else if let Some(f) = pressure.filter(|_| !self.critical_memory) {
-            Some(Alert::Critical(f.clone()))
         } else {
-            None
+            pressure
+                .filter(|_| !self.critical_memory)
+                .map(|f| Alert::Critical(f.clone()))
         };
         self.critical_memory = pressure.is_some();
 
