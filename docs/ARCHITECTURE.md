@@ -74,7 +74,7 @@ UI callbacks (sort, filter, kill, suspend) ──> command channel ──> sampl
 
 * Code, comments and commit messages in English.
 * No `unwrap()` on anything that depends on the OS. A probe failure for one process skips that process, it never fails the tick.
-* Test flags on the binary, for screenshots and agents: `vigie [--tab=processes|performance] [--sort=cpu|memory|name|pid[:asc]] [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID] [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] [--tab=diagnostics] [--range=1m|10m|1h|6h|24h|7d] [--history]`.
+* Test flags on the binary, for screenshots and agents: `vigie [--tab=processes|performance] [--sort=cpu|memory|name|pid[:asc]] [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID] [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] [--tab=diagnostics] [--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=ports|files|startup|services] [--locks=PATH]`.
 
 ## Performance budget
 

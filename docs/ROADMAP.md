@@ -17,7 +17,7 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 
 * **D1 — Identity (done, approved 2026-10-22):** logo and app icon (readable at 16 px in the taskbar and the tray), palette, typography, art direction, short brand guide in `docs/BRAND.md`, masters in `assets/brand/`.
 * **D2 — Interface art direction (done 2026-10-22, `ui/theme.slint`):** design tokens as a Slint global (colours for dark and light, type scale, spacing, radii), table density, heat colours, status bar; applied over the native styles without fighting them.
-* **D3 — UX pass per milestone (M1: `docs/ux/audit-m1.md`, M2: `docs/ux/audit-m2.md`, M3: `docs/ux/audit-m3.md`):** each milestone ends with a screenshot review of its views (empty, loading, error and privilege-limited states included) and a list of fixes.
+* **D3 — UX pass per milestone (M1: `docs/ux/audit-m1.md`, M2: `docs/ux/audit-m2.md`, M3: `docs/ux/audit-m3.md`, M4: `docs/ux/audit-m4.md`):** each milestone ends with a screenshot review of its views (empty, loading, error and privilege-limited states included) and a list of fixes.
 
 **Done when:** each item has its screenshots and its decision recorded; D2 lands before M1 is called done.
 
@@ -54,6 +54,8 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 * Ports: which process listens on or connects to which port, kill from there.
 * Who locks this file: drop a file, get the processes holding it (Windows Restart Manager, `lsof`-style on macOS and Linux).
 * Startup apps and services.
+
+**Status (2026-10-23):** done on Windows (decision 0007, UX audit in `docs/ux/audit-m4.md`). Vigie now draws its own controls from the design tokens. Linux and macOS show that these views are not available yet.
 
 ## M5 — Polish
 
