@@ -699,10 +699,10 @@ mod tests {
         probe.sample(&mut sample).expect("sample");
         let second = by_pid(&sample, 4).measured_at_ns;
         assert_eq!(second, sample.at_ns);
-        // Then opened processes are measured every tick, System only on full snapshots. A new
-        // service also triggers a snapshot (decision 0004), and machines starting services
-        // (CI runners) do that often: some tick before the next periodic snapshot keeps
-        // System's older measurement.
+        // Then opened processes are measured every tick, the others only on full snapshots. A
+        // new service also triggers a snapshot (decision 0004), and machines starting services
+        // (CI runners) do that often: some tick before the next periodic snapshot keeps an
+        // older measurement for a process that could not be opened.
         let mut kept = false;
         for _ in 0..3 {
             probe.sample(&mut sample).expect("sample");
@@ -710,9 +710,21 @@ mod tests {
                 by_pid(&sample, sample.self_pid).measured_at_ns,
                 sample.at_ns
             );
-            kept |= by_pid(&sample, 4).measured_at_ns < sample.at_ns;
+            kept |= sample
+                .processes
+                .iter()
+                .any(|p| p.measured_at_ns < sample.at_ns);
         }
-        assert!(kept, "System was measured on every tick");
+        // Elevated (CI runners run as administrator), every process can be opened, System
+        // included: everything is measured every tick and there is no snapshot to see.
+        let elevated = sample
+            .processes
+            .iter()
+            .all(|p| p.measured_at_ns == sample.at_ns);
+        assert!(
+            kept || elevated,
+            "unopened processes were measured on every tick"
+        );
     }
 }
 
