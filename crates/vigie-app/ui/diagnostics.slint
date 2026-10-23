@@ -1,7 +1,8 @@
 // "Why is my computer slow?": findings with their evidence and one suggestion each, or what
 // was checked when all is well (decision 0006).
 
-import { Button, ScrollView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { VButton } from "controls.slint";
 import { Theme } from "theme.slint";
 
 // One finding, formatted by Rust (src/model.rs). Figures `a`, `b`, `c` depend on the kind.
@@ -106,11 +107,13 @@ component FindingCard inherits Rectangle {
                     : root.item.suggestion == 3 ? @tr("Vigie cannot tell yet which program uses the disk. Check the disk activity over time.")
                     : @tr("Suggestion: restart (not shut down: with fast startup, shutting down keeps the system running).");
             }
-            if root.item.suggestion == 0: Button {
+            if root.item.suggestion == 0: VButton {
+                kind: 2;
                 text: @tr("End task…");
                 clicked => { root.end(root.item); }
             }
-            if root.item.suggestion == 3: Button {
+            if root.item.suggestion == 3: VButton {
+                kind: 1;
                 text: @tr("Open Performance");
                 clicked => { root.show-performance(); }
             }

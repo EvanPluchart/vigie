@@ -1,0 +1,177 @@
+// Vigie's own controls, drawn from the tokens (docs/BRAND.md): 8 px radius like the rail items,
+// the lagoon tint for what is active, a danger tint for what destroys. The native widgets kept
+// the system accent and their own shapes, which did not match the art direction.
+
+import { Theme } from "theme.slint";
+
+// A button. Kind 0: neutral (thin border), 1: accent (lagoon tint, like the active rail item),
+// 2: danger (ends or stops something).
+export component VButton inherits Rectangle {
+    in property <string> text;
+    in property <int> kind;
+    in property <bool> enabled: true;
+    callback clicked();
+    property <color> tone: root.kind == 2 ? Theme.danger : root.kind == 1 ? Theme.accent : Theme.text;
+    property <bool> active: root.enabled && (touch.has-hover || focus.has-focus);
+    height: 32px;
+    min-width: label.preferred-width + 2 * Theme.space-3;
+    horizontal-stretch: 0;
+    border-radius: Theme.radius-control;
+    border-width: root.kind == 0 || focus.has-focus ? 1px : 0px;
+    border-color: focus.has-focus ? Theme.accent : Theme.border;
+    background: root.kind == 0
+        ? (touch.pressed && root.enabled ? Theme.text.with-alpha(0.10) : root.active ? Theme.text.with-alpha(0.06) : transparent)
+        : root.tone.with-alpha(touch.pressed && root.enabled ? 0.30 : root.active ? 0.24 : 0.16);
+    opacity: root.enabled ? 1 : 0.4;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: 120ms; easing: ease-out; }
+    label := Text {
+        text: root.text;
+        color: root.kind == 0 ? Theme.text : root.tone;
+        font-size: Theme.font-body;
+        font-weight: Theme.weight-strong;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+// A one-line text field: rounded like the other controls, lagoon border when focused.
+export component VField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    // A magnifying glass at the start, and a clear button once there is text.
+    in property <bool> search;
+    callback edited(string);
+    callback accepted(string);
+    forward-focus: input;
+    height: 32px;
+    border-radius: Theme.radius-control;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : touch.has-hover ? Theme.text-muted.with-alpha(0.5) : Theme.border;
+    background: Theme.surface;
+    accessible-role: text-input;
+    accessible-label: root.placeholder;
+    accessible-value: root.text;
+    animate border-color { duration: 120ms; easing: ease-out; }
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+    HorizontalLayout {
+        padding-left: Theme.space-3;
+        padding-right: root.text != "" && root.search ? Theme.space-1 : Theme.space-3;
+        spacing: Theme.space-2;
+        if root.search: Path {
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M 17 10.5 A 6.5 6.5 0 1 1 4 10.5 A 6.5 6.5 0 1 1 17 10.5 M 15.2 15.2 L 20 20";
+            stroke: input.has-focus ? Theme.accent : Theme.text-muted;
+            stroke-width: 2px;
+            fill: transparent;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+            if root.text == "": Text {
+                width: 100%;
+                height: 100%;
+                text: root.placeholder;
+                color: Theme.text-muted;
+                font-size: Theme.font-body;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            input := TextInput {
+                width: 100%;
+                height: 100%;
+                text <=> root.text;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                vertical-alignment: center;
+                single-line: true;
+                selection-background-color: Theme.selection;
+                selection-foreground-color: Theme.text;
+                edited => { root.edited(self.text); }
+                accepted => { root.accepted(self.text); }
+            }
+        }
+        if root.text != "" && root.search: Rectangle {
+            width: 24px;
+            height: 24px;
+            y: (parent.height - self.height) / 2;
+            border-radius: Theme.radius-small;
+            background: clear-touch.has-hover ? Theme.text.with-alpha(0.08) : transparent;
+            accessible-role: button;
+            accessible-label: @tr("Clear");
+            Path {
+                width: 10px;
+                height: 10px;
+                viewbox-width: 10;
+                viewbox-height: 10;
+                commands: "M 1 1 L 9 9 M 9 1 L 1 9";
+                stroke: Theme.text-muted;
+                stroke-width: 1.6px;
+            }
+            clear-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.text = "";
+                    root.edited("");
+                    input.focus();
+                }
+            }
+        }
+    }
+}
+
+// A tab-like choice between a few panes, styled as the rail: the active one gets the tint.
+export component VSegment inherits HorizontalLayout {
+    in property <[string]> labels;
+    in-out property <int> current;
+    callback changed(int);
+    spacing: Theme.space-1;
+    for label[i] in root.labels: Rectangle {
+        width: tab-text.preferred-width + 2 * Theme.space-3;
+        height: 32px;
+        border-radius: Theme.radius-control;
+        background: i == root.current ? Theme.selection : tab-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+        accessible-role: tab;
+        accessible-label: label;
+        tab-text := Text {
+            text: label;
+            color: i == root.current ? Theme.accent : Theme.text-muted;
+            font-size: Theme.font-body;
+            font-weight: Theme.weight-strong;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        tab-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.current = i;
+                root.changed(i);
+            }
+        }
+    }
+}

@@ -1,4 +1,5 @@
-import { AboutSlint, Button, LineEdit, ListView, Palette } from "std-widgets.slint";
+import { AboutSlint, ListView, Palette } from "std-widgets.slint";
+import { VButton, VField } from "controls.slint";
 import { Theme } from "theme.slint";
 import { DiskCard, GpuCard, PerfView, PerformanceView } from "performance.slint";
 import { Graph, GraphData, RangeBar, Spans } from "timeline.slint";
@@ -620,14 +621,16 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                 }
-                search := LineEdit {
+                search := VField {
                     width: 300px;
-                    placeholder-text: @tr("Search name, PID or publisher (Ctrl+F)");
+                    search: true;
+                    placeholder: @tr("Search name, PID or publisher (Ctrl+F)");
                     text <=> root.search-text;
                     edited(text) => { root.search-edited(text); }
                 }
                 // Everything else: process actions, columns, About.
                 more := ContextMenuArea {
+                    width: 32px;
                     Menu {
                         MenuItem {
                             title: @tr("Suspend");
@@ -672,7 +675,8 @@ export component AppWindow inherits Window {
                             activated => { root.show-about(); }
                         }
                     }
-                    more-button := Button {
+                    more-button := VButton {
+                        width: 32px;
                         text: "···";
                         clicked => { more.show({ x: 0, y: self.height }); }
                     }
@@ -701,21 +705,21 @@ export component AppWindow inherits Window {
                         wrap: word-wrap;
                         horizontal-stretch: 1;
                     }
-                    Button {
+                    VButton {
                         text: root.history-open ? @tr("Hide history") : @tr("Show history");
                         clicked => {
                             root.history-open = !root.history-open;
                             root.history-toggled(root.history-open);
                         }
                     }
-                    Button {
+                    VButton {
                         text: @tr("End process tree");
                         enabled: root.has-selection && root.selected.tree-size > 0;
                         clicked => { root.ask(root.selected, 1); }
                     }
-                    Button {
+                    VButton {
                         text: @tr("End task");
-                        primary: true;
+                        kind: 2;
                         enabled: root.has-selection;
                         clicked => { root.ask(root.selected, 0); }
                     }
@@ -888,7 +892,7 @@ export component AppWindow inherits Window {
                     }
                     HorizontalLayout {
                         alignment: center;
-                        Button {
+                        VButton {
                             text: @tr("Clear search");
                             clicked => { root.clear-search(); }
                         }
@@ -1141,12 +1145,13 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     alignment: end;
                     spacing: Theme.space-2;
-                    Button {
+                    VButton {
                         text: @tr("Cancel");
                         clicked => { root.confirm-open = false; }
                     }
-                    Button {
-                        primary: true;
+                    VButton {
+                        // Ending, suspending and stopping destroy work; a priority does not.
+                        kind: root.confirm-action <= 2 || root.confirm-action == 20 ? 2 : 1;
                         text: root.confirm-action == 20 ? @tr("Stop service")
                             : root.confirm-action == 0 ? @tr("End task")
                             : root.confirm-action == 1 ? @tr("End process tree")

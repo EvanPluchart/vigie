@@ -84,6 +84,13 @@ Contrast checks: lagoon on ink 8.7:1, ink on lagoon 8.7:1, deep lagoon on white 
 * **Spacing:** 4-point grid: 4, 8, 12, 16, 24, 32.
 * **Radii:** 4 (chips, cells), 8 (controls, rail items), 12 (cards, panels). The icon tile uses 56/256.
 * **Density:** table rows 28 px (comfortable) or 24 px (compact setting).
+* **Controls** (`ui/controls.slint`): Vigie draws its own buttons, fields and pane switches instead of the native widgets, which bring the system accent and their own shapes.
+  * Shape: 32 px high, 8 px radius (like the rail items), labels in the strong weight.
+  * Neutral buttons: a thin border.
+  * Accent buttons: the lagoon tint of the active rail item, for the action a view is about (Start, Check, Enable).
+  * Danger buttons: the same tint in the danger colour, for actions that end or stop something.
+  * Fields: the surface colour, a border that turns lagoon on focus, a magnifying glass and a clear button when they search.
+  * Disabled controls fade to 40 %.
 * **Icons:** line icons, 1.6 px stroke at 18 px, round caps and joins, echoing the round ends of the arms.
 * **Voice:** short and factual. "Vigie uses 0.4 % CPU", not "Everything is fine!". English source strings, French first translation.
 

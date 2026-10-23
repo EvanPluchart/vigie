@@ -1,6 +1,7 @@
 // Developer tools (decision 0007): ports, who holds a file, startup items and services.
 
-import { Button, LineEdit, ListView } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
+import { VButton, VField, VSegment } from "controls.slint";
 import { Theme } from "theme.slint";
 
 export struct PortRowUi {
@@ -148,9 +149,10 @@ export component PortsView inherits Rectangle {
     VerticalLayout {
         ViewHeader {
             title: @tr("Ports");
-            LineEdit {
+            VField {
                 width: 300px;
-                placeholder-text: @tr("Port, process, PID or address");
+                search: true;
+                placeholder: @tr("Port, process, PID or address");
                 text <=> root.filter;
                 edited(text) => { root.filter-edited(text); }
             }
@@ -173,9 +175,9 @@ export component PortsView inherits Rectangle {
                         : @tr("{} · PID {} · {} {}", parent.current.name, parent.current.pid, parent.current.protocol, parent.current.port);
                     color: parent.current.key == "" ? Theme.text-muted : Theme.text;
                 }
-                Button {
+                VButton {
                     text: @tr("End task");
-                    primary: true;
+                    kind: 2;
                     enabled: parent.current.key != "" && parent.current.can-end;
                     clicked => { root.end(parent.current); }
                 }
@@ -301,14 +303,15 @@ export component FilesView inherits Rectangle {
             }
             HorizontalLayout {
                 spacing: Theme.space-2;
-                path-edit := LineEdit {
+                path-edit := VField {
                     horizontal-stretch: 1;
-                    placeholder-text: @tr("Or paste the path of a file");
+                    placeholder: @tr("Or paste the path of a file");
                     text <=> root.path;
                     accepted(text) => { root.check(text); }
                 }
-                Button {
+                VButton {
                     text: @tr("Check");
+                    kind: 1;
                     enabled: root.path != "";
                     clicked => { root.check(root.path); }
                 }
@@ -338,8 +341,9 @@ export component FilesView inherits Rectangle {
                     Cell { text: row.name; horizontal-stretch: 1; }
                     Cell { text: root.kind-text(row.kind, row.service); color: Theme.text-muted; width: 180px; }
                     Cell { text: @tr("PID {}", row.pid); color: Theme.text-muted; width: 80px; horizontal-alignment: right; }
-                    Button {
+                    VButton {
                         text: @tr("End task");
+                        kind: 2;
                         enabled: row.can-end;
                         y: (parent.height - self.height) / 2;
                         clicked => { root.end(row); }
@@ -391,29 +395,12 @@ export component StartupView inherits Rectangle {
     VerticalLayout {
         ViewHeader {
             title: @tr("Startup");
-            for label[i] in [@tr("Startup apps"), @tr("Services")]: Rectangle {
-                width: tab-text.preferred-width + 2 * Theme.space-3;
-                height: 28px;
-                y: (parent.height - self.height) / 2;
-                border-radius: Theme.radius-small;
-                background: i == root.pane ? Theme.selection : tab-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
-                tab-text := Text {
-                    text: label;
-                    color: i == root.pane ? Theme.text : Theme.text-muted;
-                    font-size: Theme.font-body;
-                    font-weight: i == root.pane ? Theme.weight-strong : Theme.weight-regular;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                tab-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.pane = i;
-                        root.pane-changed(i);
-                    }
-                }
+            VSegment {
+                labels: [@tr("Startup apps"), @tr("Services")];
+                current <=> root.pane;
+                changed(pane) => { root.pane-changed(pane); }
             }
-            Button {
+            VButton {
                 text: @tr("Refresh");
                 clicked => { root.refresh(); }
             }
@@ -466,8 +453,9 @@ export component StartupView inherits Rectangle {
                             width: 70px;
                             color: item.enabled ? Theme.accent : Theme.text-muted;
                         }
-                        Button {
+                        VButton {
                             width: 84px;
+                            kind: item.enabled ? 0 : 1;
                             y: (parent.height - self.height) / 2;
                             text: item.enabled ? @tr("Disable") : @tr("Enable");
                             clicked => { root.toggle(item); }
@@ -503,9 +491,10 @@ export component StartupView inherits Rectangle {
                     padding-bottom: Theme.space-1;
                     spacing: Theme.space-2;
                     property <ServiceRowUi> current: root.selected-service >= 0 && root.selected-service < root.services.length ? root.services[root.selected-service] : { name: "" };
-                    LineEdit {
+                    VField {
                         width: 240px;
-                        placeholder-text: @tr("Search services");
+                        search: true;
+                        placeholder: @tr("Search services");
                         text <=> root.service-filter;
                         edited(text) => {
                             root.selected-service = -1;
@@ -517,13 +506,15 @@ export component StartupView inherits Rectangle {
                         text: parent.current.name == "" ? @tr("Select a service to start or stop it") : parent.current.display;
                         color: parent.current.name == "" ? Theme.text-muted : Theme.text;
                     }
-                    Button {
+                    VButton {
                         text: @tr("Start");
+                        kind: 1;
                         enabled: parent.current.name != "" && parent.current.state == 4 && parent.current.start-type != 3;
                         clicked => { root.start-service(parent.current); }
                     }
-                    Button {
+                    VButton {
                         text: @tr("Stop");
+                        kind: 2;
                         enabled: parent.current.name != "" && parent.current.state == 0;
                         clicked => { root.stop-service(parent.current); }
                     }
