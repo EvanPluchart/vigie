@@ -33,6 +33,26 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    // The elevated helper of "Replace Task Manager" does its one job and exits (decision 0009).
+    if let Some(on) = options.set_replace_taskmgr {
+        std::process::exit(match vigie_shell::taskmgr::apply(on) {
+            Ok(()) => 0,
+            Err(_) => 1,
+        });
+    }
+    // One Vigie per session: a second launch (Ctrl+Shift+Esc, say) shows the first and exits.
+    // Test runs (--no-settings) may run next to the user's Vigie.
+    let _instance = if options.no_settings {
+        None
+    } else {
+        match vigie_shell::single_instance(|| {
+            let _ = slint::invoke_from_event_loop(desktop::show_main_window);
+        }) {
+            Some(instance) => Some(instance),
+            None => return Ok(()),
+        }
+    };
+
     // Settings from the file, with the flags on top for this session only (decision 0008).
     let (prefs, session) = prefs::Prefs::load(&options);
     let app = AppWindow::new().context("creating the main window")?;
@@ -44,6 +64,12 @@ fn main() -> anyhow::Result<()> {
     }
     prefs::show(&app, &session);
     app.set_settings_path(prefs.path().into());
+    app.set_app_version(env!("CARGO_PKG_VERSION").into());
+    desktop::show_replace_state(&app);
+    let weak = app.as_weak();
+    app.on_taskmgr_toggled(move |on| desktop::request_replace(weak.clone(), on));
+    let weak = app.as_weak();
+    app.on_taskmgr_repair(move || desktop::request_replace(weak.clone(), false));
     desktop::set_close_to_tray(session.close_to_tray);
     app.set_rows(ModelRc::from(Rc::new(VecModel::<ProcRow>::default())));
     app.set_icons(ModelRc::from(Rc::new(VecModel::<slint::Image>::default())));
@@ -73,6 +99,7 @@ fn main() -> anyhow::Result<()> {
         }
         if let (Some(window), Some(app)) = (about.as_ref(), weak.upgrade()) {
             window.set_history_memory(app.get_history_memory());
+            window.set_version(app.get_app_version());
             let _ = window.show();
         }
     });

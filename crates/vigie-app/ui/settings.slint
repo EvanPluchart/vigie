@@ -3,7 +3,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { VSegment, VSwitch } from "controls.slint";
+import { VButton, VSegment, VSwitch } from "controls.slint";
 
 component Section inherits Rectangle {
     in property <string> title;
@@ -79,6 +79,11 @@ export component SettingsView inherits Rectangle {
     // Where the settings are saved; empty with --no-settings.
     in property <string> path;
     callback edited();
+    in property <int> taskmgr-state;
+    in property <string> taskmgr-path;
+    in property <bool> taskmgr-installed;
+    callback taskmgr-toggled(bool);
+    callback taskmgr-repair();
 
     VerticalLayout {
         HorizontalLayout {
@@ -181,6 +186,34 @@ export component SettingsView inherits Rectangle {
                         checked <=> root.close-to-tray;
                         enabled: root.tray-available;
                         toggled => { root.edited(); }
+                    }
+                }
+
+                if root.taskmgr-state != 4: Section {
+                    title: @tr("Task Manager");
+                    SwitchLine {
+                        label: @tr("Open Vigie with Ctrl+Shift+Esc");
+                        hint: root.taskmgr-state == 3 ? @tr("Another program opens instead of Task Manager: {}", root.taskmgr-path)
+                            : !root.taskmgr-installed && root.taskmgr-state != 1 ? @tr("Available once Vigie is installed.")
+                            : @tr("Replaces Task Manager for every account on this computer. Asks for administrator rights; turn it off here at any time. Uninstalling Vigie turns it off.");
+                        checked: root.taskmgr-state == 1;
+                        enabled: root.taskmgr-state == 1 || (root.taskmgr-state == 0 && root.taskmgr-installed);
+                        toggled(on) => { root.taskmgr-toggled(on); }
+                    }
+                    if root.taskmgr-state == 2: HorizontalLayout {
+                        spacing: Theme.space-3;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: @tr("Ctrl+Shift+Esc points to a Vigie that no longer exists ({}): Task Manager cannot open. Repair it to give Ctrl+Shift+Esc back to Task Manager.", root.taskmgr-path);
+                            color: Theme.danger;
+                            font-size: Theme.font-body;
+                            wrap: word-wrap;
+                        }
+                        VButton {
+                            text: @tr("Repair");
+                            kind: 2;
+                            clicked => { root.taskmgr-repair(); }
+                        }
                     }
                 }
 

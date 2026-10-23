@@ -36,6 +36,10 @@ pub struct Options {
     pub palette: Option<String>,
     /// Interface language for this session: "en" or "fr".
     pub lang: Option<String>,
+    /// Started by Windows in place of Task Manager.
+    pub from_taskmgr: bool,
+    /// Elevated helper: turn replacing Task Manager on or off, then exit (decision 0009).
+    pub set_replace_taskmgr: Option<bool>,
     /// `None` follows the system theme.
     pub dark: Option<bool>,
     /// Opens the About window at start, for screenshots.
@@ -57,6 +61,12 @@ pub struct Options {
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
     let mut options = Options::default();
     for arg in args {
+        // Replacing Task Manager (decision 0009): Windows starts Vigie with the path of
+        // taskmgr.exe and its own flags. They mean "open Vigie": ignore them.
+        if names_taskmgr(&arg) {
+            options.from_taskmgr = true;
+            break;
+        }
         let (flag, value) = match arg.split_once('=') {
             Some((flag, value)) => (flag, Some(value)),
             None => (arg.as_str(), None),
@@ -103,6 +113,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--no-tray", None) => options.no_tray = true,
             ("--notify-test", None) => options.notify_test = true,
             ("--mini", None) => options.mini = true,
+            ("--set-replace-taskmgr", Some(state @ ("on" | "off"))) => {
+                options.set_replace_taskmgr = Some(state == "on");
+            }
             ("--lang", Some(lang @ ("en" | "fr"))) => options.lang = Some(lang.to_owned()),
             ("--palette", value) => options.palette = Some(value.unwrap_or_default().to_owned()),
             ("--ask", Some(value)) => {
@@ -131,6 +144,13 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
         }
     }
     Ok(options)
+}
+
+/// An argument naming taskmgr.exe, quoted or not, with any folder in front.
+fn names_taskmgr(arg: &str) -> bool {
+    let arg = arg.trim().trim_matches('"');
+    let name = arg.rsplit(['\\', '/']).next().unwrap_or(arg);
+    name.eq_ignore_ascii_case("taskmgr.exe")
 }
 
 fn parse_sort(value: &str) -> Result<Sort, String> {
@@ -193,6 +213,21 @@ mod tests {
         let m3 = parse(args(&["--tab=diagnostics", "--range=6h", "--history"])).unwrap();
         assert_eq!((m3.tab, m3.range, m3.history), (2, 3, true));
         assert!(parse(args(&["--range=2h"])).is_err());
+        // Started in place of Task Manager: its path and flags are not errors.
+        let taskmgr = parse(args(&[r"C:\WINDOWS\system32\taskmgr.exe", "/4"])).unwrap();
+        assert!(taskmgr.from_taskmgr);
+        assert!(
+            parse(args(&[r#""C:\Windows\System32\Taskmgr.exe""#]))
+                .unwrap()
+                .from_taskmgr
+        );
+        assert_eq!(
+            parse(args(&["--set-replace-taskmgr=on"]))
+                .unwrap()
+                .set_replace_taskmgr,
+            Some(true)
+        );
+        assert!(parse(args(&["--set-replace-taskmgr=maybe"])).is_err());
         let m4 = parse(args(&["--tab=ports"])).unwrap();
         assert_eq!(m4.tab, 3);
         let locks = parse(args(&[r"--locks=C:\x.txt"])).unwrap();

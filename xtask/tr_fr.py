@@ -281,6 +281,18 @@ FR = {
     "{} GB": "{} Go",
     "{} MB": "{} Mo",
     "0.5 s": "0,5 s",
+    "Ctrl+Shift+Esc now opens Vigie": "Ctrl+Maj+Échap ouvre maintenant Vigie",
+    "Ctrl+Shift+Esc opens Task Manager again": "Ctrl+Maj+Échap ouvre de nouveau le Gestionnaire des tâches",
+    "Nothing changed: the administrator prompt was declined": "Rien n’a changé : l’invite administrateur a été refusée",
+    "Could not change what Ctrl+Shift+Esc opens": "Impossible de changer ce qu’ouvre Ctrl+Maj+Échap",
+    "Version {}": "Version {}",
+    "Task Manager": "Gestionnaire des tâches",
+    "Open Vigie with Ctrl+Shift+Esc": "Ouvrir Vigie avec Ctrl+Maj+Échap",
+    "Another program opens instead of Task Manager: {}": "Un autre programme s’ouvre à la place du Gestionnaire des tâches : {}",
+    "Available once Vigie is installed.": "Disponible une fois Vigie installé.",
+    "Replaces Task Manager for every account on this computer. Asks for administrator rights; turn it off here at any time. Uninstalling Vigie turns it off.": "Remplace le Gestionnaire des tâches pour tous les comptes de cet ordinateur. Demande les droits administrateur ; désactivez-le ici à tout moment. Désinstaller Vigie le désactive.",
+    "Ctrl+Shift+Esc points to a Vigie that no longer exists ({}): Task Manager cannot open. Repair it to give Ctrl+Shift+Esc back to Task Manager.": "Ctrl+Maj+Échap pointe vers un Vigie qui n’existe plus ({}) : le Gestionnaire des tâches ne peut pas s’ouvrir. Réparez pour rendre Ctrl+Maj+Échap au Gestionnaire des tâches.",
+    "Repair": "Réparer",
     "Starting and stopping most services needs Vigie to run as administrator.": "Démarrer ou arrêter la plupart des services demande de lancer Vigie en administrateur.",
 }
 

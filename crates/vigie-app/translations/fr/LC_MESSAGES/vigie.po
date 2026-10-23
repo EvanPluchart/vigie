@@ -109,6 +109,9 @@ msgstr "Démarrage"
 msgid "Settings"
 msgstr "Réglages"
 
+msgid "Version {}"
+msgstr "Version {}"
+
 msgid "A fast cross-platform task manager."
 msgstr "Un gestionnaire de tâches rapide et multiplateforme."
 
@@ -177,6 +180,18 @@ msgstr "Accès refusé : modifier {} demande de lancer Vigie en administrateur."
 
 msgid "Could not change {}"
 msgstr "Impossible de modifier {}"
+
+msgid "Ctrl+Shift+Esc now opens Vigie"
+msgstr "Ctrl+Maj+Échap ouvre maintenant Vigie"
+
+msgid "Ctrl+Shift+Esc opens Task Manager again"
+msgstr "Ctrl+Maj+Échap ouvre de nouveau le Gestionnaire des tâches"
+
+msgid "Nothing changed: the administrator prompt was declined"
+msgstr "Rien n’a changé : l’invite administrateur a été refusée"
+
+msgid "Could not change what Ctrl+Shift+Esc opens"
+msgstr "Impossible de changer ce qu’ouvre Ctrl+Maj+Échap"
 
 msgid "Search name, PID or publisher (Ctrl+F)"
 msgstr "Nom, PID ou éditeur (Ctrl+F)"
@@ -567,6 +582,27 @@ msgstr "Rouvrez-le depuis son icône ; quittez depuis le menu de l’icône."
 
 msgid "Not available: there is no notification area icon."
 msgstr "Indisponible : il n’y a pas d’icône dans la zone de notification."
+
+msgid "Task Manager"
+msgstr "Gestionnaire des tâches"
+
+msgid "Open Vigie with Ctrl+Shift+Esc"
+msgstr "Ouvrir Vigie avec Ctrl+Maj+Échap"
+
+msgid "Another program opens instead of Task Manager: {}"
+msgstr "Un autre programme s’ouvre à la place du Gestionnaire des tâches : {}"
+
+msgid "Available once Vigie is installed."
+msgstr "Disponible une fois Vigie installé."
+
+msgid "Replaces Task Manager for every account on this computer. Asks for administrator rights; turn it off here at any time. Uninstalling Vigie turns it off."
+msgstr "Remplace le Gestionnaire des tâches pour tous les comptes de cet ordinateur. Demande les droits administrateur ; désactivez-le ici à tout moment. Désinstaller Vigie le désactive."
+
+msgid "Ctrl+Shift+Esc points to a Vigie that no longer exists ({}): Task Manager cannot open. Repair it to give Ctrl+Shift+Esc back to Task Manager."
+msgstr "Ctrl+Maj+Échap pointe vers un Vigie qui n’existe plus ({}) : le Gestionnaire des tâches ne peut pas s’ouvrir. Réparez pour rendre Ctrl+Maj+Échap au Gestionnaire des tâches."
+
+msgid "Repair"
+msgstr "Réparer"
 
 msgid "Settings are not saved in this session (--no-settings)."
 msgstr "Les réglages ne sont pas enregistrés dans cette session (--no-settings)."

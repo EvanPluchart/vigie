@@ -159,6 +159,10 @@ impl Notice {
     /// Access denied to a change that is not about a process (a service, a startup item).
     pub const CHANGE_DENIED: i32 = 15;
     pub const CHANGE_FAILED: i32 = 16;
+    pub const TASKMGR_ON: i32 = 17;
+    pub const TASKMGR_OFF: i32 = 18;
+    pub const TASKMGR_CANCELLED: i32 = 19;
+    pub const TASKMGR_FAILED: i32 = 20;
 }
 fn proc_row(row: &Row) -> ProcRow {
     let pid = i32::try_from(row.pid).unwrap_or(i32::MAX);

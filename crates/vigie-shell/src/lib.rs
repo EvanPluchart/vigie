@@ -2,11 +2,173 @@
 //! notifications, and placing a window near the taskbar. No UI here: like `vigie-probe`, this
 //! crate never depends on Slint, so `vigie-app` makes no OS calls of its own.
 
+#[cfg(windows)]
+mod instance_windows;
 pub mod settings_file;
+#[cfg(windows)]
+mod taskmgr_windows;
 #[cfg(windows)]
 mod tray_windows;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Held while this process is the running Vigie (decision 0009).
+pub struct Instance {
+    #[cfg(windows)]
+    _inner: instance_windows::Instance,
+}
+
+/// Makes this process the single running Vigie: `Some` when it is the first, and `on_show` then
+/// runs (on another thread) whenever a later launch wants the window shown. `None` when Vigie
+/// already runs; it has been asked to show itself, and this process should exit.
+pub fn single_instance(on_show: impl Fn() + Send + Sync + 'static) -> Option<Instance> {
+    #[cfg(windows)]
+    {
+        instance_windows::acquire(Arc::new(on_show)).map(|inner| Instance { _inner: inner })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = on_show;
+        Some(Instance {})
+    }
+}
+
+/// Who opens when Task Manager is started (decision 0009).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReplaceState {
+    /// Task Manager itself.
+    Off,
+    /// Vigie, at this path.
+    On(PathBuf),
+    /// A Vigie that no longer exists at this path: Task Manager cannot start at all.
+    Stale(PathBuf),
+    /// Another program (Process Explorer, say).
+    Other(PathBuf),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReplaceError {
+    /// The user declined the administrator prompt.
+    Cancelled,
+    Denied,
+    /// Only an installed Vigie may take Task Manager's place.
+    NotInstalled,
+    Unsupported,
+    Failed(u32),
+}
+
+/// The `Debugger` value naming `exe`, quoted.
+pub fn debugger_value(exe: &Path) -> String {
+    format!("\"{}\"", exe.display())
+}
+
+/// Reads a `Debugger` value: the program it starts, and whether that is a live Vigie.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn state_of(value: &str) -> ReplaceState {
+    let value = value.trim();
+    let program = if let Some(rest) = value.strip_prefix('"') {
+        rest.split('"').next().unwrap_or(rest)
+    } else {
+        match value.to_ascii_lowercase().find(".exe") {
+            Some(at) => &value[..at + 4],
+            None => value.split_whitespace().next().unwrap_or(value),
+        }
+    };
+    if program.is_empty() {
+        return ReplaceState::Off;
+    }
+    let path = PathBuf::from(program);
+    let is_vigie = path
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("vigie.exe"));
+    if !is_vigie {
+        ReplaceState::Other(path)
+    } else if path.exists() {
+        ReplaceState::On(path)
+    } else {
+        ReplaceState::Stale(path)
+    }
+}
+
+/// Replacing Task Manager (Windows; decision 0009).
+pub mod taskmgr {
+    use super::{ReplaceError, ReplaceState};
+    use std::path::PathBuf;
+
+    pub fn state() -> ReplaceState {
+        #[cfg(windows)]
+        {
+            super::taskmgr_windows::state()
+        }
+        #[cfg(not(windows))]
+        {
+            ReplaceState::Off
+        }
+    }
+
+    /// The installed Vigie, when this process is it.
+    pub fn installed() -> Option<PathBuf> {
+        #[cfg(windows)]
+        {
+            let installed = super::taskmgr_windows::installed_path()?;
+            let current = std::env::current_exe().ok()?;
+            let same = |a: &std::path::Path, b: &std::path::Path| match (
+                a.canonicalize(),
+                b.canonicalize(),
+            ) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => false,
+            };
+            same(&installed, &current).then_some(installed)
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
+    /// Asks for the administrator prompt, and turns the replacement on or off in an elevated
+    /// copy of this Vigie. Turning it on needs an installed Vigie; turning it off works from any.
+    pub fn request(on: bool) -> Result<(), ReplaceError> {
+        #[cfg(windows)]
+        {
+            if on && installed().is_none() {
+                return Err(ReplaceError::NotInstalled);
+            }
+            let exe = std::env::current_exe().map_err(|_| ReplaceError::Failed(0))?;
+            let args = if on {
+                "--set-replace-taskmgr=on"
+            } else {
+                "--set-replace-taskmgr=off"
+            };
+            super::taskmgr_windows::run_elevated(&exe, args)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = on;
+            Err(ReplaceError::Unsupported)
+        }
+    }
+
+    /// In the elevated copy: writes or removes the value. On names the installed Vigie only.
+    pub fn apply(on: bool) -> Result<(), ReplaceError> {
+        #[cfg(windows)]
+        {
+            if on {
+                let installed = installed().ok_or(ReplaceError::NotInstalled)?;
+                super::taskmgr_windows::write(Some(&installed))
+            } else {
+                super::taskmgr_windows::write(None)
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = on;
+            Err(ReplaceError::Unsupported)
+        }
+    }
+}
 
 /// What happens on the tray icon, reported to the callback given to `Tray::new`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,5 +309,26 @@ mod tests {
             (1592, 644)
         );
         assert_eq!(clamp_into(area, -50, -50, 320, 380), (8, 8));
+    }
+
+    #[test]
+    fn debugger_values_round_trip_and_stale_paths_are_seen() {
+        let here = std::env::current_exe().unwrap();
+        // The test binary is not vigie.exe: another program.
+        assert_eq!(
+            state_of(&debugger_value(&here)),
+            ReplaceState::Other(here.clone())
+        );
+        let gone = Path::new(r"C:\nowhere\Vigie\vigie.exe");
+        assert_eq!(debugger_value(gone), r#""C:\nowhere\Vigie\vigie.exe""#);
+        assert_eq!(
+            state_of(&debugger_value(gone)),
+            ReplaceState::Stale(gone.to_path_buf())
+        );
+        assert_eq!(
+            state_of(r"C:\Tools\procexp64.exe /e"),
+            ReplaceState::Other(r"C:\Tools\procexp64.exe".into())
+        );
+        assert_eq!(state_of("  "), ReplaceState::Off);
     }
 }

@@ -418,6 +418,7 @@ component Rail inherits Rectangle {
 export component AboutWindow inherits Window {
     // Memory held by the history, formatted ("412 KB").
     in property <string> history-memory;
+    in property <string> version;
     title: @tr("About Vigie");
     icon: @image-url("../../../assets/brand/icons/vigie-256.png");
     background: Theme.background;
@@ -436,6 +437,12 @@ export component AboutWindow inherits Window {
             color: Theme.text;
             font-size: Theme.font-title;
             font-weight: Theme.weight-strong;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: @tr("Version {}", root.version);
+            color: Theme.text-muted;
+            font-size: Theme.font-caption;
             horizontal-alignment: center;
         }
         Text {
@@ -546,6 +553,14 @@ export component AppWindow inherits Window {
     in property <bool> tray-available;
     in property <string> settings-path;
     callback settings-edited();
+    in property <string> app-version;
+    // Replacing Task Manager (decision 0009): 0 off, 1 Vigie, 2 a Vigie that no longer exists,
+    // 3 another program, 4 not on this system.
+    in property <int> taskmgr-state;
+    in property <string> taskmgr-path;
+    in property <bool> taskmgr-installed;
+    callback taskmgr-toggled(bool);
+    callback taskmgr-repair();
     changed columns => { root.settings-edited(); }
     // Command palette: the matching commands, filtered by Rust (src/main.rs).
     in-out property <bool> palette-open;
@@ -683,12 +698,16 @@ export component AppWindow inherits Window {
             : root.notice-kind == 14 ? @tr("{} cannot stop while services that depend on it are running", root.notice-name)
             : root.notice-kind == 15 ? @tr("Access denied: changing {} needs Vigie to run as administrator.", root.notice-name)
             : root.notice-kind == 16 ? @tr("Could not change {}", root.notice-name)
+            : root.notice-kind == 17 ? @tr("Ctrl+Shift+Esc now opens Vigie")
+            : root.notice-kind == 18 ? @tr("Ctrl+Shift+Esc opens Task Manager again")
+            : root.notice-kind == 19 ? @tr("Nothing changed: the administrator prompt was declined")
+            : root.notice-kind == 20 ? @tr("Could not change what Ctrl+Shift+Esc opens")
             : "";
     }
 
     // Notices that report a failure (see src/model.rs for the codes).
     function notice-failed() -> bool {
-        return (root.notice-kind >= 7 && root.notice-kind <= 9) || root.notice-kind >= 14;
+        return (root.notice-kind >= 7 && root.notice-kind <= 9) || (root.notice-kind >= 14 && root.notice-kind <= 16) || root.notice-kind >= 19;
     }
 
     function clear-search() {
@@ -1204,6 +1223,11 @@ export component AppWindow inherits Window {
                 tray-available: root.tray-available;
                 path: root.settings-path;
                 edited => { root.settings-edited(); }
+                taskmgr-state: root.taskmgr-state;
+                taskmgr-path: root.taskmgr-path;
+                taskmgr-installed: root.taskmgr-installed;
+                taskmgr-toggled(on) => { root.taskmgr-toggled(on); }
+                taskmgr-repair => { root.taskmgr-repair(); }
             }
 
             if root.tab == 5: StartupView {

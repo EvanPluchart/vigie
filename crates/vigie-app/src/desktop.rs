@@ -32,6 +32,51 @@ struct Desktop {
 
 thread_local! {
     static DESKTOP: RefCell<Desktop> = RefCell::default();
+    static MAIN: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
+}
+
+/// Shows the main window; a second launch of Vigie asks for this (decision 0009).
+pub fn show_main_window() {
+    let app = MAIN.with_borrow(|w| w.as_ref().and_then(slint::Weak::upgrade));
+    if let Some(app) = app {
+        show_main(&app);
+    }
+}
+
+/// The Settings view's "Replace Task Manager" line: state, and whether it can be offered.
+pub fn show_replace_state(app: &AppWindow) {
+    use vigie_shell::ReplaceState;
+    let (state, path) = match vigie_shell::taskmgr::state() {
+        ReplaceState::Off => (0, String::new()),
+        ReplaceState::On(p) => (1, p.display().to_string()),
+        ReplaceState::Stale(p) => (2, p.display().to_string()),
+        ReplaceState::Other(p) => (3, p.display().to_string()),
+    };
+    app.set_taskmgr_state(if cfg!(windows) { state } else { 4 });
+    app.set_taskmgr_path(path.into());
+    app.set_taskmgr_installed(vigie_shell::taskmgr::installed().is_some());
+}
+
+/// Turns replacing Task Manager on or off: the administrator prompt and the elevated helper run
+/// on a thread of their own, so the window stays responsive meanwhile.
+pub fn request_replace(weak: slint::Weak<AppWindow>, on: bool) {
+    std::thread::spawn(move || {
+        let result = vigie_shell::taskmgr::request(on);
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(app) = weak.upgrade() else { return };
+            show_replace_state(&app);
+            let kind = match result {
+                Ok(()) if on => crate::model::Notice::TASKMGR_ON,
+                Ok(()) => crate::model::Notice::TASKMGR_OFF,
+                Err(vigie_shell::ReplaceError::Cancelled) => {
+                    crate::model::Notice::TASKMGR_CANCELLED
+                }
+                Err(_) => crate::model::Notice::TASKMGR_FAILED,
+            };
+            app.set_notice_name("".into());
+            app.set_notice_kind(kind);
+        });
+    });
 }
 
 /// Adds the tray icon (unless `with_tray` is false) and remembers how to reach the sampler.
@@ -50,6 +95,7 @@ pub fn install(app: &AppWindow, commands: flume::Sender<Command>, with_tray: boo
         })
         .flatten();
     app.set_tray_available(tray.is_some());
+    MAIN.with_borrow_mut(|w| *w = Some(app.as_weak()));
     DESKTOP.with_borrow_mut(|d| {
         d.tray = tray;
         d.commands = Some(commands);
