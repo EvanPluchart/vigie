@@ -38,7 +38,10 @@ fn main() -> anyhow::Result<()> {
     let app = AppWindow::new().context("creating the main window")?;
     // Translations can only be chosen once a component exists.
     prefs::select_language(session.language);
-    app.invoke_set_scheme(prefs::scheme(session.theme));
+    // "System" assigns nothing: the palette then follows the system theme live.
+    if session.theme != vigie_core::settings::Theme::System {
+        app.invoke_set_scheme(prefs::scheme(session.theme));
+    }
     prefs::show(&app, &session);
     app.set_settings_path(prefs.path().into());
     desktop::set_close_to_tray(session.close_to_tray);
@@ -194,6 +197,7 @@ fn main() -> anyhow::Result<()> {
                 app.invoke_show_tab(4);
                 let _ = tx.send(Command::CheckFile(path.clone()));
             }
+            WindowEvent::ThemeChanged(_) => desktop::system_theme_changed(&app),
             _ => {}
         }
         slint::winit_030::EventResult::Propagate
@@ -275,8 +279,7 @@ fn main() -> anyhow::Result<()> {
             let _ = tx.send(Command::Interval(prefs::interval(&now)));
         }
         if now.theme != before.theme {
-            app.invoke_set_scheme(prefs::scheme(now.theme));
-            desktop::set_scheme(prefs::scheme(now.theme));
+            desktop::set_scheme(&app, prefs::scheme(now.theme));
         }
         if now.language != before.language {
             prefs::select_language(now.language);

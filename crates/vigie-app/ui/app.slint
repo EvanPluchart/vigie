@@ -1351,8 +1351,9 @@ export component AppWindow inherits Window {
     if root.palette-open: Rectangle {
         background: #000000.with-alpha(0.35);
         TouchArea { clicked => { root.close-palette(); } }
+        // Captured before the text field, which would otherwise take Enter and the arrows.
         FocusScope {
-            key-pressed(event) => {
+            capture-key-pressed(event) => {
                 if (event.text == Key.Escape) {
                     root.close-palette();
                     return accept;

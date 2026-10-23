@@ -22,6 +22,11 @@ Severity: **P1** blocks daily use, **P2** costs time or trust, **P3** polish.
 | 6 | P3 | Killing Vigie (benchmarks, crashes with `panic = "abort"`) leaves a ghost tray icon until the pointer passes over it. | Benchmarks and screenshots pass `--no-tray`. A normal quit removes the icon. | Accepted |
 | 7 | P3 | Plural forms: "and {} child processes" reads awkwardly for one child in French. | Use Slint's plural syntax for the few counted strings. | Open |
 | 8 | P3 | The mini view's placement was checked with `--mini`, near the bottom right corner; a real click on the tray icon was not tried. | Manual check below. | Open |
+| 9 | P1 | With the theme on "System" (the default), Vigie assigned `unknown` to the palette, which Vigie's tokens read as light: a dark-themed Windows got a light Vigie. | "System" assigns nothing at launch, so the palette follows the system live. Choosing System again at runtime applies the system's current theme and follows its changes. Checked with a settings file and no flags: dark system, dark Vigie, French. | Fixed |
+| 10 | P2 | Enter and the arrows in the palette were likely taken by its text field. | The palette captures them before the field (`capture-key-pressed`). Not tried with real keys: Windows kept the foreground elsewhere, so no synthetic input was sent. | Fixed, check by hand |
+| 11 | P2 | A machine already under high memory pressure would get a notification at every launch: the critical finding has no window. | Critical findings notify once they have lasted a minute, and not in the first two minutes after launch (tested). | Fixed |
+| 12 | P3 | Clicking the tray icon while the mini view is open closed it (focus lost) and the same click opened it again. | A click within 400 ms of a close on focus loss is taken as the closing click. | Fixed |
+| 13 | P2 | Clean exit was never seen: scripts killed Vigie. | With the tray on, closing the window ends the process in under 5 s with exit code 0, and removes the icon. | Checked |
 
 ## What landed
 
@@ -38,8 +43,8 @@ Severity: **P1** blocks daily use, **P2** costs time or trust, **P3** polish.
   * notifications are balloons, shown as toasts.
   * Closing to the tray is off by default, like Task Manager.
 * **Alerts:**
-  * a critical finding (CPU saturated, high memory pressure) notifies when it is raised;
-  * so does a user threshold;
+  * a critical finding (CPU saturated, high memory pressure) notifies once it has lasted a minute, not in the first two minutes after launch;
+  * so does a user threshold (its whole window measured);
   * at most one notification per resource every 15 minutes;
   * nothing fires at launch.
 * **Command palette (Ctrl+K):** views, search, end the selected task (which asks first), history, theme, About, Quit, and "Search processes for …".

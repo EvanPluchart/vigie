@@ -14,6 +14,11 @@ const HYSTERESIS: f32 = 10.0;
 const FULL: f32 = 0.99;
 /// Memory thresholds look at the last minute.
 const MEMORY_WINDOW_S: u64 = 60;
+/// A critical finding notifies once it has lasted this long…
+const CRITICAL_HOLD_NS: u64 = 60 * SECOND;
+/// …and not before Vigie has run this long: a machine already under pressure at launch should
+/// not greet the user with a notification every time.
+const LAUNCH_GRACE_NS: u64 = 120 * SECOND;
 
 /// User thresholds; 0 turns one off.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -60,12 +65,38 @@ impl Alert {
 
 #[derive(Debug, Default)]
 pub struct Alerts {
+    started_ns: Option<u64>,
     cpu_raised: bool,
     memory_raised: bool,
-    critical_cpu: bool,
-    critical_memory: bool,
+    critical_cpu: Critical,
+    critical_memory: Critical,
     last_cpu_ns: Option<u64>,
     last_memory_ns: Option<u64>,
+}
+
+/// How long a critical finding has lasted, and whether it was already notified.
+#[derive(Debug, Default)]
+struct Critical {
+    since_ns: Option<u64>,
+    notified: bool,
+}
+
+impl Critical {
+    /// True once, when a finding present now has lasted long enough after the launch grace.
+    fn due(&mut self, present: bool, now_ns: u64, started_ns: u64) -> bool {
+        if !present {
+            *self = Critical::default();
+            return false;
+        }
+        let since = *self.since_ns.get_or_insert(now_ns);
+        let ready = now_ns.saturating_sub(since) >= CRITICAL_HOLD_NS
+            && now_ns.saturating_sub(started_ns) >= LAUNCH_GRACE_NS;
+        if ready && !self.notified {
+            self.notified = true;
+            return true;
+        }
+        false
+    }
 }
 
 impl Alerts {
@@ -78,6 +109,7 @@ impl Alerts {
         rules: Rules,
     ) -> Vec<Alert> {
         let mut due = Vec::new();
+        let started = *self.started_ns.get_or_insert(now_ns);
 
         // Thresholds, with hysteresis: an edge from below to above is what notifies.
         let mut cpu_edge = None;
@@ -146,10 +178,12 @@ impl Alerts {
             })
         } else {
             saturated
-                .filter(|_| !self.critical_cpu)
+                .filter(|_| self.critical_cpu.due(true, now_ns, started))
                 .map(|f| Alert::Critical(f.clone()))
         };
-        self.critical_cpu = saturated.is_some();
+        if saturated.is_none() {
+            self.critical_cpu.due(false, now_ns, started);
+        }
         let memory_alert = if let Some(percent) = memory_edge {
             Some(Alert::MemoryThreshold {
                 percent,
@@ -157,10 +191,12 @@ impl Alerts {
             })
         } else {
             pressure
-                .filter(|_| !self.critical_memory)
+                .filter(|_| self.critical_memory.due(true, now_ns, started))
                 .map(|f| Alert::Critical(f.clone()))
         };
-        self.critical_memory = pressure.is_some();
+        if pressure.is_none() {
+            self.critical_memory.due(false, now_ns, started);
+        }
 
         // One notification per resource per cooldown.
         for alert in [cpu_alert, memory_alert].into_iter().flatten() {
@@ -240,21 +276,57 @@ mod tests {
         let mut alerts = Alerts::default();
         let due = alerts.evaluate(120 * SECOND, &perf, std::slice::from_ref(&saturated), RULES);
         assert_eq!(due.len(), 1, "{due:?}");
-        // Without a CPU threshold, the finding alone notifies.
+        // Without a CPU threshold, the finding alone notifies, once it has lasted a minute and
+        // Vigie has run for two.
         let mut alerts = Alerts::default();
         let none = Rules {
             cpu_percent: 0.0,
             ..RULES
         };
-        let due = alerts.evaluate(120 * SECOND, &perf, std::slice::from_ref(&saturated), none);
+        let at = |alerts: &mut Alerts, s: u64| {
+            alerts.evaluate(s * SECOND, &perf, std::slice::from_ref(&saturated), none)
+        };
+        assert!(at(&mut alerts, 120).is_empty(), "just launched");
+        assert!(
+            at(&mut alerts, 180).is_empty(),
+            "one minute in: still the launch grace"
+        );
         assert!(matches!(
-            due[..],
+            at(&mut alerts, 240)[..],
             [Alert::Critical(Finding::CpuSaturated { .. })]
         ));
+        assert!(at(&mut alerts, 245).is_empty(), "once");
+    }
+
+    #[test]
+    fn memory_already_low_at_launch_waits_and_must_last() {
+        let low = Finding::MemoryPressure {
+            level: Pressure::High,
+            cause: crate::perf::PressureCause::Available,
+            available_percent: 4.0,
+            commit_percent: 60.0,
+            culprits: Vec::new(),
+        };
+        let perf = Performance::default();
+        let rules = Rules::default();
+        let mut alerts = Alerts::default();
+        let run = |alerts: &mut Alerts, s: u64, present: bool| {
+            let findings = if present {
+                vec![low.clone()]
+            } else {
+                Vec::new()
+            };
+            alerts.evaluate(s * SECOND, &perf, &findings, rules)
+        };
         assert!(
-            alerts
-                .evaluate(125 * SECOND, &perf, &[saturated], none)
-                .is_empty()
+            run(&mut alerts, 5, true).is_empty(),
+            "already low at launch: no greeting"
         );
+        assert!(run(&mut alerts, 100, true).is_empty());
+        // Gone, then back after the grace: it must last a minute again.
+        assert!(run(&mut alerts, 130, false).is_empty());
+        assert!(run(&mut alerts, 140, true).is_empty());
+        assert!(run(&mut alerts, 170, true).is_empty());
+        assert_eq!(run(&mut alerts, 200, true).len(), 1);
     }
 }

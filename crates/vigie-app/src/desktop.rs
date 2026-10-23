@@ -19,9 +19,15 @@ struct Desktop {
     tray: Option<Tray>,
     mini: Option<MiniWindow>,
     close_to_tray: bool,
-    /// 0 system, 1 dark, 2 light: given to the mini view too.
+    /// The user's theme: 0 system, 1 dark, 2 light.
     scheme: i32,
+    /// The main window's palette was assigned while following the system (the user switched
+    /// back to System): it no longer follows on its own, so system changes are applied here.
+    assigned: bool,
     commands: Option<flume::Sender<Command>>,
+    /// When the mini view last closed because it lost focus: a click on the tray icon makes it
+    /// lose focus first, and that same click must close it, not open it again.
+    focus_closed_at: Option<std::time::Instant>,
 }
 
 thread_local! {
@@ -87,13 +93,39 @@ pub fn closes_to_tray() -> bool {
     DESKTOP.with_borrow(|d| d.close_to_tray && d.tray.is_some())
 }
 
-pub fn set_scheme(scheme: i32) {
+/// The theme the user chose changed. Slint follows the system only while the palette was never
+/// assigned, so "System" chosen at runtime applies the system's current theme instead.
+pub fn set_scheme(app: &AppWindow, scheme: i32) {
+    let effective = if scheme == 0 {
+        system_scheme(app)
+    } else {
+        scheme
+    };
+    app.invoke_set_scheme(effective);
     DESKTOP.with_borrow_mut(|d| {
         d.scheme = scheme;
+        d.assigned = scheme == 0;
         if let Some(mini) = &d.mini {
-            mini.invoke_set_scheme(scheme);
+            mini.invoke_set_scheme(effective);
         }
     });
+}
+
+/// The system switched between dark and light.
+pub fn system_theme_changed(app: &AppWindow) {
+    if DESKTOP.with_borrow(|d| d.scheme == 0 && d.assigned) {
+        set_scheme(app, 0);
+    }
+}
+
+/// The system's theme now: 1 dark, 2 light, 0 unknown.
+fn system_scheme(app: &AppWindow) -> i32 {
+    use slint::winit_030::winit::window::Theme;
+    match app.window().with_winit_window(|w| w.theme()).flatten() {
+        Some(Theme::Dark) => 1,
+        Some(Theme::Light) => 2,
+        None => 0,
+    }
 }
 
 /// Sends one notification (the `--notify-test` flag).
@@ -176,6 +208,13 @@ fn toggle_mini(app: &AppWindow, x: i32, y: i32) {
         close_mini();
         return;
     }
+    let just_closed = DESKTOP.with_borrow(|d| {
+        d.focus_closed_at
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(400))
+    });
+    if just_closed {
+        return;
+    }
     let Ok(mini) = MiniWindow::new() else { return };
     let scale = app.window().scale_factor();
     let (width, height) = (
@@ -195,6 +234,7 @@ fn toggle_mini(app: &AppWindow, x: i32, y: i32) {
     // It closes when it loses focus, like the system's own flyouts.
     mini.window().on_winit_window_event(|_, event| {
         if let slint::winit_030::winit::event::WindowEvent::Focused(false) = event {
+            DESKTOP.with_borrow_mut(|d| d.focus_closed_at = Some(std::time::Instant::now()));
             close_mini_later();
         }
         EventResult::Propagate
@@ -202,7 +242,10 @@ fn toggle_mini(app: &AppWindow, x: i32, y: i32) {
     let _ = mini.show();
     mini.window().with_winit_window(|w| w.focus_window());
     DESKTOP.with_borrow_mut(|d| {
-        mini.invoke_set_scheme(d.scheme);
+        // A new window follows the system by itself; only a chosen theme is assigned.
+        if d.scheme != 0 {
+            mini.invoke_set_scheme(d.scheme);
+        }
         if let Some(commands) = &d.commands {
             let _ = commands.send(Command::Mini(true));
         }

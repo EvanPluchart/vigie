@@ -61,7 +61,7 @@ Like `vigie-probe`, it never depends on Slint. `vigie-app` uses it and still mak
 ### Alerts
 
 * Alerts are pure functions in `vigie-core::alerts`, run at the 5 s diagnostics cadence, never every tick.
-* **One source per fact:** the diagnostics already decide what is critical (CPU saturated, high memory pressure). An alert is sent when a critical finding is newly raised.
+* **One source per fact:** the diagnostics already decide what is critical (CPU saturated, high memory pressure). An alert is sent once a critical finding has lasted a minute, and never in the first two minutes after launch, so a machine already under pressure does not notify at every start.
 * **Thresholds of their own:** the user can set them for CPU and memory, on the finest history tier.
 * **Avoiding false alerts:**
   * a threshold rule needs its whole window measured, so nothing fires at launch;
