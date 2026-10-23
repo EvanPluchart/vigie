@@ -1360,10 +1360,8 @@ pub fn user_rows_ui(
             key: -1 - session,
             kind: 0,
             session,
-            name: match user {
-                Some(u) if !u.name.is_empty() => u.name.as_str().into(),
-                _ => format!("Session {}", group.session).into(),
-            },
+            // Empty when nobody is named: the view says "Session N" in the user's language.
+            name: user.map(|u| u.name.as_str()).unwrap_or_default().into(),
             active: user.is_some_and(|u| u.active),
             expanded: open,
             count: i32::try_from(group.members.len()).unwrap_or(i32::MAX),

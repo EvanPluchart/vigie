@@ -781,6 +781,8 @@ export component AppWindow inherits Window {
     function close-menu() {
         root.menu-open = false;
         root.menu-sub = 0;
+        // The menu held the keyboard: give it back to the table, so arrows and Del work again.
+        if (root.tab == 0 || root.tab == 7) { table.focus(); }
     }
 
     function column-entries() -> [MenuEntry] {

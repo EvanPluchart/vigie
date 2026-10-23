@@ -333,6 +333,7 @@ FR = {
     "Only {} free ({}). Windows needs room for updates, the page file and temporary files; with too little, programs and updates fail.": "Seulement {} libres ({}). Windows a besoin de place pour les mises à jour, le fichier d’échange et les fichiers temporaires ; sans elle, programmes et mises à jour échouent.",
     "Suggestion: free up space with Storage Sense, or move large files elsewhere.": "Suggestion : libérez de l’espace avec l’Assistant Stockage, ou déplacez les gros fichiers ailleurs.",
     "Open storage settings": "Ouvrir les paramètres de stockage",
+    "Session {}": "Session {}",
 }
 
 

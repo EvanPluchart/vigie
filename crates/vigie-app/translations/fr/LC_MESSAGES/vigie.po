@@ -979,6 +979,9 @@ msgstr "Démarrer ou arrêter la plupart des services demande de lancer Vigie en
 msgid "User"
 msgstr "Utilisateur"
 
+msgid "Session {}"
+msgstr "Session {}"
+
 msgid "({} processes)"
 msgstr "({} processus)"
 

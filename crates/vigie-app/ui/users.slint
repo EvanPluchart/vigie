@@ -179,7 +179,7 @@ export component UsersView inherits Rectangle {
                             }
                         }
                         Cell {
-                            text: row.name;
+                            text: row.kind == 0 && row.name == "" ? @tr("Session {}", row.session) : row.name;
                             font-weight: row.kind == 0 ? Theme.weight-strong : Theme.weight-regular;
                             horizontal-stretch: 0;
                         }
