@@ -10,6 +10,34 @@ import { MiniRow, MiniWindow } from "mini.slint";
 
 export { CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, MiniRow, MiniWindow, PerfView, PortRowUi, ServiceRowUi, StartupRowUi }
 
+export struct PaletteItem {
+    id: int,
+    title: string,
+    hint: string,
+}
+
+// The commands of the palette, by id; Rust filters them by these titles.
+export global PaletteText {
+    pure public function title(id: int) -> string {
+        return id == 0 ? @tr("Go to Processes") : id == 1 ? @tr("Go to Performance")
+            : id == 2 ? @tr("Go to Diagnostics") : id == 3 ? @tr("Go to Ports")
+            : id == 4 ? @tr("Go to Files (who is using a file)") : id == 5 ? @tr("Go to Startup and services")
+            : id == 6 ? @tr("Go to Settings") : id == 10 ? @tr("Search processes")
+            : id == 11 ? @tr("End the selected task") : id == 12 ? @tr("Show or hide the history of the selected process")
+            : id == 13 ? @tr("Switch between dark and light theme") : id == 14 ? @tr("About Vigie")
+            : id == 15 ? @tr("Quit Vigie") : "";
+    }
+
+    pure public function hint(id: int) -> string {
+        return id >= 0 && id <= 6 ? "Ctrl+" + (id + 1) : id == 10 ? "Ctrl+F" : id == 12 ? "Ctrl+H"
+            : id == 11 ? @tr("Del") : "";
+    }
+
+    pure public function search-for(text: string) -> string {
+        return @tr("Search processes for “{}”", text);
+    }
+}
+
 // Words for the desktop: notifications and the tray, asked for by Rust so they follow the
 // language (see src/desktop.rs).
 export global NotifyText {
@@ -277,6 +305,21 @@ component RailItem inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
+    // Reachable with Tab; Enter or Space opens the view.
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    if focus.has-focus: Rectangle {
+        border-radius: Theme.radius-control;
+        border-width: 1px;
+        border-color: Theme.accent;
+    }
 }
 
 // Navigation between the views: Processes, Performance and Diagnostics.
@@ -500,6 +543,13 @@ export component AppWindow inherits Window {
     in property <string> settings-path;
     callback settings-edited();
     changed columns => { root.settings-edited(); }
+    // Command palette: the matching commands, filtered by Rust (src/main.rs).
+    in-out property <bool> palette-open;
+    in-out property <string> palette-text;
+    in property <[PaletteItem]> palette-items;
+    in-out property <int> palette-index;
+    callback palette-edited(string);
+    callback quit();
     in-out property <ProcRow> selected;
     callback show-about();
     callback sort-clicked(int);
@@ -549,6 +599,47 @@ export component AppWindow inherits Window {
         root.selected = item;
         root.has-selection = true;
         table.focus();
+    }
+
+    public function open-palette() {
+        root.palette-text = "";
+        root.palette-index = 0;
+        root.palette-edited("");
+        root.palette-open = true;
+    }
+
+    function close-palette() {
+        root.palette-open = false;
+        table.focus();
+    }
+
+    // Commands of the palette (ids from PaletteText).
+    public function run-command(id: int) {
+        root.palette-open = false;
+        if (id >= 0 && id <= 6) {
+            root.show-tab(id);
+        } else if (id == 10) {
+            root.show-tab(0);
+            search.focus();
+        } else if (id == 11) {
+            if (root.has-selection) { root.ask(root.selected, 0); }
+        } else if (id == 12) {
+            root.show-tab(0);
+            root.history-open = !root.history-open;
+            root.history-toggled(root.history-open);
+        } else if (id == 13) {
+            root.setting-theme = Theme.dark ? 2 : 1;
+            root.set-scheme(root.setting-theme);
+            root.settings-edited();
+        } else if (id == 14) {
+            root.show-about();
+        } else if (id == 15) {
+            root.quit();
+        } else if (id == 16) {
+            root.show-tab(0);
+            root.search-text = root.palette-text;
+            root.search-edited(root.palette-text);
+        }
     }
 
     public function show-tab(index: int) {
@@ -629,6 +720,11 @@ export component AppWindow inherits Window {
         key-pressed(event) => {
             if (event.modifiers.control && (event.text == "f" || event.text == "F")) {
                 search.focus();
+                return accept;
+            }
+            // Ctrl+K (or Ctrl+Shift+P) opens the command palette.
+            if (event.modifiers.control && (event.text == "k" || event.text == "K" || (event.modifiers.shift && (event.text == "p" || event.text == "P")))) {
+                root.open-palette();
                 return accept;
             }
             // Ctrl+1 to Ctrl+7 switch views, in rail order.
@@ -1173,6 +1269,7 @@ export component AppWindow inherits Window {
         background: #000000.with-alpha(0.45);
         // Swallow clicks outside the dialog; Escape or Cancel closes it.
         TouchArea { }
+        // Cancel takes the focus, so Enter never ends a task by accident; Escape closes.
         FocusScope {
             key-pressed(event) => {
                 if (event.text == Key.Escape) {
@@ -1181,8 +1278,7 @@ export component AppWindow inherits Window {
                 }
                 return reject;
             }
-            init => { self.focus(); }
-        }
+            init => { cancel-button.focus(); }
         Rectangle {
             width: 420px;
             height: dialog.preferred-height;
@@ -1217,7 +1313,7 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     alignment: end;
                     spacing: Theme.space-2;
-                    VButton {
+                    cancel-button := VButton {
                         text: @tr("Cancel");
                         clicked => { root.confirm-open = false; }
                     }
@@ -1237,6 +1333,97 @@ export component AppWindow inherits Window {
                                 root.request-action(root.confirm-pid, root.confirm-start, root.confirm-action);
                             }
                         }
+                    }
+                }
+            }
+        }
+        }
+    }
+
+    // Command palette (Ctrl+K): type to filter, arrows to choose, Enter to run, Escape to close.
+    if root.palette-open: Rectangle {
+        background: #000000.with-alpha(0.35);
+        TouchArea { clicked => { root.close-palette(); } }
+        FocusScope {
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.close-palette();
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    root.palette-index = min(root.palette-index + 1, root.palette-items.length - 1);
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    root.palette-index = max(root.palette-index - 1, 0);
+                    return accept;
+                }
+                if (event.text == Key.Return && root.palette-index >= 0 && root.palette-index < root.palette-items.length) {
+                    root.run-command(root.palette-items[root.palette-index].id);
+                    return accept;
+                }
+                return reject;
+            }
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: 72px;
+                width: min(560px, parent.width - 2 * Theme.space-4);
+                height: palette-layout.preferred-height;
+                background: Theme.raised;
+                border-radius: Theme.radius-panel;
+                border-width: 1px;
+                border-color: Theme.border;
+                drop-shadow-blur: 24px;
+                drop-shadow-color: #000000.with-alpha(0.35);
+                TouchArea { }
+                palette-layout := VerticalLayout {
+                    padding: Theme.space-3;
+                    spacing: Theme.space-2;
+                    palette-field := VField {
+                        search: true;
+                        placeholder: @tr("Type a command or a process name");
+                        text <=> root.palette-text;
+                        edited(text) => {
+                            root.palette-index = 0;
+                            root.palette-edited(text);
+                        }
+                        init => { self.focus(); }
+                    }
+                    // Scrolls when the window is short; every command fits in a normal one.
+                    if root.palette-items.length > 0: ListView {
+                        height: min(root.palette-items.length * 32px, 416px);
+                        for item[i] in root.palette-items: Rectangle {
+                            height: 32px;
+                            border-radius: Theme.radius-control;
+                            background: i == root.palette-index ? Theme.selection : item-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+                            item-touch := TouchArea {
+                                clicked => { root.run-command(item.id); }
+                            }
+                            HorizontalLayout {
+                                padding-left: Theme.space-3;
+                                padding-right: Theme.space-3;
+                                Text {
+                                    text: item.title;
+                                    color: i == root.palette-index ? Theme.accent : Theme.text;
+                                    font-size: Theme.font-body;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: item.hint;
+                                    color: Theme.text-muted;
+                                    font-size: Theme.font-caption;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                    if root.palette-items.length == 0: Text {
+                        text: @tr("No command matches.");
+                        color: Theme.text-muted;
+                        font-size: Theme.font-body;
+                        horizontal-alignment: center;
                     }
                 }
             }

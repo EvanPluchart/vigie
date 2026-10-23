@@ -50,6 +50,7 @@ fn main() -> anyhow::Result<()> {
     app.set_locks(ModelRc::from(Rc::new(VecModel::<LockRowUi>::default())));
     app.set_startup_items(ModelRc::from(Rc::new(VecModel::<StartupRowUi>::default())));
     app.set_services(ModelRc::from(Rc::new(VecModel::<ServiceRowUi>::default())));
+    app.set_palette_items(ModelRc::from(Rc::new(VecModel::<PaletteItem>::default())));
     app.set_tab(options.tab);
     app.set_perf_span_index(options.range);
     app.set_history_open(options.history);
@@ -247,6 +248,17 @@ fn main() -> anyhow::Result<()> {
         let _ = tx.send(Command::Filter(text.to_string()));
     });
 
+    // The palette's commands are few: filtered here, on the UI thread, by their translated titles.
+    let weak = app.as_weak();
+    app.on_palette_edited(move |text| {
+        if let Some(app) = weak.upgrade() {
+            let items = palette_items(&app, &text);
+            app.set_palette_items(ModelRc::new(VecModel::from(items)));
+        }
+    });
+    app.on_quit(|| {
+        let _ = slint::quit_event_loop();
+    });
     // Changes in the Settings view apply at once; what the user changed is saved.
     let prefs = Rc::new(RefCell::new(prefs));
     let session = Rc::new(Cell::new(session));
@@ -303,6 +315,16 @@ fn main() -> anyhow::Result<()> {
         !options.no_tray,
         prefs::scheme(start.theme),
     );
+    if let Some(text) = options.palette.clone() {
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(800), move || {
+            if let Some(app) = weak.upgrade() {
+                app.invoke_open_palette();
+                app.set_palette_text(text.as_str().into());
+                app.invoke_palette_edited(text.as_str().into());
+            }
+        });
+    }
     if options.mini {
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
@@ -408,12 +430,41 @@ fn main() -> anyhow::Result<()> {
     app.on_service_filter_edited(|_| {});
     app.on_service_control(|_, _| {});
     app.on_settings_edited(|| {});
+    app.on_palette_edited(|_| {});
     app.window()
         .on_winit_window_event(|_, _| slint::winit_030::EventResult::Propagate);
     app.on_request_action(|_, _, _| {});
     drop(pace_timer);
     let _ = sampler.join();
     Ok(())
+}
+
+/// Commands of the palette (`PaletteText` in `ui/app.slint`) whose titles hold every word of
+/// `query`, then, when there is a query, searching processes for it.
+fn palette_items(app: &AppWindow, query: &str) -> Vec<PaletteItem> {
+    const COMMANDS: [i32; 13] = [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15];
+    let text = app.global::<PaletteText>();
+    let query = query.trim().to_lowercase();
+    let mut items: Vec<PaletteItem> = COMMANDS
+        .iter()
+        .map(|&id| PaletteItem {
+            id,
+            title: text.invoke_title(id),
+            hint: text.invoke_hint(id),
+        })
+        .filter(|item| {
+            let title = item.title.to_lowercase();
+            query.split_whitespace().all(|word| title.contains(word))
+        })
+        .collect();
+    if !query.is_empty() {
+        items.push(PaletteItem {
+            id: 16,
+            title: text.invoke_search_for(query.as_str().into()),
+            hint: "Ctrl+F".into(),
+        });
+    }
+    items
 }
 
 /// Column indices used by the header in `ui/app.slint`.

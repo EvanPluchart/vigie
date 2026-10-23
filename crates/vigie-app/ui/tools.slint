@@ -140,6 +140,8 @@ export component PortsView inherits Rectangle {
     // A copy of the selected row: the action checks the process is still the same one. Rust
     // clears it when the row leaves the list.
     in-out property <PortRowUi> selected;
+    // Row of the selection for the arrow keys.
+    property <int> cursor: -1;
 
     function state-text(state: int) -> string {
         return state == -1 ? "" : state == 0 ? @tr("Listening") : state == 1 ? @tr("Connected")
@@ -206,40 +208,60 @@ export component PortsView inherits Rectangle {
             horizontal-alignment: center;
             vertical-alignment: center;
         }
-        if root.available && root.rows.length > 0: ListView {
+if root.available && root.rows.length > 0: ports-keys := FocusScope {
             vertical-stretch: 1;
-            for row in root.rows: Rectangle {
-                height: Theme.row-height;
-                property <bool> is-selected: row.key == root.selected.key;
-                background: self.is-selected ? Theme.selection : touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
-                touch := TouchArea {
-                    clicked => { root.selected = row; }
+            key-pressed(event) => {
+                if (root.rows.length == 0) { return reject; }
+                if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                    root.cursor = clamp(root.cursor + (event.text == Key.DownArrow ? 1 : -1), 0, root.rows.length - 1);
+                    root.selected = root.rows[root.cursor];
+                    return accept;
                 }
-                HorizontalLayout {
-                    padding-left: Theme.space-4;
-                    padding-right: Theme.space-4;
-                    spacing: Theme.space-3;
+                if (event.text == Key.Delete && root.selected.can-end) {
+                    root.end(root.selected);
+                    return accept;
+                }
+                return reject;
+            }
+            ListView {
+                vertical-stretch: 1;
+                for row[i] in root.rows: Rectangle {
+                    height: Theme.row-height;
+                    property <bool> is-selected: row.key == root.selected.key;
+                    background: self.is-selected ? Theme.selection : touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+                    touch := TouchArea {
+                        clicked => {
+                        root.selected = row;
+                        root.cursor = i;
+                        ports-keys.focus();
+                    }
+                    }
                     HorizontalLayout {
-                        horizontal-stretch: 1;
-                        spacing: Theme.space-2;
-                        SmallIcon { has-icon: row.icon >= 0; source: root.icons[row.icon]; }
-                        Cell {
-                            text: row.name != "" ? row.name : row.pid == 0 ? @tr("System (closing)") : @tr("Exited process");
-                            color: row.name != "" ? Theme.text : Theme.text-muted;
+                        padding-left: Theme.space-4;
+                        padding-right: Theme.space-4;
+                        spacing: Theme.space-3;
+                        HorizontalLayout {
+                            horizontal-stretch: 1;
+                            spacing: Theme.space-2;
+                            SmallIcon { has-icon: row.icon >= 0; source: root.icons[row.icon]; }
+                            Cell {
+                                text: row.name != "" ? row.name : row.pid == 0 ? @tr("System (closing)") : @tr("Exited process");
+                                color: row.name != "" ? Theme.text : Theme.text-muted;
+                            }
                         }
+                        Cell { text: row.pid; width: 64px; horizontal-alignment: right; color: Theme.text-muted; }
+                        Cell { text: row.protocol; width: 56px; color: Theme.text-muted; }
+                        Cell { text: row.address; width: 150px; }
+                        Cell {
+                            text: row.port;
+                            width: 56px;
+                            horizontal-alignment: right;
+                            font-weight: row.exact ? Theme.weight-strong : Theme.weight-regular;
+                            color: row.exact ? Theme.accent : Theme.text;
+                        }
+                        Cell { text: row.remote; width: 170px; color: Theme.text-muted; }
+                        Cell { text: root.state-text(row.state); width: 80px; color: row.state == 0 ? Theme.accent : Theme.text-muted; }
                     }
-                    Cell { text: row.pid; width: 64px; horizontal-alignment: right; color: Theme.text-muted; }
-                    Cell { text: row.protocol; width: 56px; color: Theme.text-muted; }
-                    Cell { text: row.address; width: 150px; }
-                    Cell {
-                        text: row.port;
-                        width: 56px;
-                        horizontal-alignment: right;
-                        font-weight: row.exact ? Theme.weight-strong : Theme.weight-regular;
-                        color: row.exact ? Theme.accent : Theme.text;
-                    }
-                    Cell { text: row.remote; width: 170px; color: Theme.text-muted; }
-                    Cell { text: root.state-text(row.state); width: 80px; color: row.state == 0 ? Theme.accent : Theme.text-muted; }
                 }
             }
         }
@@ -539,27 +561,41 @@ export component StartupView inherits Rectangle {
                 vertical-alignment: center;
                 vertical-stretch: 1;
             }
-            if root.services-ready: ListView {
+if root.services-ready: services-keys := FocusScope {
                 vertical-stretch: 1;
-                for service[i] in root.services: Rectangle {
-                    height: Theme.row-height;
-                    background: i == root.selected-service ? Theme.selection : service-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
-                    service-touch := TouchArea {
-                        clicked => { root.selected-service = i; }
+                key-pressed(event) => {
+                    if (root.services.length == 0) { return reject; }
+                    if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                        root.selected-service = clamp(root.selected-service + (event.text == Key.DownArrow ? 1 : -1), 0, root.services.length - 1);
+                        return accept;
                     }
-                    HorizontalLayout {
-                        padding-left: Theme.space-4;
-                        padding-right: Theme.space-4;
-                        spacing: Theme.space-3;
-                        Cell { text: service.display; horizontal-stretch: 1; }
-                        Cell { text: service.name; width: 160px; color: Theme.text-muted; }
-                        Cell {
-                            text: root.state-text(service.state);
-                            width: 80px;
-                            color: service.state == 0 ? Theme.accent : Theme.text-muted;
+                    return reject;
+                }
+                ListView {
+                    vertical-stretch: 1;
+                    for service[i] in root.services: Rectangle {
+                        height: Theme.row-height;
+                        background: i == root.selected-service ? Theme.selection : service-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+                        service-touch := TouchArea {
+                            clicked => {
+                            root.selected-service = i;
+                            services-keys.focus();
                         }
-                        Cell { text: root.start-text(service.start-type); width: 140px; color: Theme.text-muted; }
-                        Cell { text: service.pid > 0 ? service.pid : ""; width: 64px; horizontal-alignment: right; color: Theme.text-muted; }
+                        }
+                        HorizontalLayout {
+                            padding-left: Theme.space-4;
+                            padding-right: Theme.space-4;
+                            spacing: Theme.space-3;
+                            Cell { text: service.display; horizontal-stretch: 1; }
+                            Cell { text: service.name; width: 160px; color: Theme.text-muted; }
+                            Cell {
+                                text: root.state-text(service.state);
+                                width: 80px;
+                                color: service.state == 0 ? Theme.accent : Theme.text-muted;
+                            }
+                            Cell { text: root.start-text(service.start-type); width: 140px; color: Theme.text-muted; }
+                            Cell { text: service.pid > 0 ? service.pid : ""; width: 64px; horizontal-alignment: right; color: Theme.text-muted; }
+                        }
                     }
                 }
             }

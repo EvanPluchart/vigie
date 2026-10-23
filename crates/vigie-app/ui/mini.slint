@@ -50,7 +50,7 @@ export component MiniWindow inherits Window {
     in property <float> memory-share;
     in property <[MiniRow]> top;
     callback open();
-    callback close();
+    callback dismiss();
     title: "Vigie mini";
     no-frame: true;
     always-on-top: true;
@@ -66,7 +66,7 @@ export component MiniWindow inherits Window {
     FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                root.close();
+                root.dismiss();
                 return accept;
             }
             return reject;

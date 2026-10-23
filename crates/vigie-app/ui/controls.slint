@@ -11,6 +11,7 @@ export component VButton inherits Rectangle {
     in property <int> kind;
     in property <bool> enabled: true;
     callback clicked();
+    forward-focus: focus;
     property <color> tone: root.kind == 2 ? Theme.danger : root.kind == 1 ? Theme.accent : Theme.text;
     property <bool> active: root.enabled && (touch.has-hover || focus.has-focus);
     height: 32px;

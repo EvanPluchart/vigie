@@ -6,7 +6,7 @@ use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes|performance|diagnostics] [--sort=cpu|memory|name|pid[:asc]] \
 [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] \
-[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--notify-test] [--mini]";
+[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--notify-test] [--mini] [--palette[=TEXT]]";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
@@ -32,6 +32,8 @@ pub struct Options {
     pub notify_test: bool,
     /// Opens the tray mini view at start, above the bottom right corner (screenshots).
     pub mini: bool,
+    /// Opens the command palette at start, with this text typed (screenshots).
+    pub palette: Option<String>,
     /// `None` follows the system theme.
     pub dark: Option<bool>,
     /// Opens the About window at start, for screenshots.
@@ -99,6 +101,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--no-tray", None) => options.no_tray = true,
             ("--notify-test", None) => options.notify_test = true,
             ("--mini", None) => options.mini = true,
+            ("--palette", value) => options.palette = Some(value.unwrap_or_default().to_owned()),
             ("--ask", Some(value)) => {
                 let parsed = value
                     .split_once(':')

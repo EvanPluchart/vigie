@@ -191,7 +191,7 @@ fn toggle_mini(app: &AppWindow, x: i32, y: i32) {
             show_main(&app);
         }
     });
-    mini.on_close(close_mini_later);
+    mini.on_dismiss(close_mini_later);
     // It closes when it loses focus, like the system's own flyouts.
     mini.window().on_winit_window_event(|_, event| {
         if let slint::winit_030::winit::event::WindowEvent::Focused(false) = event {
