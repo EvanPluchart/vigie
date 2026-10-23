@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 const USAGE: &str = "usage: cargo xtask bench-overhead [--seconds=N] [--check] [--tab=processes|performance|diagnostics|ports|files|startup]";
-/// Performance budget from docs/ARCHITECTURE.md.
+/// Performance budget from docs/ARCHITECTURE.md: CPU on an idle machine, private memory.
 const CPU_BUDGET_PERCENT: f64 = 1.0;
 const MEMORY_BUDGET_MB: f64 = 30.0;
 
@@ -68,7 +68,15 @@ fn bench_overhead(duration: Duration, check: bool, tab: &str) -> Result<()> {
         .join("target/release/vigie")
         .with_extension(std::env::consts::EXE_EXTENSION);
     let mut child = Command::new(&exe)
-        .args(["--interval=1000", "--no-adaptive", &format!("--tab={tab}")])
+        // No settings file and no tray icon: a benchmark neither reads nor changes the user's
+        // setup, and leaves nothing behind when it is killed.
+        .args([
+            "--interval=1000",
+            "--no-adaptive",
+            "--no-settings",
+            "--no-tray",
+            &format!("--tab={tab}"),
+        ])
         .spawn()
         .with_context(|| format!("starting {}", exe.display()))?;
     let result = measure(&child, duration, WARM_UP, POLL);
@@ -102,9 +110,11 @@ fn bench_overhead(duration: Duration, check: bool, tab: &str) -> Result<()> {
         "  private {:.1} MB sampled peak (memory not shared with other processes)",
         mb(m.peak_private)
     );
-    println!("  budget  < {CPU_BUDGET_PERCENT} % of one core, < {MEMORY_BUDGET_MB} MB");
+    println!(
+        "  budget  < {CPU_BUDGET_PERCENT} % of one core on an idle machine, < {MEMORY_BUDGET_MB} MB private"
+    );
     if check {
-        let peak_mb = mb(m.peak_memory);
+        let peak_mb = mb(m.peak_private);
         if cpu_steady >= CPU_BUDGET_PERCENT || peak_mb >= MEMORY_BUDGET_MB {
             bail!("over budget: {cpu_steady:.2} % of one core, {peak_mb:.1} MB");
         }

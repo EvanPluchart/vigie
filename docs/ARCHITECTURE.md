@@ -10,6 +10,7 @@ crates/
   vigie-probe   per-OS sampling behind one trait: processes, CPU, memory, disk, network, GPU   (no UI)
   vigie-core    process tree, app grouping, CPU% from deltas, history ring buffers, alerts,     (no UI, no OS calls)
                 diagnostics
+  vigie-shell   desktop integration: tray, notifications, settings file (decision 0008)        (no UI)
   vigie-app     Slint application, binary "vigie"; ui/*.slint holds every view
 xtask/          bench-overhead, bundle, release                                                 (M0)
 ```
@@ -80,9 +81,11 @@ UI callbacks (sort, filter, kill, suspend) ──> command channel ──> sampl
 
 | Metric | Budget | How it is checked |
 |---|---|---|
-| CPU while focused, 1 s interval, ~300 processes | < 1 % of one core on average | `cargo xtask bench-overhead` (60 s run, reads Vigie's own CPU time) |
-| Memory (RSS) | < 30 MB | same run |
+| CPU while focused, 1 s interval, idle machine with ~300 processes | < 1 % of one core on average | `cargo xtask bench-overhead` (60 s run, reads Vigie's own CPU time) |
+| Memory (private bytes: what Vigie allocates for itself, not shared pages) | < 30 MB | same run; the working set is reported too |
 | `Probe::sample` | < 3 ms for 500 processes | criterion benchmark in `vigie-probe` |
 | Steady-state allocations per tick | 0 in `sample` | counting allocator in a test |
+
+The metrics were settled on 2026-10-23: private memory, because the working set grows with the window and with shared system pages; CPU on an idle machine, because a loaded one is too noisy to compare builds.
 
 A change that breaks the budget does not merge.
