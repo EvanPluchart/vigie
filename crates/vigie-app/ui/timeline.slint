@@ -44,15 +44,15 @@ export global Format {
 
     // Unit 0: percent, 1: bytes per second shown in bits (link speeds), 2: bytes.
     pure public function value(v: float, unit: int) -> string {
-        if (unit == 0) { return round(v) + " %"; }
+        if (unit == 0) { return round(v) + "\u{a0}%"; }
         if (unit == 1) {
             let bits = v * 8;
-            return bits >= 1000000000 ? round(bits / 100000000) / 10 + " Gbps"
-                : bits >= 1000000 ? round(bits / 100000) / 10 + " Mbps"
-                : round(bits / 1000) + " kbps";
+            return bits >= 1000000000 ? @tr("{} Gbps", round(bits / 100000000) / 10)
+                : bits >= 1000000 ? @tr("{} Mbps", round(bits / 100000) / 10)
+                : @tr("{} kbps", round(bits / 1000));
         }
         let mb = v / 1048576;
-        return mb >= 1024 ? round(mb / 10.24) / 100 + " GB" : round(mb * 10) / 10 + " MB";
+        return mb >= 1024 ? @tr("{} GB", round(mb / 10.24) / 100) : @tr("{} MB", round(mb * 10) / 10);
     }
 }
 

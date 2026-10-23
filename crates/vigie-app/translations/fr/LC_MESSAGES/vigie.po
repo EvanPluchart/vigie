@@ -1,0 +1,833 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: fr\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "Go to Processes"
+msgstr "Aller aux processus"
+
+msgid "Go to Performance"
+msgstr "Aller aux performances"
+
+msgid "Go to Diagnostics"
+msgstr "Aller aux diagnostics"
+
+msgid "Go to Ports"
+msgstr "Aller aux ports"
+
+msgid "Go to Files (who is using a file)"
+msgstr "Aller aux fichiers (qui utilise un fichier)"
+
+msgid "Go to Startup and services"
+msgstr "Aller au démarrage et aux services"
+
+msgid "Go to Settings"
+msgstr "Aller aux réglages"
+
+msgid "Search processes"
+msgstr "Rechercher des processus"
+
+msgid "End the selected task"
+msgstr "Mettre fin à la tâche sélectionnée"
+
+msgid "Show or hide the history of the selected process"
+msgstr "Afficher ou masquer l’historique du processus sélectionné"
+
+msgid "Switch between dark and light theme"
+msgstr "Basculer entre thème sombre et clair"
+
+msgid "About Vigie"
+msgstr "À propos de Vigie"
+
+msgid "Quit Vigie"
+msgstr "Quitter Vigie"
+
+msgid "Del"
+msgstr "Suppr"
+
+msgid "Search processes for “{}”"
+msgstr "Rechercher « {} » dans les processus"
+
+msgid "The processor is very busy"
+msgstr "Le processeur est très occupé"
+
+msgid "Memory is running low"
+msgstr "La mémoire vient à manquer"
+
+msgid "{} on average over {} min."
+msgstr "{} en moyenne sur {} min."
+
+msgid "{} of memory in use."
+msgstr "{} de la mémoire utilisée."
+
+msgid "Only {} % of memory is available."
+msgstr "Seulement {} % de la mémoire est disponible."
+
+msgid "Busiest: {}."
+msgstr "Le plus gourmand : {}."
+
+msgid "Vigie · CPU {} · Memory {}"
+msgstr "Vigie · Processeur {} · Mémoire {}"
+
+msgid "Open Vigie"
+msgstr "Ouvrir Vigie"
+
+msgid "Quit"
+msgstr "Quitter"
+
+msgid "Apps ({})"
+msgstr "Applications ({})"
+
+msgid "Background processes ({})"
+msgstr "Processus en arrière-plan ({})"
+
+msgid "Services and system ({})"
+msgstr "Services et système ({})"
+
+msgid "Processes ({})"
+msgstr "Processus ({})"
+
+msgid "Processes"
+msgstr "Processus"
+
+msgid "Performance"
+msgstr "Performances"
+
+msgid "Diagnostics"
+msgstr "Diagnostics"
+
+msgid "Ports"
+msgstr "Ports"
+
+msgid "Files"
+msgstr "Fichiers"
+
+msgid "Startup"
+msgstr "Démarrage"
+
+msgid "Settings"
+msgstr "Réglages"
+
+msgid "A fast cross-platform task manager."
+msgstr "Un gestionnaire de tâches rapide et multiplateforme."
+
+msgid "History in memory: {}"
+msgstr "Historique en mémoire : {}"
+
+msgid "Low"
+msgstr "Basse"
+
+msgid "Below normal"
+msgstr "Inférieure à la normale"
+
+msgid "Normal"
+msgstr "Normale"
+
+msgid "Above normal"
+msgstr "Supérieure à la normale"
+
+msgid "High"
+msgstr "Haute"
+
+msgid "Ended {} (PID {})"
+msgstr "Fin de {} (PID {})"
+
+msgid "Ended {} (PID {}) and {} child processes"
+msgstr "Fin de {} (PID {}) et de ses processus enfants ({})"
+
+msgid "Suspended {} (PID {})"
+msgstr "{} (PID {}) suspendu"
+
+msgid "Resumed {} (PID {})"
+msgstr "{} (PID {}) repris"
+
+msgid "Changed the priority of {} (PID {})"
+msgstr "Priorité de {} (PID {}) modifiée"
+
+msgid "Copied the command line of {} (PID {})"
+msgstr "Ligne de commande de {} (PID {}) copiée"
+
+msgid "{} (PID {}) has already exited"
+msgstr "{} (PID {}) est déjà terminé"
+
+msgid "Access denied for {} (PID {}). Restart Vigie as administrator to act on it."
+msgstr "Accès refusé pour {} (PID {}). Relancez Vigie en administrateur pour agir dessus."
+
+msgid "Could not act on {} (PID {})"
+msgstr "Impossible d’agir sur {} (PID {})"
+
+msgid "{} will start with Windows"
+msgstr "{} démarrera avec Windows"
+
+msgid "{} will no longer start with Windows"
+msgstr "{} ne démarrera plus avec Windows"
+
+msgid "Started {}"
+msgstr "{} démarré"
+
+msgid "Stopped {}"
+msgstr "{} arrêté"
+
+msgid "{} cannot stop while services that depend on it are running"
+msgstr "{} ne peut pas s’arrêter tant que des services qui en dépendent fonctionnent"
+
+msgid "Access denied: changing {} needs Vigie to run as administrator."
+msgstr "Accès refusé : modifier {} demande de lancer Vigie en administrateur."
+
+msgid "Could not change {}"
+msgstr "Impossible de modifier {}"
+
+msgid "Search name, PID or publisher (Ctrl+F)"
+msgstr "Nom, PID ou éditeur (Ctrl+F)"
+
+msgid "Suspend"
+msgstr "Suspendre"
+
+msgid "Resume"
+msgstr "Reprendre"
+
+msgid "Priority"
+msgstr "Priorité"
+
+msgid "Open file location"
+msgstr "Ouvrir l’emplacement du fichier"
+
+msgid "Copy command line"
+msgstr "Copier la ligne de commande"
+
+msgid "Columns"
+msgstr "Colonnes"
+
+msgid "Publisher"
+msgstr "Éditeur"
+
+msgid "PID"
+msgstr "PID"
+
+msgid "CPU"
+msgstr "Processeur"
+
+msgid "Memory"
+msgstr "Mémoire"
+
+msgid "{} · PID {}"
+msgstr "{} · PID {}"
+
+msgid "Select a process to act on it"
+msgstr "Sélectionnez un processus pour agir dessus"
+
+msgid "Hide history"
+msgstr "Masquer l’historique"
+
+msgid "Show history"
+msgstr "Historique"
+
+msgid "End process tree"
+msgstr "Fin de l’arborescence"
+
+msgid "End task"
+msgstr "Fin de tâche"
+
+msgid "Name"
+msgstr "Nom"
+
+msgid "No process matches “{}”"
+msgstr "Aucun processus ne correspond à « {} »"
+
+msgid "Clear search"
+msgstr "Effacer la recherche"
+
+msgid "Select a process to see its history."
+msgstr "Sélectionnez un processus pour voir son historique."
+
+msgid "History of {}"
+msgstr "Historique de {}"
+
+msgid "Recording starts now: Vigie keeps a history of the busiest processes and of the one you select."
+msgstr "L’enregistrement commence maintenant : Vigie garde l’historique des processus les plus gourmands et de celui que vous sélectionnez."
+
+msgid "Memory (scale {})"
+msgstr "Mémoire (échelle {})"
+
+msgid "Vigie {} CPU · {}"
+msgstr "Vigie {} processeur · {}"
+
+msgid "{} of {} processes"
+msgstr "{} sur {} processus"
+
+msgid "{} processes"
+msgstr "{} processus"
+
+msgid "Stop the service {}?"
+msgstr "Arrêter le service {} ?"
+
+msgid "End {} (PID {})?"
+msgstr "Mettre fin à {} (PID {}) ?"
+
+msgid "End {} (PID {}) and its {} child processes?"
+msgstr "Mettre fin à {} (PID {}) et à ses processus enfants ({}) ?"
+
+msgid "Suspend {} (PID {})?"
+msgstr "Suspendre {} (PID {}) ?"
+
+msgid "Set the priority of {} (PID {}) to {}?"
+msgstr "Passer la priorité de {} (PID {}) à « {} » ?"
+
+msgid "Programs and services that rely on it may stop working until it starts again."
+msgstr "Les programmes et services qui en dépendent peuvent cesser de fonctionner jusqu’à son redémarrage."
+
+msgid "Unsaved work in this program will be lost."
+msgstr "Le travail non enregistré dans ce programme sera perdu."
+
+msgid "Unsaved work in these programs will be lost."
+msgstr "Le travail non enregistré dans ces programmes sera perdu."
+
+msgid "It stops running until you resume it. Suspending a system process can freeze Windows."
+msgstr "Il s’arrête jusqu’à ce que vous le repreniez. Suspendre un processus système peut figer Windows."
+
+msgid "A high priority can slow down the rest of the system."
+msgstr "Une priorité haute peut ralentir le reste du système."
+
+msgid "Cancel"
+msgstr "Annuler"
+
+msgid "Stop service"
+msgstr "Arrêter le service"
+
+msgid "Change priority"
+msgstr "Changer la priorité"
+
+msgid "Type a command or a process name"
+msgstr "Tapez une commande ou un nom de processus"
+
+msgid "No command matches."
+msgstr "Aucune commande ne correspond."
+
+msgid "Clear"
+msgstr "Effacer"
+
+msgid "The processor is saturated"
+msgstr "Le processeur est saturé"
+
+msgid "{} keeps a processor core busy"
+msgstr "{} occupe un cœur du processeur en continu"
+
+msgid "Committed memory is near its limit"
+msgstr "La mémoire validée approche de sa limite"
+
+msgid "{} keeps using more memory"
+msgstr "{} utilise de plus en plus de mémoire"
+
+msgid "Disk {} is saturated"
+msgstr "Le disque {} est saturé"
+
+msgid "Disk {} ({}) is saturated"
+msgstr "Le disque {} ({}) est saturé"
+
+msgid "Your computer has been running for {} days"
+msgstr "Votre ordinateur tourne depuis {} jours"
+
+msgid "{} busy on average over the last {} minutes."
+msgstr "{} d’occupation en moyenne sur les {} dernières minutes."
+
+msgid "{} cores on average over the last {} minutes."
+msgstr "{} cœurs en moyenne sur les {} dernières minutes."
+
+msgid "Programs have reserved {} % of what memory and the page file can hold; new allocations may fail."
+msgstr "Les programmes ont réservé {} % de ce que la mémoire et le fichier d’échange peuvent contenir ; de nouvelles allocations risquent d’échouer."
+
+msgid "Only {} % of memory is available; the system moves memory to disk, which is slow."
+msgstr "Seulement {} % de la mémoire est disponible ; le système déplace de la mémoire sur le disque, ce qui est lent."
+
+msgid "From {} to {} over {}, steadily. A program that never gives memory back often has a leak."
+msgstr "De {} à {} en {}, sans relâche. Un programme qui ne rend jamais de mémoire a souvent une fuite."
+
+msgid "Busy {} of the time over the last minute. Programs that read or write files wait for it."
+msgstr "Occupé {} du temps sur la dernière minute. Les programmes qui lisent ou écrivent des fichiers l’attendent."
+
+msgid "Some slowdowns and pending updates only clear with a restart."
+msgstr "Certains ralentissements et mises à jour en attente ne disparaissent qu’avec un redémarrage."
+
+msgid "Suggestion: end {} if you do not need it now. Unsaved work in it will be lost."
+msgstr "Suggestion : mettez fin à {} si vous n’en avez pas besoin maintenant. Le travail non enregistré sera perdu."
+
+msgid "{} is part of the system: ending it could crash the computer. If this lasts, restart."
+msgstr "{} fait partie du système : y mettre fin pourrait planter l’ordinateur. Si cela dure, redémarrez."
+
+msgid "Suggestion: close the programs you do not need."
+msgstr "Suggestion : fermez les programmes dont vous n’avez pas besoin."
+
+msgid "Vigie cannot tell yet which program uses the disk. Check the disk activity over time."
+msgstr "Vigie ne sait pas encore quel programme utilise le disque. Regardez l’activité du disque dans le temps."
+
+msgid "Suggestion: restart (not shut down: with fast startup, shutting down keeps the system running)."
+msgstr "Suggestion : redémarrez (pas d’arrêt : avec le démarrage rapide, l’arrêt garde le système en marche)."
+
+msgid "End task…"
+msgstr "Fin de tâche…"
+
+msgid "Open Performance"
+msgstr "Ouvrir Performances"
+
+msgid "Why is my computer slow?"
+msgstr "Pourquoi mon ordinateur est-il lent ?"
+
+msgid "Checked every 5 s"
+msgstr "Vérifié toutes les 5 s"
+
+msgid "Diagnostics need the performance figures, which are not available on this system yet."
+msgstr "Les diagnostics ont besoin des chiffres de performance, pas encore disponibles sur ce système."
+
+msgid "Measuring…"
+msgstr "Mesure en cours…"
+
+msgid "Nothing is slowing your computer down right now"
+msgstr "Rien ne ralentit votre ordinateur en ce moment"
+
+msgid "Vigie keeps checking while it runs. If something feels slow, come back here."
+msgstr "Vigie continue de vérifier tant qu’il tourne. Si quelque chose semble lent, revenez ici."
+
+msgid "Processor"
+msgstr "Processeur"
+
+msgid "{} on average over 2 minutes"
+msgstr "{} en moyenne sur 2 minutes"
+
+msgid "Pressure low"
+msgstr "Pression faible"
+
+msgid "Pressure rising, not critical"
+msgstr "Pression en hausse, pas critique"
+
+msgid "Disks"
+msgstr "Disques"
+
+msgid "Busiest disk {} busy over the last minute"
+msgstr "Disque le plus occupé : {} sur la dernière minute"
+
+msgid "No process keeps growing ({} watched)"
+msgstr "Aucun processus ne grossit sans arrêt ({} surveillés)"
+
+msgid "Memory growth is judged after 30 minutes of watching ({} min so far)"
+msgstr "La croissance de la mémoire est jugée après 30 minutes d’observation ({} min pour l’instant)"
+
+msgid "Busiest processes"
+msgstr "Processus les plus gourmands"
+
+msgid "Disk {}"
+msgstr "Disque {}"
+
+msgid "Disk {} ({})"
+msgstr "Disque {} ({})"
+
+msgid "up {} d {} h"
+msgstr "allumé depuis {} j {} h"
+
+msgid "up {} h {} min"
+msgstr "allumé depuis {} h {} min"
+
+msgid "up {} min"
+msgstr "allumé depuis {} min"
+
+msgid "Performance figures are not available on this system yet."
+msgstr "Les chiffres de performance ne sont pas encore disponibles sur ce système."
+
+msgid "{} logical processors"
+msgstr "{} processeurs logiques"
+
+msgid "In use"
+msgstr "Utilisée"
+
+msgid "{} of {}"
+msgstr "{} sur {}"
+
+msgid "Cached"
+msgstr "En cache"
+
+msgid "Committed"
+msgstr "Validée"
+
+msgid "Compressed"
+msgstr "Compressée"
+
+msgid "Slots"
+msgstr "Emplacements"
+
+msgid "{} of {} · {} MT/s"
+msgstr "{} sur {} · {} MT/s"
+
+msgid "Pressure"
+msgstr "Pression"
+
+msgid "High (commit {} %)"
+msgstr "Haute (validée {} %)"
+
+msgid "Medium (commit {} %)"
+msgstr "Moyenne (validée {} %)"
+
+msgid "Medium"
+msgstr "Moyenne"
+
+msgid "Network"
+msgstr "Réseau"
+
+msgid "Received"
+msgstr "Reçu"
+
+msgid "Sent"
+msgstr "Envoyé"
+
+msgid "Graph scale"
+msgstr "Échelle du graphique"
+
+msgid "Read"
+msgstr "Lecture"
+
+msgid "Write"
+msgstr "Écriture"
+
+msgid "No disk counters are readable on this system."
+msgstr "Aucun compteur de disque n’est lisible sur ce système."
+
+msgid "GPU {}"
+msgstr "GPU {}"
+
+msgid "Dedicated memory"
+msgstr "Mémoire dédiée"
+
+msgid "General"
+msgstr "Général"
+
+msgid "Refresh every"
+msgstr "Actualiser toutes les"
+
+msgid "Vigie slows down on its own in the background and when minimised."
+msgstr "Vigie ralentit de lui-même en arrière-plan et quand il est réduit."
+
+msgid "0.5 s"
+msgstr "0,5 s"
+
+msgid "Theme"
+msgstr "Thème"
+
+msgid "System"
+msgstr "Système"
+
+msgid "Dark"
+msgstr "Sombre"
+
+msgid "Light"
+msgstr "Clair"
+
+msgid "Language"
+msgstr "Langue"
+
+msgid "Process table columns"
+msgstr "Colonnes du tableau des processus"
+
+msgid "Alerts"
+msgstr "Alertes"
+
+msgid "Notify me when something slows the computer down"
+msgstr "Me prévenir quand quelque chose ralentit l’ordinateur"
+
+msgid "A system notification when the processor is saturated, memory runs low, or a threshold below is crossed. At most one per resource every 15 minutes."
+msgstr "Une notification système quand le processeur est saturé, que la mémoire manque ou qu’un seuil ci-dessous est franchi. Au plus une par ressource toutes les 15 minutes."
+
+msgid "Processor above"
+msgstr "Processeur au-dessus de"
+
+msgid "Off"
+msgstr "Désactivé"
+
+msgid "For at least"
+msgstr "Pendant au moins"
+
+msgid "1 min"
+msgstr "1 min"
+
+msgid "2 min"
+msgstr "2 min"
+
+msgid "5 min"
+msgstr "5 min"
+
+msgid "Memory in use above"
+msgstr "Mémoire utilisée au-dessus de"
+
+msgid "Window"
+msgstr "Fenêtre"
+
+msgid "Closing the window keeps Vigie in the notification area"
+msgstr "Fermer la fenêtre garde Vigie dans la zone de notification"
+
+msgid "Open it again from its icon; quit from the icon's menu."
+msgstr "Rouvrez-le depuis son icône ; quittez depuis le menu de l’icône."
+
+msgid "Not available: there is no notification area icon."
+msgstr "Indisponible : il n’y a pas d’icône dans la zone de notification."
+
+msgid "Settings are not saved in this session (--no-settings)."
+msgstr "Les réglages ne sont pas enregistrés dans cette session (--no-settings)."
+
+msgid "Saved in {}"
+msgstr "Enregistré dans {}"
+
+msgid "10 min"
+msgstr "10 min"
+
+msgid "1 h"
+msgstr "1 h"
+
+msgid "6 h"
+msgstr "6 h"
+
+msgid "24 h"
+msgstr "24 h"
+
+msgid "7 days"
+msgstr "7 jours"
+
+msgid "now"
+msgstr "maintenant"
+
+msgid "{} s ago"
+msgstr "il y a {} s"
+
+msgid "{} min ago"
+msgstr "il y a {} min"
+
+msgid "{} h ago"
+msgstr "il y a {} h"
+
+msgid "{} h {} min ago"
+msgstr "il y a {} h {} min"
+
+msgid "{} d {} h ago"
+msgstr "il y a {} j {} h"
+
+msgid "{} Gbps"
+msgstr "{} Gbit/s"
+
+msgid "{} Mbps"
+msgstr "{} Mbit/s"
+
+msgid "{} kbps"
+msgstr "{} kbit/s"
+
+msgid "{} GB"
+msgstr "{} Go"
+
+msgid "{} MB"
+msgstr "{} Mo"
+
+msgid "{} → {}"
+msgstr "{} → {}"
+
+msgid "Earlier"
+msgstr "Plus tôt"
+
+msgid "Later"
+msgstr "Plus tard"
+
+msgid "Now"
+msgstr "Maintenant"
+
+msgid "Not available on this system yet."
+msgstr "Pas encore disponible sur ce système."
+
+msgid "Listening"
+msgstr "À l’écoute"
+
+msgid "Connected"
+msgstr "Connecté"
+
+msgid "Closing"
+msgstr "Fermeture"
+
+msgid "Other"
+msgstr "Autre"
+
+msgid "Port, process, PID or address"
+msgstr "Port, processus, PID ou adresse"
+
+msgid "Select a port to act on its process"
+msgstr "Sélectionnez un port pour agir sur son processus"
+
+msgid "{} · PID {} · {} {}"
+msgstr "{} · PID {} · {} {}"
+
+msgid "Process"
+msgstr "Processus"
+
+msgid "Protocol"
+msgstr "Protocole"
+
+msgid "Local address"
+msgstr "Adresse locale"
+
+msgid "Port"
+msgstr "Port"
+
+msgid "Remote"
+msgstr "Distante"
+
+msgid "State"
+msgstr "État"
+
+msgid "No open ports."
+msgstr "Aucun port ouvert."
+
+msgid "Nothing uses “{}”."
+msgstr "Rien n’utilise « {} »."
+
+msgid "System (closing)"
+msgstr "Système (fermeture)"
+
+msgid "Exited process"
+msgstr "Processus terminé"
+
+msgid "Service {}"
+msgstr "Service {}"
+
+msgid "Desktop shell"
+msgstr "Interface du bureau"
+
+msgid "Console program"
+msgstr "Programme console"
+
+msgid "Critical system process"
+msgstr "Processus système critique"
+
+msgid "App"
+msgstr "Application"
+
+msgid "Who is using this file?"
+msgstr "Qui utilise ce fichier ?"
+
+msgid "Drop to see who is using it"
+msgstr "Déposez pour voir qui l’utilise"
+
+msgid "Drop a file here"
+msgstr "Déposez un fichier ici"
+
+msgid "Vigie lists the programs that keep it open, so you can close them before deleting, moving or saving it."
+msgstr "Vigie liste les programmes qui le gardent ouvert, pour les fermer avant de le supprimer, le déplacer ou l’enregistrer."
+
+msgid "Or paste the path of a file"
+msgstr "Ou collez le chemin d’un fichier"
+
+msgid "Check"
+msgstr "Vérifier"
+
+msgid "No file at “{}”."
+msgstr "Aucun fichier à « {} »."
+
+msgid "“{}” is a folder. Only files can be checked; drop one of the files inside."
+msgstr "« {} » est un dossier. Seuls les fichiers peuvent être vérifiés ; déposez un des fichiers qu’il contient."
+
+msgid "Could not check “{}”."
+msgstr "Impossible de vérifier « {} »."
+
+msgid "No program is using “{}”."
+msgstr "Aucun programme n’utilise « {} »."
+
+msgid "Programs using “{}”:"
+msgstr "Programmes qui utilisent « {} » :"
+
+msgid "PID {}"
+msgstr "PID {}"
+
+msgid "Registry (you)"
+msgstr "Registre (vous)"
+
+msgid "Registry (all users)"
+msgstr "Registre (tous les utilisateurs)"
+
+msgid "Registry (all users, 32-bit)"
+msgstr "Registre (tous, 32 bits)"
+
+msgid "Startup folder (you)"
+msgstr "Dossier Démarrage (vous)"
+
+msgid "Startup folder (all users)"
+msgstr "Dossier Démarrage (tous)"
+
+msgid "Running"
+msgstr "En cours"
+
+msgid "Starting"
+msgstr "Démarrage"
+
+msgid "Stopping"
+msgstr "Arrêt en cours"
+
+msgid "Paused"
+msgstr "En pause"
+
+msgid "Stopped"
+msgstr "Arrêté"
+
+msgid "Automatic"
+msgstr "Automatique"
+
+msgid "Automatic (delayed)"
+msgstr "Automatique (différé)"
+
+msgid "Manual"
+msgstr "Manuel"
+
+msgid "Disabled"
+msgstr "Désactivé"
+
+msgid "Startup apps"
+msgstr "Applications au démarrage"
+
+msgid "Services"
+msgstr "Services"
+
+msgid "Refresh"
+msgstr "Actualiser"
+
+msgid "Registered in"
+msgstr "Enregistré dans"
+
+msgid "Status"
+msgstr "État"
+
+msgid "Reading…"
+msgstr "Lecture…"
+
+msgid "Enabled"
+msgstr "Activé"
+
+msgid "Disable"
+msgstr "Désactiver"
+
+msgid "Enable"
+msgstr "Activer"
+
+msgid "Lists the Run keys and the startup folders. Packaged apps that start with Windows and scheduled tasks are not listed yet. Disabling keeps the entry: enable it again at any time."
+msgstr "Liste les clés Run et les dossiers Démarrage. Les applications du Store qui démarrent avec Windows et les tâches planifiées n’y sont pas encore. Désactiver garde l’entrée : réactivez-la à tout moment."
+
+msgid "Search services"
+msgstr "Rechercher des services"
+
+msgid "Select a service to start or stop it"
+msgstr "Sélectionnez un service pour le démarrer ou l’arrêter"
+
+msgid "Start"
+msgstr "Démarrer"
+
+msgid "Stop"
+msgstr "Arrêter"
+
+msgid "Service"
+msgstr "Service"
+
+msgid "Startup type"
+msgstr "Type de démarrage"
+
+msgid "Starting and stopping most services needs Vigie to run as administrator."
+msgstr "Démarrer ou arrêter la plupart des services demande de lancer Vigie en administrateur."

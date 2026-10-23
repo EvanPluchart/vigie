@@ -36,6 +36,11 @@ impl Prefs {
         if let Some(interval) = options.interval {
             session.interval_ms = interval.as_millis() as u32;
         }
+        match options.lang.as_deref() {
+            Some("fr") => session.language = Language::French,
+            Some("en") => session.language = Language::English,
+            _ => {}
+        }
         if let Some(dark) = options.dark {
             session.theme = if dark { Theme::Dark } else { Theme::Light };
         }
@@ -225,6 +230,7 @@ pub fn select_language(language: Language) {
         }
     };
     let _ = slint::select_bundled_translation(code);
+    crate::model::set_french(code == "fr");
 }
 
 /// The user's language from the environment Slint reads; French when it starts with "fr".

@@ -142,21 +142,25 @@ component SortHeader inherits Rectangle {
     in property <int> sort-column;
     in property <bool> sort-ascending;
     in property <TextHorizontalAlignment> alignment: left;
-    // Machine-wide figure shown before the label, as Task Manager does ("34 % CPU").
+    // Machine-wide figure shown above the label, as Task Manager does ("34 %" over "CPU").
     in property <string> total;
     callback clicked(int);
     property <bool> active: column == sort-column;
 
-    HorizontalLayout {
-        alignment: root.alignment == TextHorizontalAlignment.right ? end : start;
-        spacing: Theme.space-1;
+    // Labels share the bottom line, with or without a total above.
+    VerticalLayout {
+        alignment: end;
+        padding-bottom: 6px;
         if root.total != "": HeaderCell {
             text: root.total;
             color: Theme.text;
+            font-size: Theme.font-body;
+            horizontal-alignment: root.alignment;
         }
         HeaderCell {
             text: root.active ? (root.sort-ascending ? root.label + " ↑" : root.label + " ↓") : root.label;
             color: root.active || touch.has-hover ? Theme.text : Theme.text-muted;
+            horizontal-alignment: root.alignment;
         }
     }
 
@@ -876,9 +880,10 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Right-click the header to choose the columns (also in the ··· menu).
+            // Right-click the header to choose the columns (also in the ··· menu). Two lines high:
+            // machine totals sit above the CPU and memory labels.
             ContextMenuArea {
-                height: Theme.bar-height;
+                height: 40px;
                 Menu {
                     MenuItem { title: @tr("Publisher"); checkable: true; checked: root.columns.publisher; activated => { root.columns.publisher = !root.columns.publisher; } }
                     MenuItem { title: @tr("PID"); checkable: true; checked: root.columns.pid; activated => { root.columns.pid = !root.columns.pid; } }
@@ -891,9 +896,11 @@ export component AppWindow inherits Window {
                         sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                         clicked(c) => { root.sort-clicked(c); }
                     }
-                    if root.columns.publisher: HeaderCell {
-                        text: @tr("Publisher");
+                    if root.columns.publisher: VerticalLayout {
                         width: 160px;
+                        alignment: end;
+                        padding-bottom: 6px;
+                        HeaderCell { text: @tr("Publisher"); }
                     }
                     if root.columns.pid: SortHeader {
                         label: @tr("PID"); column: 1; width: 72px; alignment: right;

@@ -8,7 +8,11 @@ fn main() {
         "macos" => "cupertino",
         _ => "cosmic",
     };
-    let config = slint_build::CompilerConfiguration::new().with_style(style.into());
+    // French is bundled (decision 0008); source strings are English, without contexts.
+    let config = slint_build::CompilerConfiguration::new()
+        .with_style(style.into())
+        .with_bundled_translations("translations")
+        .with_default_translation_context(slint_build::DefaultTranslationContext::None);
     slint_build::compile_with_config("ui/app.slint", config).expect("Slint UI compiles");
 
     // Explorer, the taskbar and Alt+Tab read the icon from the executable's resources.

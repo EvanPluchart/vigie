@@ -107,7 +107,7 @@ export component SettingsView inherits Rectangle {
                         label: @tr("Refresh every");
                         hint: @tr("Vigie slows down on its own in the background and when minimised.");
                         VSegment {
-                            labels: ["0.5 s", "1 s", "2 s", "5 s"];
+                            labels: [@tr("0.5 s"), "1 s", "2 s", "5 s"];
                             current <=> root.interval;
                             changed => { root.edited(); }
                         }

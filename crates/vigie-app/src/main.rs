@@ -8,6 +8,7 @@ mod desktop;
 mod model;
 mod prefs;
 mod sampler;
+mod translations;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -34,8 +35,9 @@ fn main() -> anyhow::Result<()> {
 
     // Settings from the file, with the flags on top for this session only (decision 0008).
     let (prefs, session) = prefs::Prefs::load(&options);
-    prefs::select_language(session.language);
     let app = AppWindow::new().context("creating the main window")?;
+    // Translations can only be chosen once a component exists.
+    prefs::select_language(session.language);
     app.invoke_set_scheme(prefs::scheme(session.theme));
     prefs::show(&app, &session);
     app.set_settings_path(prefs.path().into());

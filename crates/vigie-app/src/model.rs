@@ -771,7 +771,7 @@ fn finding_row(finding: &Finding) -> FindingRow {
             window_s,
         } => {
             row.kind = 1;
-            row.a = format!("{cores:.1}").into();
+            row.a = decimal(f64::from(*cores), 1).into();
             row.b = (window_s / 60).to_string().into();
             row.evidence = culprit_line(culprit).into();
         }
@@ -868,7 +868,7 @@ fn drive_letters(letters: u32) -> String {
 
 fn format_percent(value: Option<f32>) -> SharedString {
     match value {
-        Some(v) => format!("{v:.0} %").into(),
+        Some(v) => format!("{v:.0}\u{a0}%").into(),
         None => "—".into(),
     }
 }
@@ -880,11 +880,11 @@ fn format_bits(bytes_per_s: Option<f64>) -> SharedString {
     };
     let bits = bytes * 8.0;
     if bits >= 1e9 {
-        format!("{:.1} Gbps", bits / 1e9).into()
+        format!("{}\u{a0}{}", decimal(bits / 1e9, 1), unit("Gbps", "Gbit/s")).into()
     } else if bits >= 1e6 {
-        format!("{:.1} Mbps", bits / 1e6).into()
+        format!("{}\u{a0}{}", decimal(bits / 1e6, 1), unit("Mbps", "Mbit/s")).into()
     } else {
-        format!("{:.0} kbps", bits / 1e3).into()
+        format!("{:.0}\u{a0}{}", bits / 1e3, unit("kbps", "kbit/s")).into()
     }
 }
 
@@ -894,9 +894,14 @@ fn format_bytes_per_s(bytes_per_s: Option<f64>) -> SharedString {
     };
     const KB: f64 = 1024.0;
     if bytes >= KB * KB {
-        format!("{:.1} MB/s", bytes / (KB * KB)).into()
+        format!(
+            "{}\u{a0}{}",
+            decimal(bytes / (KB * KB), 1),
+            unit("MB/s", "Mo/s")
+        )
+        .into()
     } else {
-        format!("{:.0} KB/s", bytes / KB).into()
+        format!("{:.0}\u{a0}{}", bytes / KB, unit("KB/s", "Ko/s")).into()
     }
 }
 
@@ -1226,10 +1231,36 @@ pub fn step_selection(
     processes.get(target).copied()
 }
 
+/// Numbers and units follow the interface language (decision 0008): French uses a decimal
+/// comma and octets (Mo, Go). Set on the UI thread, read on the sampler thread.
+static FRENCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_french(french: bool) {
+    FRENCH.store(french, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn french() -> bool {
+    FRENCH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `value` with `places` decimals, with the language's decimal separator.
+fn decimal(value: f64, places: usize) -> String {
+    let text = format!("{value:.places$}");
+    if french() {
+        text.replace('.', ",")
+    } else {
+        text
+    }
+}
+
+fn unit(english: &'static str, french_unit: &'static str) -> &'static str {
+    if french() { french_unit } else { english }
+}
+
 /// "—" when there is no value yet, never a misleading 0.
 pub fn format_cpu(percent: Option<f32>) -> SharedString {
     match percent {
-        Some(p) => format!("{p:.1} %").into(),
+        Some(p) => format!("{}\u{a0}%", decimal(f64::from(p), 1)).into(),
         None => "—".into(),
     }
 }
@@ -1239,9 +1270,9 @@ pub fn format_memory(bytes: u64) -> SharedString {
     const MB: f64 = 1024.0 * 1024.0;
     let mb = bytes as f64 / MB;
     if mb < 1024.0 {
-        format!("{mb:.1} MB").into()
+        format!("{}\u{a0}{}", decimal(mb, 1), unit("MB", "Mo")).into()
     } else {
-        format!("{:.2} GB", mb / 1024.0).into()
+        format!("{}\u{a0}{}", decimal(mb / 1024.0, 2), unit("GB", "Go")).into()
     }
 }
 
@@ -1254,9 +1285,9 @@ pub fn format_total(percent: Option<f32>) -> SharedString {
 pub fn format_kilobytes(bytes: usize) -> SharedString {
     let kb = bytes as f64 / 1024.0;
     if kb < 1024.0 {
-        format!("{kb:.0} KB").into()
+        format!("{kb:.0}\u{a0}{}", unit("KB", "Ko")).into()
     } else {
-        format!("{:.1} MB", kb / 1024.0).into()
+        format!("{}\u{a0}{}", decimal(kb / 1024.0, 1), unit("MB", "Mo")).into()
     }
 }
 
@@ -1456,9 +1487,13 @@ mod tests {
     #[test]
     fn formats_values() {
         assert_eq!(format_cpu(None), "—");
-        assert_eq!(format_cpu(Some(12.345)), "12.3 %");
-        assert_eq!(format_memory(3 * 1024 * 1024 / 2), "1.5 MB");
-        assert_eq!(format_memory(3_800_000_000), "3.54 GB");
+        assert_eq!(format_cpu(Some(12.345)), "12.3\u{a0}%");
+        assert_eq!(format_memory(3 * 1024 * 1024 / 2), "1.5\u{a0}MB");
+        assert_eq!(format_memory(3_800_000_000), "3.54\u{a0}GB");
+        set_french(true);
+        assert_eq!(format_memory(3_800_000_000), "3,54\u{a0}Go");
+        assert_eq!(format_cpu(Some(12.345)), "12,3\u{a0}%");
+        set_french(false);
         assert_eq!(drive_letters(0b1100), "C: D:");
         assert_eq!(drive_letters(0), "");
         assert_eq!(format_duration(45 * 60), "45 min");
