@@ -1960,7 +1960,7 @@ export component AppWindow inherits Window {
                     }
                     // Scrolls when the window is short; every command fits in a normal one.
                     if root.palette-items.length > 0: ListView {
-                        height: min(root.palette-items.length * 32px, 416px);
+                        height: min(root.palette-items.length * 32px, 480px);
                         for item[i] in root.palette-items: Rectangle {
                             height: 32px;
                             border-radius: Theme.radius-control;

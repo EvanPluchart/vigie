@@ -560,7 +560,8 @@ fn main() -> anyhow::Result<()> {
 /// Commands of the palette (`PaletteText` in `ui/app.slint`) whose titles hold every word of
 /// `query`, then, when there is a query, searching processes for it.
 fn palette_items(app: &AppWindow, query: &str) -> Vec<PaletteItem> {
-    const COMMANDS: [i32; 13] = [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15];
+    // Views in rail order, then the actions.
+    const COMMANDS: [i32; 15] = [0, 1, 7, 8, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15];
     let text = app.global::<PaletteText>();
     let query = query.trim().to_lowercase();
     let mut items: Vec<PaletteItem> = COMMANDS

@@ -90,9 +90,11 @@ export component Graph inherits Rectangle {
             width: 1px;
             background: Theme.text-muted.with-alpha(0.5);
         }
-        if parent.width > 120px: Text {
+        Text {
             x: Theme.space-2;
             width: parent.width - 2 * Theme.space-2;
+            // Shown whole or not at all: a cut label reads as a glitch.
+            visible: self.preferred-width <= self.width;
             text: root.unrecorded-label;
             color: Theme.text-muted;
             font-size: Theme.font-caption;
