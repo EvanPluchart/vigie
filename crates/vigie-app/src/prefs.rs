@@ -7,11 +7,11 @@ use std::time::Duration;
 use vigie_core::alerts::Rules;
 use vigie_core::settings::{
     CPU_ALERT_MINUTES, CPU_ALERTS, Columns, INTERVALS_MS, Language, MEMORY_ALERTS, Settings, Theme,
-    index_of,
+    Widths, index_of,
 };
 
 use crate::cli::Options;
-use crate::{AppWindow, ColumnSet};
+use crate::{AppWindow, ColumnSet, ColumnWidths};
 
 /// The settings on disk, and what the view showed last (to tell what the user changed).
 pub struct Prefs {
@@ -51,6 +51,12 @@ impl Prefs {
                 pid: has("pid"),
                 cpu: has("cpu"),
                 memory: has("memory"),
+                status: has("status"),
+                user: has("user"),
+                description: has("description"),
+                io: has("io"),
+                threads: has("threads"),
+                handles: has("handles"),
             };
         }
         (
@@ -89,6 +95,15 @@ impl Prefs {
         }
         if now.columns != before.columns {
             saved.columns = now.columns;
+        }
+        if now.detail_columns != before.detail_columns {
+            saved.detail_columns = now.detail_columns;
+        }
+        if now.widths != before.widths {
+            saved.widths = now.widths;
+        }
+        if now.history_height != before.history_height {
+            saved.history_height = now.history_height;
         }
         if (
             now.alerts,
@@ -130,17 +145,57 @@ pub fn show(app: &AppWindow, s: &Settings) {
         Language::English => 1,
         Language::French => 2,
     });
-    app.set_columns(ColumnSet {
-        publisher: s.columns.publisher,
-        pid: s.columns.pid,
-        cpu: s.columns.cpu,
-        memory: s.columns.memory,
+    app.set_columns(column_set(&s.columns));
+    app.set_detail_columns(column_set(&s.detail_columns));
+    let w = |v: u16| f32::from(v);
+    app.set_widths(ColumnWidths {
+        publisher: w(s.widths.publisher),
+        pid: w(s.widths.pid),
+        cpu: w(s.widths.cpu),
+        memory: w(s.widths.memory),
+        status: w(s.widths.status),
+        user: w(s.widths.user),
+        description: w(s.widths.description),
+        io: w(s.widths.io),
+        threads: w(s.widths.threads),
+        handles: w(s.widths.handles),
     });
+    app.set_history_height(f32::from(s.history_height));
     app.set_setting_alerts(s.alerts);
     app.set_setting_cpu_alert(index_of(&CPU_ALERTS, s.cpu_alert, 2) as i32);
     app.set_setting_cpu_minutes(index_of(&CPU_ALERT_MINUTES, s.cpu_alert_minutes, 1) as i32);
     app.set_setting_memory_alert(index_of(&MEMORY_ALERTS, s.memory_alert, 2) as i32);
     app.set_setting_close_to_tray(s.close_to_tray);
+}
+
+fn column_set(c: &Columns) -> ColumnSet {
+    ColumnSet {
+        publisher: c.publisher,
+        pid: c.pid,
+        cpu: c.cpu,
+        memory: c.memory,
+        status: c.status,
+        user: c.user,
+        description: c.description,
+        io: c.io,
+        threads: c.threads,
+        handles: c.handles,
+    }
+}
+
+fn columns_of(c: &ColumnSet) -> Columns {
+    Columns {
+        publisher: c.publisher,
+        pid: c.pid,
+        cpu: c.cpu,
+        memory: c.memory,
+        status: c.status,
+        user: c.user,
+        description: c.description,
+        io: c.io,
+        threads: c.threads,
+        handles: c.handles,
+    }
 }
 
 /// What the view shows now.
@@ -151,7 +206,8 @@ pub fn read(app: &AppWindow, session: &Settings) -> Settings {
             .and_then(|i| choices.get(i).copied())
             .unwrap_or(current)
     }
-    let columns = app.get_columns();
+    let widths = app.get_widths();
+    let w = |v: f32| (v.round() as u16).clamp(Widths::MIN, Widths::MAX);
     Settings {
         // Unchanged in the view, an interval set by a flag (500, 1500…) stays as it is.
         interval_ms: {
@@ -172,12 +228,21 @@ pub fn read(app: &AppWindow, session: &Settings) -> Settings {
             2 => Language::French,
             _ => Language::System,
         },
-        columns: Columns {
-            publisher: columns.publisher,
-            pid: columns.pid,
-            cpu: columns.cpu,
-            memory: columns.memory,
+        columns: columns_of(&app.get_columns()),
+        detail_columns: columns_of(&app.get_detail_columns()),
+        widths: Widths {
+            publisher: w(widths.publisher),
+            pid: w(widths.pid),
+            cpu: w(widths.cpu),
+            memory: w(widths.memory),
+            status: w(widths.status),
+            user: w(widths.user),
+            description: w(widths.description),
+            io: w(widths.io),
+            threads: w(widths.threads),
+            handles: w(widths.handles),
         },
+        history_height: (app.get_history_height().round() as u16).clamp(150, 2000),
         alerts: app.get_setting_alerts(),
         cpu_alert: pick(&CPU_ALERTS, app.get_setting_cpu_alert(), session.cpu_alert),
         cpu_alert_minutes: pick(

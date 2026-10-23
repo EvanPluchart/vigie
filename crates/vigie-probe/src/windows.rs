@@ -25,8 +25,8 @@ use windows_sys::Win32::System::RemoteDesktop::{
 };
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::{
-    ALL_PROCESSOR_GROUPS, GetActiveProcessorCount, GetProcessTimes, OpenProcess,
-    PROCESS_QUERY_LIMITED_INFORMATION,
+    ALL_PROCESSOR_GROUPS, GetActiveProcessorCount, GetProcessIoCounters, GetProcessTimes,
+    IO_COUNTERS, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GW_OWNER, GWL_EXSTYLE, GetShellWindow, GetWindow, GetWindowLongW,
@@ -80,6 +80,68 @@ struct SystemProcessInfo {
     page_fault_count: u32,
     peak_working_set_size: usize,
     working_set_size: usize,
+    quota_peak_paged_pool_usage: usize,
+    quota_paged_pool_usage: usize,
+    quota_peak_non_paged_pool_usage: usize,
+    quota_non_paged_pool_usage: usize,
+    pagefile_usage: usize,
+    peak_pagefile_usage: usize,
+    private_page_count: usize,
+    read_operation_count: i64,
+    write_operation_count: i64,
+    other_operation_count: i64,
+    read_transfer_count: i64,
+    write_transfer_count: i64,
+    other_transfer_count: i64,
+}
+
+/// `SYSTEM_THREAD_INFORMATION`: the threads of a process follow its entry in the snapshot.
+#[repr(C)]
+struct SystemThreadInfo {
+    kernel_time: i64,
+    user_time: i64,
+    create_time: i64,
+    wait_time: u32,
+    start_address: usize,
+    unique_process: usize,
+    unique_thread: usize,
+    priority: i32,
+    base_priority: i32,
+    context_switches: u32,
+    thread_state: u32,
+    wait_reason: u32,
+}
+
+/// `KTHREAD_STATE::Waiting` and `KWAIT_REASON::Suspended`.
+const THREAD_WAITING: u32 = 5;
+const WAIT_SUSPENDED: u32 = 5;
+
+impl SystemProcessInfo {
+    /// Every thread waits because it was suspended. A process without threads is not.
+    fn suspended(&self) -> bool {
+        let count = self.number_of_threads as usize;
+        if count == 0 {
+            return false;
+        }
+        // SAFETY: the kernel writes `number_of_threads` thread entries right after the process
+        // entry, inside the same buffer.
+        let threads = unsafe {
+            std::slice::from_raw_parts(
+                (self as *const Self).add(1).cast::<SystemThreadInfo>(),
+                count,
+            )
+        };
+        threads
+            .iter()
+            .all(|t| t.thread_state == THREAD_WAITING && t.wait_reason == WAIT_SUSPENDED)
+    }
+
+    /// Bytes read and written by all I/O so far.
+    fn io_bytes(&self) -> u64 {
+        (self.read_transfer_count as u64)
+            .saturating_add(self.write_transfer_count as u64)
+            .saturating_add(self.other_transfer_count as u64)
+    }
 }
 
 /// `SYSTEM_BASICPROCESS_INFORMATION`, from the reverse-engineered NT headers (phnt).
@@ -198,6 +260,18 @@ fn read_handle(handle: &OwnedHandle) -> Option<(u64, u64, u64)> {
     ))
 }
 
+/// Bytes read and written by all I/O, from a process handle.
+fn read_io(handle: &OwnedHandle) -> Option<u64> {
+    // SAFETY: an all-zero IO_COUNTERS is valid; the handle has query rights.
+    let mut io: IO_COUNTERS = unsafe { std::mem::zeroed() };
+    // SAFETY: valid handle and out pointer.
+    (unsafe { GetProcessIoCounters(handle.as_raw_handle(), &mut io) } != 0).then(|| {
+        io.ReadTransferCount
+            .saturating_add(io.WriteTransferCount)
+            .saturating_add(io.OtherTransferCount)
+    })
+}
+
 /// What the probe knows about one live process.
 #[derive(Default)]
 struct Entry {
@@ -211,6 +285,11 @@ struct Entry {
     memory_bytes: u64,
     measured_at_ns: u64,
     session: Option<u32>,
+    threads: u32,
+    handles: u32,
+    suspended: bool,
+    io_bytes: u64,
+    io_measured_at_ns: u64,
     /// False until a first measurement exists.
     measured: bool,
     /// Tick counter value when last listed; older entries belong to exited processes.
@@ -242,6 +321,10 @@ pub struct WindowsProbe {
     sockets: Vec<u64>,
     /// Loaded on the first request for who holds a file.
     restart_manager: Option<crate::windows_locks::RestartManager>,
+    /// Read I/O counters from handles every tick (an I/O column is shown).
+    io_every_tick: bool,
+    /// Account names by SID, read once each.
+    accounts: HashMap<Vec<u8>, Option<String>>,
 }
 
 impl WindowsProbe {
@@ -277,6 +360,8 @@ impl WindowsProbe {
             sockets: Vec::new(),
             restart_manager: None,
             gpus: crate::windows_gpu::Gpus::discover(),
+            io_every_tick: false,
+            accounts: HashMap::new(),
         })
     }
 
@@ -293,6 +378,7 @@ impl WindowsProbe {
         }
         let tick = self.tick;
         let mut need_full = false;
+        let io_every_tick = self.io_every_tick;
         let entries = &mut self.entries;
         let spare_names = &mut self.spare_names;
         self.basic.for_each(|info: &SystemBasicProcessInfo| {
@@ -333,6 +419,10 @@ impl WindowsProbe {
                     entry.memory_bytes = memory;
                     entry.measured_at_ns = now_ns;
                     entry.measured = true;
+                    if io_every_tick && let Some(io) = entry.handle.as_ref().and_then(read_io) {
+                        entry.io_bytes = io;
+                        entry.io_measured_at_ns = now_ns;
+                    }
                 }
                 // Could not be opened, or exited since it was listed: the snapshot decides.
                 None => {
@@ -351,12 +441,14 @@ impl WindowsProbe {
         Ok(true)
     }
 
-    /// Reads the processes without a handle from one full snapshot.
+    /// Reads the processes without a handle from one full snapshot, and the slow-changing
+    /// figures (threads, handles, suspension, I/O) of every process.
     fn refresh_unopened(&mut self, now_ns: u64) -> Result<()> {
         self.full
             .query(SystemProcessInformation)
             .map_err(unavailable)?;
         let tick = self.tick;
+        let io_every_tick = self.io_every_tick;
         let entries = &mut self.entries;
         let mut first_values = false;
         self.full.for_each(|info: &SystemProcessInfo| {
@@ -367,7 +459,18 @@ impl WindowsProbe {
             if entry.seen == tick && entry.session.is_none() {
                 entry.session = Some(info.session_id);
             }
-            if entry.handle.is_some() || entry.seen != tick {
+            if entry.seen != tick {
+                return;
+            }
+            entry.threads = info.number_of_threads;
+            entry.handles = info.handle_count;
+            entry.suspended = info.suspended();
+            // Handles give I/O every tick when asked; the snapshot gives the rest.
+            if entry.handle.is_none() || !io_every_tick {
+                entry.io_bytes = info.io_bytes();
+                entry.io_measured_at_ns = now_ns;
+            }
+            if entry.handle.is_some() {
                 return;
             }
             first_values |= !entry.measured;
@@ -406,6 +509,11 @@ impl WindowsProbe {
             slot.measured_at_ns = now_ns;
             slot.session = Some(info.session_id);
             slot.has_window = windowed.contains(&pid);
+            slot.threads = info.number_of_threads;
+            slot.handles = info.handle_count;
+            slot.suspended = info.suspended();
+            slot.io_bytes = info.io_bytes();
+            slot.io_measured_at_ns = now_ns;
             set_name(&mut slot.name, &info.image_name);
             len += 1;
         });
@@ -577,6 +685,11 @@ impl Probe for WindowsProbe {
             slot.measured_at_ns = entry.measured_at_ns;
             slot.session = entry.session;
             slot.has_window = self.windowed.contains(&pid);
+            slot.threads = entry.threads;
+            slot.handles = entry.handles;
+            slot.suspended = entry.suspended;
+            slot.io_bytes = entry.io_bytes;
+            slot.io_measured_at_ns = entry.io_measured_at_ns;
             slot.name.clear();
             slot.name.push_str(&entry.name);
             len += 1;
@@ -585,8 +698,14 @@ impl Probe for WindowsProbe {
         Ok(())
     }
 
+    fn set_io_every_tick(&mut self, on: bool) {
+        self.io_every_tick = on;
+    }
+
     fn details(&mut self, pids: &[Pid], out: &mut Vec<ProcDetails>) -> Result<()> {
         out.clear();
+        // Accounts of every process at once, services included, without opening them.
+        let owners = crate::windows_accounts::process_owners(&mut self.accounts);
         for &pid in pids {
             // The handle kept for sampling, or a short-lived one (fallback mode keeps none).
             let entry = self.entries.get(&pid);
@@ -597,7 +716,17 @@ impl Probe for WindowsProbe {
                     temporary = open(pid);
                     match temporary.as_ref() {
                         Some(handle) => handle,
-                        None => continue,
+                        // Not ours to open (a service, say): its account is still known.
+                        None => {
+                            out.push(ProcDetails {
+                                pid,
+                                start_time: entry.map_or(0, |e| e.start_time),
+                                exe: None,
+                                command_line: Vec::new(),
+                                user: owners.get(&pid).cloned().flatten(),
+                            });
+                            continue;
+                        }
                     }
                 }
             };
@@ -607,6 +736,7 @@ impl Probe for WindowsProbe {
                 exe: windows_exe::image_path(handle),
                 // Read on demand (it means reading the other process's memory), not here.
                 command_line: Vec::new(),
+                user: owners.get(&pid).cloned().flatten(),
             });
         }
         Ok(())
@@ -702,6 +832,14 @@ mod tests {
             .iter()
             .find(|p| p.pid == pid)
             .expect("process")
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn snapshot_layouts_match_the_kernel() {
+        // From the NT headers: threads start right after the 0x100-byte process entry.
+        assert_eq!(size_of::<SystemProcessInfo>(), 0x100);
+        assert_eq!(size_of::<SystemThreadInfo>(), 0x50);
     }
 
     #[test]

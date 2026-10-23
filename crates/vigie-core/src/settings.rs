@@ -19,23 +19,127 @@ pub enum Language {
     French,
 }
 
-/// Optional columns of the process table.
+/// Optional columns of the process table (Name is always shown).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Columns {
     pub publisher: bool,
     pub pid: bool,
     pub cpu: bool,
     pub memory: bool,
+    /// Running or suspended.
+    pub status: bool,
+    /// The account the process runs as.
+    pub user: bool,
+    /// What the executable says it is.
+    pub description: bool,
+    /// All I/O, per second.
+    pub io: bool,
+    pub threads: bool,
+    pub handles: bool,
 }
 
 impl Default for Columns {
+    /// The Processes view, as Task Manager opens it.
     fn default() -> Self {
         Self {
             publisher: false,
             pid: true,
             cpu: true,
             memory: true,
+            status: true,
+            user: false,
+            description: false,
+            io: false,
+            threads: false,
+            handles: false,
         }
+    }
+}
+
+impl Columns {
+    /// The Details view, as Task Manager opens it.
+    pub fn details() -> Self {
+        Self {
+            publisher: false,
+            pid: true,
+            cpu: true,
+            memory: true,
+            status: true,
+            user: true,
+            description: true,
+            io: false,
+            threads: false,
+            handles: false,
+        }
+    }
+
+    /// Each column with its key in the settings file.
+    fn fields(&mut self) -> [(&'static str, &mut bool); 10] {
+        [
+            ("publisher", &mut self.publisher),
+            ("pid", &mut self.pid),
+            ("cpu", &mut self.cpu),
+            ("memory", &mut self.memory),
+            ("status", &mut self.status),
+            ("user", &mut self.user),
+            ("description", &mut self.description),
+            ("io", &mut self.io),
+            ("threads", &mut self.threads),
+            ("handles", &mut self.handles),
+        ]
+    }
+}
+
+/// Column widths in logical pixels; Name takes what is left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Widths {
+    pub publisher: u16,
+    pub pid: u16,
+    pub cpu: u16,
+    pub memory: u16,
+    pub status: u16,
+    pub user: u16,
+    pub description: u16,
+    pub io: u16,
+    pub threads: u16,
+    pub handles: u16,
+}
+
+impl Default for Widths {
+    fn default() -> Self {
+        Self {
+            publisher: 160,
+            pid: 72,
+            cpu: 88,
+            memory: 120,
+            status: 96,
+            user: 120,
+            description: 200,
+            io: 96,
+            threads: 72,
+            handles: 80,
+        }
+    }
+}
+
+impl Widths {
+    /// Narrowest and widest a column may be dragged to.
+    pub const MIN: u16 = 40;
+    pub const MAX: u16 = 600;
+
+    fn fields(&mut self) -> [(&'static str, &mut u16); 10] {
+        [
+            ("publisher", &mut self.publisher),
+            ("pid", &mut self.pid),
+            ("cpu", &mut self.cpu),
+            ("memory", &mut self.memory),
+            ("status", &mut self.status),
+            ("user", &mut self.user),
+            ("description", &mut self.description),
+            ("io", &mut self.io),
+            ("threads", &mut self.threads),
+            ("handles", &mut self.handles),
+        ]
     }
 }
 
@@ -45,7 +149,13 @@ pub struct Settings {
     pub interval_ms: u32,
     pub theme: Theme,
     pub language: Language,
+    /// Columns of the Processes view and of the Details view.
     pub columns: Columns,
+    pub detail_columns: Columns,
+    /// Widths shared by both views.
+    pub widths: Widths,
+    /// Height of the process history panel, in logical pixels.
+    pub history_height: u16,
     /// Notifications for critical findings and thresholds.
     pub alerts: bool,
     /// Total CPU threshold in percent, 0 for none, over `cpu_alert_minutes`.
@@ -64,6 +174,9 @@ impl Default for Settings {
             theme: Theme::System,
             language: Language::System,
             columns: Columns::default(),
+            detail_columns: Columns::details(),
+            widths: Widths::default(),
+            history_height: 280,
             alerts: true,
             cpu_alert: 90,
             cpu_alert_minutes: 2,
@@ -119,10 +232,11 @@ impl Settings {
                         _ => s.language,
                     }
                 }
-                "column_publisher" => s.columns.publisher = flag().unwrap_or(s.columns.publisher),
-                "column_pid" => s.columns.pid = flag().unwrap_or(s.columns.pid),
-                "column_cpu" => s.columns.cpu = flag().unwrap_or(s.columns.cpu),
-                "column_memory" => s.columns.memory = flag().unwrap_or(s.columns.memory),
+                "history_height" => {
+                    if let Some(v) = number().filter(|v| (150..=2000).contains(v)) {
+                        s.history_height = v as u16;
+                    }
+                }
                 "alerts" => s.alerts = flag().unwrap_or(s.alerts),
                 "cpu_alert" => {
                     if let Some(v) = number().and_then(|v| u8::try_from(v).ok())
@@ -146,7 +260,31 @@ impl Settings {
                     }
                 }
                 "close_to_tray" => s.close_to_tray = flag().unwrap_or(s.close_to_tray),
-                _ => {}
+                _ => {
+                    // column_NAME, detail_column_NAME and width_NAME.
+                    let set_flag = |columns: &mut Columns, name: &str| {
+                        for (key, field) in columns.fields() {
+                            if key == name {
+                                *field = flag().unwrap_or(*field);
+                            }
+                        }
+                    };
+                    if let Some(name) = key.strip_prefix("detail_column_") {
+                        set_flag(&mut s.detail_columns, name);
+                    } else if let Some(name) = key.strip_prefix("column_") {
+                        set_flag(&mut s.columns, name);
+                    } else if let Some(name) = key.strip_prefix("width_") {
+                        for (key, field) in s.widths.fields() {
+                            if key == name
+                                && let Some(v) = number()
+                                    .and_then(|v| u16::try_from(v).ok())
+                                    .filter(|v| (Widths::MIN..=Widths::MAX).contains(v))
+                            {
+                                *field = v;
+                            }
+                        }
+                    }
+                }
             }
         }
         s
@@ -167,10 +305,18 @@ impl Settings {
         let _ = writeln!(out, "interval_ms = {}", self.interval_ms);
         let _ = writeln!(out, "theme = {theme}");
         let _ = writeln!(out, "language = {language}");
-        let _ = writeln!(out, "column_publisher = {}", self.columns.publisher);
-        let _ = writeln!(out, "column_pid = {}", self.columns.pid);
-        let _ = writeln!(out, "column_cpu = {}", self.columns.cpu);
-        let _ = writeln!(out, "column_memory = {}", self.columns.memory);
+        let (mut columns, mut details, mut widths) =
+            (self.columns, self.detail_columns, self.widths);
+        for (key, value) in columns.fields() {
+            let _ = writeln!(out, "column_{key} = {value}");
+        }
+        for (key, value) in details.fields() {
+            let _ = writeln!(out, "detail_column_{key} = {value}");
+        }
+        for (key, value) in widths.fields() {
+            let _ = writeln!(out, "width_{key} = {value}");
+        }
+        let _ = writeln!(out, "history_height = {}", self.history_height);
         let _ = writeln!(out, "alerts = {}", self.alerts);
         let _ = writeln!(out, "cpu_alert = {}", self.cpu_alert);
         let _ = writeln!(out, "cpu_alert_minutes = {}", self.cpu_alert_minutes);
@@ -198,9 +344,18 @@ mod tests {
             columns: Columns {
                 publisher: true,
                 pid: false,
-                cpu: true,
-                memory: true,
+                threads: true,
+                ..Columns::default()
             },
+            detail_columns: Columns {
+                io: true,
+                ..Columns::details()
+            },
+            widths: Widths {
+                description: 320,
+                ..Widths::default()
+            },
+            history_height: 400,
             alerts: false,
             cpu_alert: 95,
             cpu_alert_minutes: 5,
@@ -217,7 +372,7 @@ mod tests {
     #[test]
     fn bad_input_keeps_defaults() {
         let parsed = Settings::parse(
-            "interval_ms = 3\ntheme = purple\n\u{0}garbage\nalerts = maybe\ncpu_alert = 300\nunknown = 1\nlanguage=fr",
+            "interval_ms = 3\ntheme = purple\n\u{0}garbage\nalerts = maybe\ncpu_alert = 300\nunknown = 1\nlanguage=fr\nwidth_pid = 9000\ncolumn_nope = true\nhistory_height = 3",
         );
         assert_eq!(
             parsed,

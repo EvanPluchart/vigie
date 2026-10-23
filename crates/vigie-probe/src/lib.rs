@@ -4,6 +4,8 @@ mod sysinfo_probe;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
+mod windows_accounts;
+#[cfg(windows)]
 mod windows_actions;
 #[cfg(windows)]
 mod windows_exe;
@@ -76,6 +78,15 @@ pub struct ProcSample {
     pub session: Option<u32>,
     /// Owns a visible top-level window: an app the user sees.
     pub has_window: bool,
+    /// Threads and open handles. Refreshed every few seconds; 0 where unknown.
+    pub threads: u32,
+    pub handles: u32,
+    /// Every thread is suspended (by a debugger, by Task Manager, or a suspended Store app).
+    pub suspended: bool,
+    /// Bytes read and written so far by all I/O (files, devices, network), and when they were
+    /// read (same clock as `measured_at_ns`; 0 while unknown).
+    pub io_bytes: u64,
+    pub io_measured_at_ns: u64,
 }
 
 /// Filled in place by `Probe::sample`, so buffers are reused between ticks.
@@ -138,6 +149,8 @@ pub struct ProcDetails {
     pub start_time: u64,
     pub exe: Option<PathBuf>,
     pub command_line: Vec<String>,
+    /// The account the process runs as ("pluch", "SYSTEM", "LOCAL SERVICE").
+    pub user: Option<String>,
 }
 
 /// Monotonic times of one logical core since boot, in nanoseconds.
@@ -376,6 +389,9 @@ pub struct ExeInfo {
 pub trait Probe: Send {
     /// One pass over the system. Cheap fields only: called every tick.
     fn sample(&mut self, out: &mut Sample) -> Result<()>;
+    /// Reads I/O counters every tick (true) or only every few seconds. Costs one more system
+    /// call per process and tick: turn it on only while an I/O figure is shown.
+    fn set_io_every_tick(&mut self, _on: bool) {}
     /// Expensive, rarely changing fields (exe path, command line, publisher, icon key) for some PIDs.
     /// Processes that cannot be read are left out.
     fn details(&mut self, pids: &[Pid], out: &mut Vec<ProcDetails>) -> Result<()>;

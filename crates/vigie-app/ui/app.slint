@@ -109,6 +109,15 @@ export struct ProcRow {
     memory: string,
     cpu-heat: int,
     memory-heat: int,
+    // Optional columns: every thread suspended, the account, what the program says it is, all
+    // I/O per second with its heat, threads and handles (empty for section headers).
+    suspended: bool,
+    user: string,
+    description: string,
+    io: string,
+    io-heat: int,
+    threads: string,
+    handles: string,
 }
 
 // Optional columns; Name is always shown.
@@ -117,6 +126,26 @@ export struct ColumnSet {
     pid: bool,
     cpu: bool,
     memory: bool,
+    status: bool,
+    user: bool,
+    description: bool,
+    io: bool,
+    threads: bool,
+    handles: bool,
+}
+
+// Widths of the optional columns, dragged from the dividers in the header; Name takes the rest.
+export struct ColumnWidths {
+    publisher: length,
+    pid: length,
+    cpu: length,
+    memory: length,
+    status: length,
+    user: length,
+    description: length,
+    io: length,
+    threads: length,
+    handles: length,
 }
 
 component Cell inherits Text {
@@ -168,6 +197,10 @@ component SortHeader inherits Rectangle {
     callback clicked(int);
     // Right click, at this point of the window.
     callback menu(length, length);
+    // A divider on the left edge drags the column's width (Name, which stretches, has none).
+    in property <bool> resizable;
+    callback resized(length);
+    callback resize-done();
     property <bool> active: column == sort-column;
 
     // Labels share the bottom line, with or without a total above.
@@ -188,11 +221,35 @@ component SortHeader inherits Rectangle {
     }
 
     touch := TouchArea {
-        mouse-cursor: pointer;
+        mouse-cursor: root.column >= 0 ? pointer : default;
         clicked => { root.clicked(root.column); }
         pointer-event(event) => {
             if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
                 root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+    // The divider sits in the gap before the column; its grip covers the column's left edge.
+    if root.resizable: Rectangle {
+        x: 0;
+        width: 8px;
+        Rectangle {
+            x: -6px;
+            y: (parent.height - self.height) / 2 + 4px;
+            width: 1px;
+            height: 18px;
+            background: grip.has-hover || grip.pressed ? Theme.accent : Theme.border;
+        }
+        grip := TouchArea {
+            mouse-cursor: MouseCursor.col-resize;
+            // The edge follows the pointer, so each move resizes by the distance from the grab.
+            moved => {
+                if (self.pressed) {
+                    root.resized(clamp(root.width - (self.mouse-x - self.pressed-x), 40px, 600px));
+                }
+            }
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.up) { root.resize-done(); }
             }
         }
     }
@@ -244,6 +301,9 @@ component ProcessLine inherits Rectangle {
     in property <ProcRow> item;
     in property <image> icon;
     in property <ColumnSet> columns;
+    in property <ColumnWidths> widths;
+    // The Details view says "Running" too; the Processes view only marks suspended processes.
+    in property <bool> details;
     callback toggle(int);
     Columns {
         HorizontalLayout {
@@ -294,10 +354,16 @@ component ProcessLine inherits Rectangle {
                 horizontal-stretch: 1;
             }
         }
-        if root.columns.publisher: Cell { text: root.item.publisher; width: 160px; color: Theme.text-muted; }
-        if root.columns.pid: Cell { text: root.item.pid; width: 72px; horizontal-alignment: right; color: Theme.text-muted; }
-        if root.columns.cpu: HeatCell { text: root.item.cpu; heat: root.item.cpu-heat; width: 88px; }
-        if root.columns.memory: HeatCell { text: root.item.memory; heat: root.item.memory-heat; width: 120px; }
+        if root.columns.status: Cell { text: root.item.suspended ? @tr("Suspended") : root.details ? @tr("Running") : ""; width: root.widths.status; color: root.item.suspended ? Theme.warning : Theme.text-muted; }
+        if root.columns.publisher: Cell { text: root.item.publisher; width: root.widths.publisher; color: Theme.text-muted; }
+        if root.columns.user: Cell { text: root.item.user; width: root.widths.user; color: Theme.text-muted; }
+        if root.columns.description: Cell { text: root.item.description; width: root.widths.description; color: Theme.text-muted; }
+        if root.columns.pid: Cell { text: root.item.pid; width: root.widths.pid; horizontal-alignment: right; color: Theme.text-muted; }
+        if root.columns.threads: Cell { text: root.item.threads; width: root.widths.threads; horizontal-alignment: right; color: Theme.text-muted; }
+        if root.columns.handles: Cell { text: root.item.handles; width: root.widths.handles; horizontal-alignment: right; color: Theme.text-muted; }
+        if root.columns.cpu: HeatCell { text: root.item.cpu; heat: root.item.cpu-heat; width: root.widths.cpu; }
+        if root.columns.memory: HeatCell { text: root.item.memory; heat: root.item.memory-heat; width: root.widths.memory; }
+        if root.columns.io: HeatCell { text: root.item.io; heat: root.item.io-heat; width: root.widths.io; }
     }
 }
 
@@ -524,7 +590,11 @@ export component AppWindow inherits Window {
     in property <int> sort-column: 0;
     in property <bool> sort-ascending: true;
     in-out property <string> search-text;
-    in-out property <ColumnSet> columns: { publisher: false, pid: true, cpu: true, memory: true };
+    in-out property <ColumnSet> columns: { publisher: false, pid: true, cpu: true, memory: true, status: true };
+    in-out property <ColumnSet> detail-columns: { pid: true, cpu: true, memory: true, status: true, user: true, description: true };
+    in-out property <ColumnWidths> widths: { publisher: 160px, pid: 72px, cpu: 88px, memory: 120px, status: 96px, user: 120px, description: 200px, io: 96px, threads: 72px, handles: 80px };
+    // The columns of the view shown: Processes or Details.
+    property <ColumnSet> cols: root.tab == 7 ? root.detail-columns : root.columns;
     // The selected process. Rust keeps `selected` up to date as rows refresh, and clears
     // `has-selection` when the process leaves the table.
     in-out property <bool> has-selection;
@@ -634,6 +704,7 @@ export component AppWindow inherits Window {
     callback taskmgr-toggled(bool);
     callback taskmgr-repair();
     changed columns => { root.settings-edited(); }
+    changed detail-columns => { root.settings-edited(); }
     // Command palette: the matching commands, filtered by Rust (src/main.rs).
     in-out property <bool> palette-open;
     in-out property <string> palette-text;
@@ -713,10 +784,18 @@ export component AppWindow inherits Window {
 
     function column-entries() -> [MenuEntry] {
         return [
-            { id: 200, title: @tr("Publisher"), checkable: true, checked: root.columns.publisher },
-            { id: 201, title: @tr("PID"), checkable: true, checked: root.columns.pid },
-            { id: 202, title: @tr("CPU"), checkable: true, checked: root.columns.cpu },
-            { id: 203, title: @tr("Memory"), checkable: true, checked: root.columns.memory },
+            { id: 200, title: @tr("Status"), checkable: true, checked: root.cols.status },
+            { id: 201, title: @tr("Publisher"), checkable: true, checked: root.cols.publisher },
+            { id: 202, title: @tr("User name"), checkable: true, checked: root.cols.user },
+            { id: 203, title: @tr("Description"), checkable: true, checked: root.cols.description },
+            { id: 204, title: @tr("PID"), checkable: true, checked: root.cols.pid },
+            { id: 205, title: @tr("Threads"), checkable: true, checked: root.cols.threads },
+            { id: 206, title: @tr("Handles"), checkable: true, checked: root.cols.handles },
+            { id: 207, title: @tr("CPU"), checkable: true, checked: root.cols.cpu },
+            { id: 208, title: @tr("Memory"), checkable: true, checked: root.cols.memory },
+            { id: 209, title: @tr("I/O"), checkable: true, checked: root.cols.io },
+            { separator: true },
+            { id: 230, title: @tr("Reset column widths") },
         ];
     }
 
@@ -868,10 +947,20 @@ export component AppWindow inherits Window {
             root.show-tab(0);
         }
         else if (id == 122) { root.show-about(); }
-        else if (id == 200) { root.columns.publisher = !root.columns.publisher; }
-        else if (id == 201) { root.columns.pid = !root.columns.pid; }
-        else if (id == 202) { root.columns.cpu = !root.columns.cpu; }
-        else if (id == 203) { root.columns.memory = !root.columns.memory; }
+        else if (id == 200) { if (root.tab == 7) { root.detail-columns.status = !root.detail-columns.status; } else { root.columns.status = !root.columns.status; } }
+        else if (id == 201) { if (root.tab == 7) { root.detail-columns.publisher = !root.detail-columns.publisher; } else { root.columns.publisher = !root.columns.publisher; } }
+        else if (id == 202) { if (root.tab == 7) { root.detail-columns.user = !root.detail-columns.user; } else { root.columns.user = !root.columns.user; } }
+        else if (id == 203) { if (root.tab == 7) { root.detail-columns.description = !root.detail-columns.description; } else { root.columns.description = !root.columns.description; } }
+        else if (id == 204) { if (root.tab == 7) { root.detail-columns.pid = !root.detail-columns.pid; } else { root.columns.pid = !root.columns.pid; } }
+        else if (id == 205) { if (root.tab == 7) { root.detail-columns.threads = !root.detail-columns.threads; } else { root.columns.threads = !root.columns.threads; } }
+        else if (id == 206) { if (root.tab == 7) { root.detail-columns.handles = !root.detail-columns.handles; } else { root.columns.handles = !root.columns.handles; } }
+        else if (id == 207) { if (root.tab == 7) { root.detail-columns.cpu = !root.detail-columns.cpu; } else { root.columns.cpu = !root.columns.cpu; } }
+        else if (id == 208) { if (root.tab == 7) { root.detail-columns.memory = !root.detail-columns.memory; } else { root.columns.memory = !root.columns.memory; } }
+        else if (id == 209) { if (root.tab == 7) { root.detail-columns.io = !root.detail-columns.io; } else { root.columns.io = !root.columns.io; } }
+        else if (id == 230) {
+            root.widths = { publisher: 160px, pid: 72px, cpu: 88px, memory: 120px, status: 96px, user: 120px, description: 200px, io: 96px, threads: 72px, handles: 80px };
+            root.layout-edited();
+        }
         else if (id == 300) {
             root.grouped = !root.grouped;
             root.grouped-changed(root.grouped);
@@ -1180,34 +1269,90 @@ export component AppWindow inherits Window {
                 }
                 Columns {
                     SortHeader {
-                        label: @tr("Name"); column: 0; horizontal-stretch: 1;
+                        label: @tr("Name"); column: 0; horizontal-stretch: 1; min-width: 120px;
                         sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                         clicked(c) => { root.sort-clicked(c); }
                         menu(x, y) => { root.open-menu(2, x, y); }
                     }
-                    if root.columns.publisher: VerticalLayout {
-                        width: 160px;
-                        alignment: end;
-                        padding-bottom: 6px;
-                        HeaderCell { text: @tr("Publisher"); }
-                    }
-                    if root.columns.pid: SortHeader {
-                        label: @tr("PID"); column: 1; width: 72px; alignment: right;
-                        sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                    if root.cols.status: SortHeader {
+                        label: @tr("Status"); column: 7; width: root.widths.status;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
                         clicked(c) => { root.sort-clicked(c); }
                         menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.status = w; }
+                        resize-done => { root.layout-edited(); }
                     }
-                    if root.columns.cpu: SortHeader {
-                        label: @tr("CPU"); column: 2; width: 88px; alignment: right; total: root.total-cpu;
-                        sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                    if root.cols.publisher: SortHeader {
+                        label: @tr("Publisher"); column: -1; width: root.widths.publisher;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
                         clicked(c) => { root.sort-clicked(c); }
                         menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.publisher = w; }
+                        resize-done => { root.layout-edited(); }
                     }
-                    if root.columns.memory: SortHeader {
-                        label: @tr("Memory"); column: 3; width: 120px; alignment: right; total: root.total-memory;
-                        sort-column: root.sort-column; sort-ascending: root.sort-ascending;
+                    if root.cols.user: SortHeader {
+                        label: @tr("User name"); column: -1; width: root.widths.user;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
                         clicked(c) => { root.sort-clicked(c); }
                         menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.user = w; }
+                        resize-done => { root.layout-edited(); }
+                    }
+                    if root.cols.description: SortHeader {
+                        label: @tr("Description"); column: -1; width: root.widths.description;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
+                        clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.description = w; }
+                        resize-done => { root.layout-edited(); }
+                    }
+                    if root.cols.pid: SortHeader {
+                        label: @tr("PID"); column: 1; width: root.widths.pid; alignment: right;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
+                        clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.pid = w; }
+                        resize-done => { root.layout-edited(); }
+                    }
+                    if root.cols.threads: SortHeader {
+                        label: @tr("Threads"); column: 5; width: root.widths.threads; alignment: right;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
+                        clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.threads = w; }
+                        resize-done => { root.layout-edited(); }
+                    }
+                    if root.cols.handles: SortHeader {
+                        label: @tr("Handles"); column: 6; width: root.widths.handles; alignment: right;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
+                        clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.handles = w; }
+                        resize-done => { root.layout-edited(); }
+                    }
+                    if root.cols.cpu: SortHeader {
+                        label: @tr("CPU"); column: 2; width: root.widths.cpu; alignment: right; total: root.total-cpu;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
+                        clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.cpu = w; }
+                        resize-done => { root.layout-edited(); }
+                    }
+                    if root.cols.memory: SortHeader {
+                        label: @tr("Memory"); column: 3; width: root.widths.memory; alignment: right; total: root.total-memory;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
+                        clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.memory = w; }
+                        resize-done => { root.layout-edited(); }
+                    }
+                    if root.cols.io: SortHeader {
+                        label: @tr("I/O"); column: 4; width: root.widths.io; alignment: right;
+                        sort-column: root.sort-column; sort-ascending: root.sort-ascending; resizable: true;
+                        clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
+                        resized(w) => { root.widths.io = w; }
+                        resize-done => { root.layout-edited(); }
                     }
                 }
                 Rectangle {
@@ -1293,7 +1438,9 @@ export component AppWindow inherits Window {
                             ProcessLine {
                                 item: row;
                                 icon: root.icons[row.icon];
-                                columns: root.columns;
+                                columns: root.cols;
+                                widths: root.widths;
+                                details: root.tab == 7;
                                 toggle(pid) => { root.toggle-clicked(pid); }
                             }
                         }

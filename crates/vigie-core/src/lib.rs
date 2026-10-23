@@ -28,6 +28,12 @@ pub enum SortKey {
     Memory,
     Name,
     Pid,
+    /// All I/O, in bytes per second.
+    Io,
+    Threads,
+    Handles,
+    /// Suspended processes first when descending.
+    Status,
 }
 
 impl SortKey {
@@ -92,9 +98,19 @@ pub struct Row {
     /// Percentage of the whole machine (all logical cores). `None` on a process's first sample.
     pub cpu_percent: Option<f32>,
     pub memory_bytes: u64,
+    /// All I/O (files, devices, network), in bytes per second. `None` until measured twice.
+    pub io_bytes_per_s: Option<f32>,
+    pub threads: u32,
+    pub handles: u32,
+    pub suspended: bool,
+    /// The account the process runs as.
+    pub user: Option<Arc<str>>,
+    /// What the executable says it is ("Brave Browser").
+    pub description: Option<Arc<str>>,
     /// 0 (cool) to 3 (hot), for background tints.
     pub cpu_heat: u8,
     pub memory_heat: u8,
+    pub io_heat: u8,
     /// Indentation level in the tree.
     pub depth: u8,
     /// Group: processes in it. Process: its descendants.
@@ -122,12 +138,15 @@ pub struct Details {
     pub publisher: Option<Arc<str>>,
     pub description: Option<Arc<str>>,
     pub path: Option<Arc<str>>,
+    pub user: Option<Arc<str>>,
 }
 
 /// Heat thresholds: CPU in percent of the whole machine, memory in percent of physical memory.
 /// One busy core on a 16-thread machine is about 6 %, so it reads as warm, not hot.
 pub const CPU_HEAT: [f32; 3] = [2.0, 10.0, 30.0];
 pub const MEMORY_HEAT: [f32; 3] = [2.0, 5.0, 15.0];
+/// I/O in megabytes per second: a copy or a download in progress reads as warm.
+pub const IO_HEAT: [f32; 3] = [1.0, 10.0, 50.0];
 
 /// 0 below the first threshold, then 1, 2 or 3.
 pub fn heat(value: f32, thresholds: [f32; 3]) -> u8 {
@@ -150,6 +169,9 @@ struct Measure {
     cpu_ns: u64,
     at_ns: u64,
     percent: Option<f32>,
+    io_bytes: u64,
+    io_at_ns: u64,
+    io_rate: Option<f32>,
 }
 
 /// Turns successive samples into frames.
@@ -372,12 +394,24 @@ impl Core {
                 ),
                 None => None,
             };
+            let io_rate = match self.prev.get(&key) {
+                _ if p.io_measured_at_ns == 0 => None,
+                Some(prev) if prev.io_at_ns == p.io_measured_at_ns => prev.io_rate,
+                Some(prev) if prev.io_at_ns > 0 && p.io_measured_at_ns > prev.io_at_ns => {
+                    let seconds = (p.io_measured_at_ns - prev.io_at_ns) as f64 / 1e9;
+                    Some((p.io_bytes.saturating_sub(prev.io_bytes) as f64 / seconds) as f32)
+                }
+                _ => None,
+            };
             self.next.insert(
                 key,
                 Measure {
                     cpu_ns: p.cpu_time_ns,
                     at_ns: p.measured_at_ns,
                     percent: cpu_percent,
+                    io_bytes: p.io_bytes,
+                    io_at_ns: p.io_measured_at_ns,
+                    io_rate,
                 },
             );
             self.starts.insert(p.pid, p.start_time);
@@ -390,6 +424,7 @@ impl Core {
             nodes.push(Node {
                 p,
                 cpu: cpu_percent,
+                io: io_rate,
             });
         }
         std::mem::swap(&mut self.prev, &mut self.next);
@@ -480,8 +515,19 @@ impl Core {
                 name: display_name(node).to_owned(),
                 cpu_percent: figures.cpu,
                 memory_bytes: figures.memory,
+                io_bytes_per_s: figures.io,
+                threads: figures.threads,
+                handles: figures.handles,
+                suspended: p.suspended,
+                user: details
+                    .get(&(p.pid, p.start_time))
+                    .and_then(|d| d.user.clone()),
+                description: details
+                    .get(&(p.pid, p.start_time))
+                    .and_then(|d| d.description.clone()),
                 cpu_heat: figures.cpu.map_or(0, |c| heat(c, CPU_HEAT)),
                 memory_heat: heat(memory_share(figures.memory, total_memory), MEMORY_HEAT),
+                io_heat: figures.io.map_or(0, |b| heat(b / 1_048_576.0, IO_HEAT)),
                 depth,
                 count,
                 expanded,
@@ -502,8 +548,15 @@ impl Core {
                     name: String::new(),
                     cpu_percent: None,
                     memory_bytes: 0,
+                    io_bytes_per_s: None,
+                    threads: 0,
+                    handles: 0,
+                    suspended: false,
+                    user: None,
+                    description: None,
                     cpu_heat: 0,
                     memory_heat: 0,
+                    io_heat: 0,
                     depth: 0,
                     count: count as u32,
                     expanded: !collapsed,
@@ -519,20 +572,14 @@ impl Core {
                     let figures = if total {
                         tree.totals[node]
                     } else {
-                        Figures {
-                            cpu: nodes[node].cpu,
-                            memory: p.memory_bytes,
-                        }
+                        Figures::of(&nodes[node])
                     };
                     let expanded = self.expanded.contains(&(p.pid, p.start_time));
                     let count = if total { tree.descendants[node] } else { 0 };
                     row(RowKind::Process, node, depth, figures, count, expanded)
                 }
                 Entry::Itself { node, depth } => {
-                    let figures = Figures {
-                        cpu: nodes[node].cpu,
-                        memory: nodes[node].p.memory_bytes,
-                    };
+                    let figures = Figures::of(&nodes[node]);
                     row(RowKind::Itself, node, depth, figures, 0, false)
                 }
             })
@@ -614,6 +661,7 @@ mod tests {
             measured_at_ns: 0,
             session: None,
             has_window: false,
+            ..ProcSample::default()
         }
     }
 
@@ -929,6 +977,53 @@ mod tests {
     }
 
     #[test]
+    fn io_rates_threads_and_status() {
+        let io = |pid, bytes, at_s: u64, threads| ProcSample {
+            io_bytes: bytes,
+            io_measured_at_ns: at_s * SEC,
+            threads,
+            handles: threads * 10,
+            suspended: pid == 2,
+            ..proc(pid, 0, "p", 0, 1)
+        };
+        let mut core = Core::new(
+            Sort {
+                key: SortKey::Io,
+                ascending: false,
+            },
+            "",
+        );
+        let first = core.update(&sample(SEC, vec![io(1, 0, 1, 4), io(2, 0, 1, 2)]));
+        assert_eq!(
+            row(&first, 1).io_bytes_per_s,
+            None,
+            "one reading gives no rate"
+        );
+        let frame = core.update(&sample(
+            3 * SEC,
+            vec![io(1, 4_000_000, 3, 4), io(2, 1_000_000, 3, 2)],
+        ));
+        assert_eq!(pids(&frame), [1, 2], "busiest I/O first");
+        assert_eq!(row(&frame, 1).io_bytes_per_s, Some(2_000_000.0));
+        assert_eq!((row(&frame, 1).threads, row(&frame, 1).handles), (4, 40));
+        assert!(row(&frame, 2).suspended && !row(&frame, 1).suspended);
+        core.set_sort(Sort {
+            key: SortKey::Status,
+            ascending: false,
+        });
+        let frame = core.update(&sample(
+            4 * SEC,
+            vec![io(1, 4_000_000, 3, 4), io(2, 1_000_000, 3, 2)],
+        ));
+        assert_eq!(pids(&frame), [2, 1], "suspended first");
+        assert_eq!(
+            row(&frame, 1).io_bytes_per_s,
+            Some(2_000_000.0),
+            "an unchanged reading keeps its rate"
+        );
+    }
+
+    #[test]
     fn flat_lists_every_process_alone() {
         let mut core = by_memory();
         core.set_flat(true);
@@ -1022,6 +1117,7 @@ mod tests {
                 publisher: Some("Lagoon Labs".into()),
                 description: Some("App Deluxe".into()),
                 path: None,
+                user: None,
             },
         );
         for pid in core.missing_details(&s) {

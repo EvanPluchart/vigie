@@ -18,10 +18,12 @@ pub enum Group {
     All,
 }
 
-/// One process with its CPU % for this tick.
+/// One process with its CPU % and I/O rate for this tick.
 pub(crate) struct Node<'a> {
     pub p: &'a ProcSample,
     pub cpu: Option<f32>,
+    /// Bytes per second of all I/O.
+    pub io: Option<f32>,
 }
 
 /// What a row shows: the process alone, or the total of its subtree.
@@ -29,15 +31,36 @@ pub(crate) struct Node<'a> {
 pub(crate) struct Figures {
     pub cpu: Option<f32>,
     pub memory: u64,
+    pub io: Option<f32>,
+    pub threads: u32,
+    pub handles: u32,
+}
+
+fn add_option(a: Option<f32>, b: Option<f32>) -> Option<f32> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a + b),
+        (a, b) => a.or(b),
+    }
 }
 
 impl Figures {
+    /// The process alone.
+    pub(crate) fn of(node: &Node) -> Figures {
+        Figures {
+            cpu: node.cpu,
+            memory: node.p.memory_bytes,
+            io: node.io,
+            threads: node.p.threads,
+            handles: node.p.handles,
+        }
+    }
+
     fn add(&mut self, other: Figures) {
-        self.cpu = match (self.cpu, other.cpu) {
-            (Some(a), Some(b)) => Some(a + b),
-            (a, b) => a.or(b),
-        };
+        self.cpu = add_option(self.cpu, other.cpu);
         self.memory += other.memory;
+        self.io = add_option(self.io, other.io);
+        self.threads += other.threads;
+        self.handles += other.handles;
     }
 }
 
@@ -126,13 +149,7 @@ pub(crate) fn build(
         }
     }
 
-    let own: Vec<Figures> = nodes
-        .iter()
-        .map(|n| Figures {
-            cpu: n.cpu,
-            memory: n.p.memory_bytes,
-        })
-        .collect();
+    let own: Vec<Figures> = nodes.iter().map(Figures::of).collect();
     let mut totals = own.clone();
     let mut descendants = vec![0u32; nodes.len()];
     let mut reached = vec![false; nodes.len()];
@@ -174,6 +191,10 @@ pub(crate) fn build(
                 crate::lowercase(&nodes[a].p.name).cmp(crate::lowercase(&nodes[b].p.name))
             }
             SortKey::Pid => nodes[a].p.pid.cmp(&nodes[b].p.pid),
+            SortKey::Io => fa.io.unwrap_or(-1.0).total_cmp(&fb.io.unwrap_or(-1.0)),
+            SortKey::Threads => fa.threads.cmp(&fb.threads),
+            SortKey::Handles => fa.handles.cmp(&fb.handles),
+            SortKey::Status => nodes[a].p.suspended.cmp(&nodes[b].p.suspended),
         };
         let primary = if sort.ascending {
             primary

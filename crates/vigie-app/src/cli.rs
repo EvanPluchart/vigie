@@ -5,7 +5,7 @@ use std::time::Duration;
 use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes|performance|diagnostics] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--menu=1|2|3] [--no-adaptive] \
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=status,publisher,user,description,pid,threads,handles,cpu,memory,io] [--select=PID] [--menu=1|2|3] [--no-adaptive] \
 [--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=details|users|ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--notify-test] [--mini] [--palette[=TEXT]] [--lang=en|fr]";
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -141,10 +141,21 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             }
             ("--columns", Some(list)) => {
                 let names: Vec<String> = list.split(',').map(str::to_owned).collect();
-                if let Some(bad) = names
-                    .iter()
-                    .find(|n| !["publisher", "pid", "cpu", "memory"].contains(&n.as_str()))
-                {
+                if let Some(bad) = names.iter().find(|n| {
+                    ![
+                        "publisher",
+                        "pid",
+                        "cpu",
+                        "memory",
+                        "status",
+                        "user",
+                        "description",
+                        "io",
+                        "threads",
+                        "handles",
+                    ]
+                    .contains(&n.as_str())
+                }) {
                     return Err(format!("unknown column `{bad}`"));
                 }
                 options.columns = Some(names);

@@ -200,6 +200,13 @@ fn main() -> anyhow::Result<()> {
     // Polled, because a window that never had focus gets no focus events, and minimising does
     // not always report occlusion.
     let (weak, tx) = (app.as_weak(), commands.clone());
+    app.on_layout_edited(move || {
+        if let Some(app) = weak.upgrade() {
+            app.invoke_settings_edited();
+            let _ = tx.send(Command::IoShown(io_shown(&app, app.get_tab())));
+        }
+    });
+    let (weak, tx) = (app.as_weak(), commands.clone());
     app.on_tab_changed(move |tab| {
         // The table shows the sort of the view it is now in.
         if (tab == 0 || tab == 7)
@@ -208,6 +215,9 @@ fn main() -> anyhow::Result<()> {
             let sort = sorts.get()[table(tab)];
             show_sort(&app, sort);
             let _ = tx.send(Command::Sort(sort));
+        }
+        if let Some(app) = weak.upgrade() {
+            let _ = tx.send(Command::IoShown(io_shown(&app, tab)));
         }
         let _ = tx.send(Command::Tab(tab));
     });
@@ -391,6 +401,7 @@ fn main() -> anyhow::Result<()> {
             )));
         }
         desktop::set_close_to_tray(now.close_to_tray);
+        let _ = tx.send(Command::IoShown(io_shown(&app, app.get_tab())));
     });
     // Closing hides to the tray when the user asked for it; otherwise it quits.
     app.window().on_close_requested(|| {
@@ -455,6 +466,7 @@ fn main() -> anyhow::Result<()> {
         alerts: prefs::rules(&start, app.get_tray_available()),
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
+    let _ = commands.send(Command::IoShown(io_shown(&app, options.tab)));
     if let Some(pid) = options.select {
         // Once rows have arrived, select as a click would.
         let weak = app.as_weak();
@@ -600,6 +612,11 @@ fn menu_offset(items: &[MenuEntry], index: i32) -> f32 {
         .sum::<f32>()
 }
 
+/// The I/O column is on screen in `tab`, so the probe reads I/O every tick.
+fn io_shown(app: &AppWindow, tab: i32) -> bool {
+    (tab == 0 && app.get_columns().io) || (tab == 7 && app.get_detail_columns().io)
+}
+
 /// Column indices used by the header in `ui/app.slint`.
 fn column_key(column: i32) -> Option<SortKey> {
     match column {
@@ -607,6 +624,10 @@ fn column_key(column: i32) -> Option<SortKey> {
         1 => Some(SortKey::Pid),
         2 => Some(SortKey::Cpu),
         3 => Some(SortKey::Memory),
+        4 => Some(SortKey::Io),
+        5 => Some(SortKey::Threads),
+        6 => Some(SortKey::Handles),
+        7 => Some(SortKey::Status),
         _ => None,
     }
 }
@@ -617,6 +638,10 @@ fn show_sort(app: &AppWindow, sort: Sort) {
         SortKey::Pid => 1,
         SortKey::Cpu => 2,
         SortKey::Memory => 3,
+        SortKey::Io => 4,
+        SortKey::Threads => 5,
+        SortKey::Handles => 6,
+        SortKey::Status => 7,
     };
     app.set_sort_column(column);
     app.set_sort_ascending(sort.ascending);

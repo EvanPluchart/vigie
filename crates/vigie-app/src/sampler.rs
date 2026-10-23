@@ -34,6 +34,8 @@ pub enum Command {
     ToggleGroup(Group),
     /// Expand or collapse a user of the Users view, by login session.
     ToggleUser(u32),
+    /// An I/O column is on screen: read I/O counters every tick.
+    IoShown(bool),
     /// The Processes view groups by type (sections and trees) or shows one flat list.
     Grouped(bool),
     ExpandAll,
@@ -223,6 +225,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                                 core.set_flat(views.flat());
                             }
                             Command::ExpandAll => core.expand_all(),
+                            Command::IoShown(shown) => probe.set_io_every_tick(shown),
                             Command::ToggleUser(session) => {
                                 if !views.users_expanded.remove(&session) {
                                     views.users_expanded.insert(session);
@@ -674,17 +677,22 @@ impl ExeCache {
             .collect();
         let mut icons = Vec::new();
         for found in &self.details {
-            let (Some(exe), Some(&start)) = (&found.exe, starts.get(&found.pid)) else {
+            let Some(&start) = starts.get(&found.pid) else {
                 continue;
             };
-            let details = Self::lookup(
-                &mut self.by_path,
-                &mut self.next_icon,
-                self.icon_size,
-                probe,
-                exe,
-                &mut icons,
-            );
+            // What the executable says is shared by its processes; the account is per process.
+            let mut details = match &found.exe {
+                Some(exe) => Self::lookup(
+                    &mut self.by_path,
+                    &mut self.next_icon,
+                    self.icon_size,
+                    probe,
+                    exe,
+                    &mut icons,
+                ),
+                None => Details::default(),
+            };
+            details.user = found.user.as_deref().map(Into::into);
             core.set_details((found.pid, start), details);
         }
         // Processes that could not be read get empty details, so they are not asked again.
@@ -722,6 +730,7 @@ impl ExeCache {
             publisher: info.publisher.map(Into::into),
             description: info.description.map(Into::into),
             path: Some(exe.to_string_lossy().into()),
+            user: None,
         };
         by_path.insert(exe.to_path_buf(), details.clone());
         details

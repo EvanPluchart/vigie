@@ -275,6 +275,20 @@ mod tests {
         let mut child = spawn_ping();
         let target = target_of(&child);
         act(target, Action::Suspend).expect("suspend");
+        // The sample says so, from the threads in the full snapshot (taken on the first tick).
+        let mut probe = SystemProbe::new().expect("probe");
+        let mut sample = Sample::default();
+        probe.sample(&mut sample).expect("sample");
+        let listed = |sample: &Sample| {
+            sample
+                .processes
+                .iter()
+                .find(|p| p.pid == target.pid)
+                .map(|p| (p.suspended, p.threads, p.handles))
+        };
+        let (suspended, threads, handles) = listed(&sample).expect("child is listed");
+        assert!(suspended, "a suspended child reads as suspended");
+        assert!(threads >= 1 && handles >= 1);
         act(target, Action::Resume).expect("resume");
         act(target, Action::SetPriority(Priority::BelowNormal)).expect("priority");
         act(target, Action::SetPriority(Priority::Normal)).expect("priority");

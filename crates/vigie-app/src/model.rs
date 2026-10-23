@@ -199,6 +199,25 @@ fn proc_row(row: &Row) -> ProcRow {
         publisher: row.publisher.as_deref().unwrap_or_default().into(),
         file: row.file.as_str().into(),
         path: row.path.as_deref().unwrap_or_default().into(),
+        suspended: row.suspended,
+        user: row.user.as_deref().unwrap_or_default().into(),
+        description: row.description.as_deref().unwrap_or_default().into(),
+        io: if figures {
+            format_rate(row.io_bytes_per_s)
+        } else {
+            SharedString::new()
+        },
+        io_heat: i32::from(row.io_heat),
+        threads: if figures && row.threads > 0 {
+            row.threads.to_string().into()
+        } else {
+            SharedString::new()
+        },
+        handles: if figures && row.handles > 0 {
+            row.handles.to_string().into()
+        } else {
+            SharedString::new()
+        },
         tree_size: i32::try_from(row.tree_size).unwrap_or(i32::MAX),
         own: row.own,
         cpu: if figures {
@@ -1376,6 +1395,22 @@ pub fn format_cpu(percent: Option<f32>) -> SharedString {
     }
 }
 
+/// "0 MB/s", "1.2 MB/s": all I/O per second, as Task Manager writes disk figures.
+pub fn format_rate(bytes_per_s: Option<f32>) -> SharedString {
+    match bytes_per_s {
+        Some(b) => {
+            let mb = f64::from(b) / (1024.0 * 1024.0);
+            let figure = if mb < 0.05 {
+                "0".to_owned()
+            } else {
+                decimal(mb, 1)
+            };
+            format!("{figure}\u{a0}{}", unit("MB/s", "Mo/s")).into()
+        }
+        None => "—".into(),
+    }
+}
+
 /// Megabytes up to 1 GB, then gigabytes, so large values stay short and readable.
 pub fn format_memory(bytes: u64) -> SharedString {
     const MB: f64 = 1024.0 * 1024.0;
@@ -1478,8 +1513,15 @@ mod tests {
             name: "p".into(),
             cpu_percent: Some(1.0),
             memory_bytes: 1,
+            io_bytes_per_s: None,
+            threads: 3,
+            handles: 30,
+            suspended: false,
+            user: None,
+            description: None,
             cpu_heat: 0,
             memory_heat: 0,
+            io_heat: 0,
             depth: 0,
             count: 2,
             expanded: true,

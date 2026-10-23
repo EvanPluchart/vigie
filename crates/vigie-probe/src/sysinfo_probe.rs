@@ -91,6 +91,7 @@ impl Probe for SysinfoProbe {
                     .iter()
                     .map(|a| a.to_string_lossy().into_owned())
                     .collect(),
+                user: None,
             });
         }
         Ok(())

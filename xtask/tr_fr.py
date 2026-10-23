@@ -320,6 +320,13 @@ FR = {
     "User": "Utilisateur",
     "({} processes)": "({} processus)",
     "Disconnected": "Déconnecté",
+    "Suspended": "Suspendu",
+    "User name": "Nom d’utilisateur",
+    "Description": "Description",
+    "Threads": "Threads",
+    "Handles": "Handles",
+    "I/O": "E/S",
+    "Reset column widths": "Rétablir la largeur des colonnes",
 }
 
 

@@ -94,6 +94,12 @@ msgstr "Services et système ({})"
 msgid "Processes ({})"
 msgstr "Processus ({})"
 
+msgid "Suspended"
+msgstr "Suspendu"
+
+msgid "Running"
+msgstr "En cours"
+
 msgid "Processes"
 msgstr "Processus"
 
@@ -130,17 +136,38 @@ msgstr "Un gestionnaire de tâches rapide et multiplateforme."
 msgid "History in memory: {}"
 msgstr "Historique en mémoire : {}"
 
+msgid "Status"
+msgstr "État"
+
 msgid "Publisher"
 msgstr "Éditeur"
 
+msgid "User name"
+msgstr "Nom d’utilisateur"
+
+msgid "Description"
+msgstr "Description"
+
 msgid "PID"
 msgstr "PID"
+
+msgid "Threads"
+msgstr "Threads"
+
+msgid "Handles"
+msgstr "Handles"
 
 msgid "CPU"
 msgstr "Processeur"
 
 msgid "Memory"
 msgstr "Mémoire"
+
+msgid "I/O"
+msgstr "E/S"
+
+msgid "Reset column widths"
+msgstr "Rétablir la largeur des colonnes"
 
 msgid "Collapse"
 msgstr "Réduire"
@@ -871,9 +898,6 @@ msgstr "Dossier Démarrage (vous)"
 msgid "Startup folder (all users)"
 msgstr "Dossier Démarrage (tous)"
 
-msgid "Running"
-msgstr "En cours"
-
 msgid "Starting"
 msgstr "Démarrage"
 
@@ -909,9 +933,6 @@ msgstr "Actualiser"
 
 msgid "Registered in"
 msgstr "Enregistré dans"
-
-msgid "Status"
-msgstr "État"
 
 msgid "Reading…"
 msgstr "Lecture…"
