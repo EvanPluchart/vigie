@@ -1,0 +1,203 @@
+// Users (Task Manager's Users tab): each signed-in account with what its processes use, and
+// its processes when expanded.
+
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct UserRowUi {
+    key: int,
+    // 0 a user, 1 one of its processes.
+    kind: int,
+    // Login session of the user.
+    session: int,
+    name: string,
+    // Users: connected or not.
+    active: bool,
+    expanded: bool,
+    count: int,
+    cpu: string,
+    memory: string,
+    cpu-heat: int,
+    memory-heat: int,
+    // Processes: identity and file, for the context menu.
+    pid: int,
+    start: int,
+    file: string,
+    path: string,
+    icon: int,
+}
+
+component Cell inherits Text {
+    vertical-alignment: center;
+    overflow: elide;
+    color: Theme.text;
+    font-size: Theme.font-body;
+}
+
+component Head inherits Cell {
+    color: Theme.text-muted;
+    font-size: Theme.font-caption;
+    font-weight: Theme.weight-strong;
+}
+
+component Heat inherits Rectangle {
+    in property <string> text;
+    in property <int> heat;
+    Rectangle {
+        x: -6px;
+        width: parent.width + 12px;
+        background: root.heat >= 3 ? Theme.heat-3 : root.heat == 2 ? Theme.heat-2 : root.heat == 1 ? Theme.heat-1 : transparent;
+    }
+    Cell {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        horizontal-alignment: right;
+    }
+}
+
+export component UsersView inherits Rectangle {
+    in property <[UserRowUi]> rows;
+    in property <[image]> icons;
+    in property <bool> available: true;
+    in property <string> total-cpu;
+    in property <string> total-memory;
+    callback toggle(int);
+    // Right click on a process: the window opens the process menu.
+    callback menu(UserRowUi, length, length);
+    property <int> selected: -1;
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding: Theme.space-3;
+            padding-left: Theme.space-4;
+            padding-right: Theme.space-4;
+            height: 56px;
+            Text {
+                text: @tr("Users");
+                color: Theme.text;
+                font-size: Theme.font-section;
+                font-weight: Theme.weight-strong;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+        HorizontalLayout {
+            height: 40px;
+            padding-left: Theme.space-4;
+            padding-right: Theme.space-4;
+            spacing: Theme.space-3;
+            Head { text: @tr("User"); horizontal-stretch: 1; vertical-alignment: bottom; }
+            Head { text: @tr("Status"); width: 110px; vertical-alignment: bottom; }
+            VerticalLayout {
+                width: 88px;
+                alignment: end;
+                Cell { text: root.total-cpu; horizontal-alignment: right; font-weight: Theme.weight-strong; }
+                Head { text: @tr("CPU"); horizontal-alignment: right; }
+            }
+            VerticalLayout {
+                width: 120px;
+                alignment: end;
+                Cell { text: root.total-memory; horizontal-alignment: right; font-weight: Theme.weight-strong; }
+                Head { text: @tr("Memory"); horizontal-alignment: right; }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+        if !root.available || root.rows.length == 0: Text {
+            vertical-stretch: 1;
+            text: root.available ? @tr("Reading…") : @tr("Not available on this system yet.");
+            color: Theme.text-muted;
+            font-size: Theme.font-section;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if root.available && root.rows.length > 0: ListView {
+            vertical-stretch: 1;
+            for row in root.rows: Rectangle {
+                height: row.kind == 0 ? 36px : Theme.row-height;
+                background: row.key == root.selected ? Theme.selection : touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+                touch := TouchArea {
+                    mouse-cursor: row.kind == 0 ? pointer : default;
+                    clicked => {
+                        root.selected = row.key;
+                        if (row.kind == 0) { root.toggle(row.session); }
+                    }
+                    pointer-event(event) => {
+                        if (row.kind == 1 && event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                            root.selected = row.key;
+                            root.menu(row, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: Theme.space-4;
+                    padding-right: Theme.space-4;
+                    spacing: Theme.space-3;
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        spacing: Theme.space-2;
+                        Rectangle { width: row.kind == 0 ? 0px : 22px; }
+                        if row.kind == 0: Path {
+                            width: 14px;
+                            height: 14px;
+                            y: (parent.height - self.height) / 2;
+                            viewbox-width: 14;
+                            viewbox-height: 14;
+                            stroke: Theme.text-muted;
+                            stroke-width: 1.6px;
+                            commands: row.expanded ? "M 3.5 5.5 L 7 9 L 10.5 5.5" : "M 5.5 3.5 L 9 7 L 5.5 10.5";
+                        }
+                        // A person for users, the program's icon for processes.
+                        Rectangle {
+                            width: 16px;
+                            if row.kind == 0: Path {
+                                width: 16px;
+                                height: 16px;
+                                y: (parent.height - self.height) / 2;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                commands: "M 16 8 A 4 4 0 1 1 8 8 A 4 4 0 1 1 16 8 M 4 21 A 8 6 0 0 1 20 21";
+                                stroke: Theme.accent;
+                                stroke-width: 1.8px;
+                                fill: transparent;
+                            }
+                            if row.kind == 1 && row.icon >= 0: Image {
+                                source: root.icons[row.icon];
+                                width: 16px;
+                                height: 16px;
+                                y: (parent.height - self.height) / 2;
+                                image-rendering: smooth;
+                            }
+                            if row.kind == 1 && row.icon < 0: Rectangle {
+                                width: 12px;
+                                height: 12px;
+                                x: 2px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 3px;
+                                border-width: 1px;
+                                border-color: Theme.text-muted.with-alpha(0.6);
+                            }
+                        }
+                        Cell {
+                            text: row.name;
+                            font-weight: row.kind == 0 ? Theme.weight-strong : Theme.weight-regular;
+                            horizontal-stretch: 0;
+                        }
+                        Cell {
+                            text: row.kind == 0 ? @tr("({} processes)", row.count) : "";
+                            color: Theme.text-muted;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    Cell {
+                        width: 110px;
+                        text: row.kind != 0 ? "" : row.active ? @tr("Connected") : @tr("Disconnected");
+                        color: row.active ? Theme.accent : Theme.text-muted;
+                    }
+                    Heat { width: 88px; text: row.cpu; heat: row.cpu-heat; }
+                    Heat { width: 120px; text: row.memory; heat: row.memory-heat; }
+                }
+            }
+        }
+    }
+}

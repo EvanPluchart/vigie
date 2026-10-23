@@ -1,0 +1,130 @@
+// Vigie's own menus, drawn from the tokens: the native Windows menus stayed light on the dark
+// theme and did not match the art direction (docs/BRAND.md, "Controls").
+
+import { Theme } from "theme.slint";
+
+// One line of a menu. Every field defaults to false or 0, so a literal names only what it needs.
+export struct MenuEntry {
+    id: int,
+    title: string,
+    // Keyboard shortcut, shown muted on the right.
+    hint: string,
+    disabled: bool,
+    // Left out of the menu (an action that does not apply to this target).
+    hidden: bool,
+    checkable: bool,
+    checked: bool,
+    // Ends or stops something: drawn in the danger colour.
+    danger: bool,
+    separator: bool,
+    // Above 0: opens the submenu with this id.
+    submenu: int,
+}
+
+// A panel of entries. The parent places it and handles what is chosen.
+export component MenuPanel inherits Rectangle {
+    in property <[MenuEntry]> items;
+    // Entry under the keyboard or the pointer, -1 for none.
+    in-out property <int> current: -1;
+    // The entry whose submenu is open, highlighted while the pointer is in the submenu.
+    in property <int> open-submenu: -1;
+    callback activated(int);
+    // The pointer rests on entry `index`, whose top is `y` in the panel.
+    callback hovered(int, length);
+    width: max(232px, layout.preferred-width);
+    height: layout.preferred-height;
+    background: Theme.raised;
+    border-radius: Theme.radius-control + 2px;
+    border-width: 1px;
+    border-color: Theme.border;
+    drop-shadow-blur: 18px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: #000000.with-alpha(Theme.dark ? 0.45 : 0.16);
+    // Clicks between entries stay in the menu.
+    TouchArea { }
+    layout := VerticalLayout {
+        padding: Theme.space-1;
+        for item[i] in root.items: Rectangle {
+            property <bool> live: !item.disabled && !item.separator;
+            property <bool> lit: self.live && (i == root.current || i == root.open-submenu);
+            visible: !item.hidden;
+            height: item.hidden ? 0px : item.separator ? 9px : 30px;
+            border-radius: Theme.radius-small + 2px;
+            background: self.lit ? (item.danger ? Theme.danger.with-alpha(0.14) : Theme.selection) : transparent;
+            accessible-role: button;
+            accessible-label: item.title;
+            accessible-checked: item.checked;
+            accessible-enabled: !item.disabled;
+            if item.separator: Rectangle {
+                y: 4px;
+                height: 1px;
+                background: Theme.border;
+            }
+            if !item.separator: HorizontalLayout {
+                padding-left: Theme.space-2;
+                padding-right: Theme.space-2;
+                spacing: Theme.space-2;
+                opacity: item.disabled ? 0.4 : 1;
+                // The check column, kept even when empty so titles line up.
+                Rectangle {
+                    width: 14px;
+                    if item.checkable && item.checked: Path {
+                        width: 12px;
+                        height: 12px;
+                        viewbox-width: 12;
+                        viewbox-height: 12;
+                        commands: "M 2 6.5 L 5 9.5 L 10 3";
+                        stroke: Theme.accent;
+                        stroke-width: 1.8px;
+                    }
+                }
+                Text {
+                    text: item.title;
+                    color: item.danger ? Theme.danger : Theme.text;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                if item.hint != "": Text {
+                    text: item.hint;
+                    color: Theme.text-muted;
+                    font-size: Theme.font-caption;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 10px;
+                    if item.submenu > 0: Path {
+                        width: 10px;
+                        height: 10px;
+                        viewbox-width: 10;
+                        viewbox-height: 10;
+                        commands: "M 3.5 1.5 L 7 5 L 3.5 8.5";
+                        stroke: Theme.text-muted;
+                        stroke-width: 1.5px;
+                    }
+                }
+            }
+            if !item.separator && !item.hidden: TouchArea {
+                enabled: parent.live;
+                mouse-cursor: parent.live ? pointer : default;
+                changed has-hover => {
+                    if (self.has-hover) {
+                        root.current = i;
+                        root.hovered(i, parent.y);
+                    }
+                }
+                clicked => { root.activated(i); }
+            }
+        }
+    }
+}
+
+// Keyboard steps through a menu: the next live entry from `start` going by `step` (1 or -1),
+// wrapping; -1 if there is none. Answered by Rust (src/main.rs): Slint functions have no loops.
+export global MenuNav {
+    pure callback next([MenuEntry], int, int) -> int;
+    // Top of entry `index` in its panel, for placing a submenu beside it.
+    pure callback offset([MenuEntry], int) -> length;
+    // Index of the entry that opens submenu `id`, -1 if none.
+    pure callback submenu-at([MenuEntry], int) -> int;
+}

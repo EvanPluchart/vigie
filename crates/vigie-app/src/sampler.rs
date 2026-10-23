@@ -32,6 +32,12 @@ pub enum Command {
     },
     /// Fold or unfold a section of the table.
     ToggleGroup(Group),
+    /// Expand or collapse a user of the Users view, by login session.
+    ToggleUser(u32),
+    /// The Processes view groups by type (sections and trees) or shows one flat list.
+    Grouped(bool),
+    ExpandAll,
+    CollapseAll,
     /// The shown view changed: 0 processes, 1 performance, 2 diagnostics.
     Tab(i32),
     /// The range of the Performance graphs.
@@ -121,6 +127,8 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
         }
     };
     let mut core = Core::new(settings.sort, settings.filter);
+    core.set_flat(settings.tab == 7);
+    core.set_file_names(settings.tab == 7);
     let mut sample = Sample::default();
     let mut exes = ExeCache {
         icon_size: settings.icon_size,
@@ -135,6 +143,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
     };
     let mut views = Views {
         tab: settings.tab,
+        grouped: true,
         info: probe.system_info(),
         range: Anchored::new(settings.range, 0),
         process_range: Anchored::new(settings.process_range, 0),
@@ -172,6 +181,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                     Err(_) => None,
                 };
                 views.started_ns.get_or_insert(sample.at_ns);
+                views.read_session_users(&mut probe, &sample);
                 views.diagnose(&core, sample.logical_cores, false);
                 views.tools.read(
                     &mut probe,
@@ -208,8 +218,22 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                             Command::Filter(filter) => core.set_filter(&filter),
                             Command::Toggle(pid) => core.toggle(pid),
                             Command::ToggleGroup(group) => core.toggle_group(group),
+                            Command::Grouped(grouped) => {
+                                views.grouped = grouped;
+                                core.set_flat(views.flat());
+                            }
+                            Command::ExpandAll => core.expand_all(),
+                            Command::ToggleUser(session) => {
+                                if !views.users_expanded.remove(&session) {
+                                    views.users_expanded.insert(session);
+                                }
+                            }
+                            Command::CollapseAll => core.collapse_all(),
                             Command::Tab(tab) => {
                                 views.tab = tab;
+                                core.set_flat(views.flat());
+                                core.set_file_names(tab == 7);
+                                views.read_session_users(&mut probe, &sample);
                                 views.timeline.invalidate();
                                 views.tools.opened(tab);
                                 if tab == 2 {
@@ -396,6 +420,46 @@ fn execute(
     }
 }
 
+impl Views {
+    /// Who is signed in to each session, while the Users view is shown: on opening, for new
+    /// sessions, and every 10 s for connection changes.
+    fn read_session_users(&mut self, probe: &mut impl Probe, sample: &Sample) {
+        if self.tab != 8 {
+            return;
+        }
+        let stale = self
+            .session_users_at
+            .is_none_or(|at| at.elapsed() >= Duration::from_secs(10));
+        let sessions: std::collections::BTreeSet<u32> = sample
+            .processes
+            .iter()
+            .filter_map(|p| p.session)
+            .filter(|&s| s != 0)
+            .collect();
+        let new = sessions.iter().any(|s| !self.session_users.contains_key(s));
+        if !stale && !new {
+            return;
+        }
+        self.session_users.clear();
+        for session in sessions {
+            if let Some(user) = probe.session_user(session) {
+                self.session_users.insert(session, user);
+            }
+        }
+        self.session_users_at = Some(Instant::now());
+    }
+
+    /// The process table is on screen: Processes or Details.
+    fn table_shown(&self) -> bool {
+        self.tab == 0 || self.tab == 7
+    }
+
+    /// Details lists every process flat; Processes too when not grouped by type.
+    fn flat(&self) -> bool {
+        self.tab == 7 || (self.tab == 0 && !self.grouped)
+    }
+}
+
 /// How often GPU counters are read while the Performance view is hidden, for the history.
 const GPU_BACKGROUND: Duration = Duration::from_secs(10);
 /// How often the diagnostics run (decision 0006).
@@ -404,8 +468,15 @@ const DIAGNOSE_EVERY_NS: u64 = 5 * SECOND;
 /// The views, the histories and the diagnostics.
 #[derive(Default)]
 struct Views {
-    /// Shown view: 0 processes, 1 performance, 2 diagnostics.
+    /// Shown view: 0 processes, 1 performance, 2 diagnostics, 7 details, 8 users.
     tab: i32,
+    /// The Processes view groups by type; Details is always one flat list.
+    grouped: bool,
+    /// Users view: expanded sessions, and who is signed in to each session (read again every
+    /// few seconds while the view is shown).
+    users_expanded: std::collections::HashSet<u32>,
+    session_users: HashMap<u32, vigie_probe::SessionUser>,
+    session_users_at: Option<Instant>,
     perf: Performance,
     system: SystemSample,
     info: SystemInfo,
@@ -499,7 +570,21 @@ fn send(
         ),
         None => model::PerfUi::unavailable(),
     });
-    let mut frame = UiFrame::new(core.update(sample), views.tab == 0, icons, notice, perf);
+    let mut frame = UiFrame::new(
+        core.update(sample),
+        views.table_shown(),
+        icons,
+        notice,
+        perf,
+    );
+    if views.tab == 8 {
+        frame.users = Some(model::user_rows_ui(
+            &core.users(sample),
+            &views.session_users,
+            &views.users_expanded,
+            sample.memory_total_bytes,
+        ));
+    }
     frame.badge = model::badge(&views.findings);
     if let Some(last) = &views.last {
         frame.total_cpu = model::format_total(last.cpu_percent);
@@ -538,7 +623,7 @@ fn send(
     if views.mini_open {
         frame.mini = Some(model::mini_ui(core, views.last.as_ref()));
     }
-    if views.tab == 0 && views.history_open {
+    if views.table_shown() && views.history_open {
         let tracked = views
             .selected
             .and_then(|(pid, bits)| core.identify(pid, bits))
@@ -636,6 +721,7 @@ impl ExeCache {
             icon,
             publisher: info.publisher.map(Into::into),
             description: info.description.map(Into::into),
+            path: Some(exe.to_string_lossy().into()),
         };
         by_path.insert(exe.to_path_buf(), details.clone());
         details

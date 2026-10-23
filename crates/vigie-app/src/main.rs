@@ -81,6 +81,7 @@ fn main() -> anyhow::Result<()> {
     app.set_locks(ModelRc::from(Rc::new(VecModel::<LockRowUi>::default())));
     app.set_startup_items(ModelRc::from(Rc::new(VecModel::<StartupRowUi>::default())));
     app.set_services(ModelRc::from(Rc::new(VecModel::<ServiceRowUi>::default())));
+    app.set_users(ModelRc::from(Rc::new(VecModel::<UserRowUi>::default())));
     app.set_palette_items(ModelRc::from(Rc::new(VecModel::<PaletteItem>::default())));
     app.set_tab(options.tab);
     app.set_perf_span_index(options.range);
@@ -110,18 +111,71 @@ fn main() -> anyhow::Result<()> {
     // The sampler stops once every sender is dropped.
     let (commands, receiver) = flume::unbounded::<Command>();
 
-    let sort = Rc::new(Cell::new(options.sort));
-    let (weak, tx) = (app.as_weak(), commands.clone());
+    // Processes and Details each keep their own sort: [processes, details].
+    let sorts = Rc::new(Cell::new([options.sort, Sort::default()]));
+    let table = |tab: i32| usize::from(tab == 7);
+    let (weak, tx, sorts_clicked) = (app.as_weak(), commands.clone(), sorts.clone());
     app.on_sort_clicked(move |column| {
-        let Some(key) = column_key(column) else {
+        let (Some(key), Some(app)) = (column_key(column), weak.upgrade()) else {
             return;
         };
-        let next = sort.get().clicked(key);
-        sort.set(next);
-        if let Some(app) = weak.upgrade() {
-            show_sort(&app, next);
+        let mut all = sorts_clicked.get();
+        let at = table(app.get_tab());
+        all[at] = all[at].clicked(key);
+        sorts_clicked.set(all);
+        show_sort(&app, all[at]);
+        let _ = tx.send(Command::Sort(all[at]));
+    });
+    let tx = commands.clone();
+    app.on_user_toggled(move |session| {
+        if let Ok(session) = u32::try_from(session) {
+            let _ = tx.send(Command::ToggleUser(session));
         }
-        let _ = tx.send(Command::Sort(next));
+    });
+    let tx = commands.clone();
+    app.on_grouped_changed(move |grouped| {
+        let _ = tx.send(Command::Grouped(grouped));
+    });
+    let tx = commands.clone();
+    app.on_expand_all(move || {
+        let _ = tx.send(Command::ExpandAll);
+    });
+    let tx = commands.clone();
+    app.on_collapse_all(move || {
+        let _ = tx.send(Command::CollapseAll);
+    });
+    // Context menu actions that need no process: the clipboard, the file manager, Properties,
+    // the browser (vigie-shell).
+    let weak = app.as_weak();
+    app.on_copy_text(move |text| {
+        let Some(app) = weak.upgrade() else { return };
+        let copied = vigie_shell::desktop::copy_text(&text);
+        app.set_notice_name(text);
+        app.set_notice_kind(if copied { 21 } else { 22 });
+    });
+    app.on_reveal_path(|path| {
+        vigie_shell::desktop::reveal(std::path::Path::new(path.as_str()));
+    });
+    app.on_show_properties(|path| {
+        vigie_shell::desktop::properties(std::path::Path::new(path.as_str()));
+    });
+    app.on_search_online(|query| {
+        vigie_shell::desktop::search_online(&query);
+    });
+    let nav = app.global::<MenuNav>();
+    nav.on_next(|items, start, step| {
+        let entries: Vec<MenuEntry> = items.iter().collect();
+        menu_step(&entries, start, step)
+    });
+    nav.on_offset(|items, index| {
+        let entries: Vec<MenuEntry> = items.iter().collect();
+        menu_offset(&entries, index)
+    });
+    nav.on_submenu_at(|items, id| {
+        items
+            .iter()
+            .position(|e| e.submenu == id && !e.hidden)
+            .map_or(-1, |i| i as i32)
     });
     let weak = app.as_weak();
     app.on_move_selection(move |delta| {
@@ -145,8 +199,16 @@ fn main() -> anyhow::Result<()> {
     // Adaptive refresh: tell the sampler when the window goes to the background or comes back.
     // Polled, because a window that never had focus gets no focus events, and minimising does
     // not always report occlusion.
-    let tx = commands.clone();
+    let (weak, tx) = (app.as_weak(), commands.clone());
     app.on_tab_changed(move |tab| {
+        // The table shows the sort of the view it is now in.
+        if (tab == 0 || tab == 7)
+            && let Some(app) = weak.upgrade()
+        {
+            let sort = sorts.get()[table(tab)];
+            show_sort(&app, sort);
+            let _ = tx.send(Command::Sort(sort));
+        }
         let _ = tx.send(Command::Tab(tab));
     });
     let tx = commands.clone();
@@ -422,6 +484,15 @@ fn main() -> anyhow::Result<()> {
             }
         });
     }
+    if let Some(context) = options.menu {
+        // After `--select` has picked its row.
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(2200), move || {
+            if let Some(app) = weak.upgrade() {
+                app.invoke_open_test_menu(context);
+            }
+        });
+    }
     for pid in options.expand {
         let _ = commands.send(Command::Toggle(pid));
     }
@@ -497,6 +568,36 @@ fn palette_items(app: &AppWindow, query: &str) -> Vec<PaletteItem> {
         });
     }
     items
+}
+
+/// The next live entry of a menu from `start`, stepping by `step` and wrapping (keyboard
+/// navigation in `ui/menu.slint`); -1 when no entry can be chosen.
+fn menu_step(items: &[MenuEntry], start: i32, step: i32) -> i32 {
+    let count = items.len() as i32;
+    if count == 0 {
+        return -1;
+    }
+    let step = if step < 0 { -1 } else { 1 };
+    let mut at = start;
+    for _ in 0..count {
+        at = (at + step).rem_euclid(count);
+        let item = &items[at as usize];
+        if !item.disabled && !item.hidden && !item.separator {
+            return at;
+        }
+    }
+    -1
+}
+
+/// Top of entry `index` in a menu panel, in logical pixels: the panel's padding, then 30 per
+/// entry and 9 per separator before it (sizes from `ui/menu.slint`).
+fn menu_offset(items: &[MenuEntry], index: i32) -> f32 {
+    4.0 + items
+        .iter()
+        .take(index.max(0) as usize)
+        .filter(|e| !e.hidden)
+        .map(|e| if e.separator { 9.0 } else { 30.0 })
+        .sum::<f32>()
 }
 
 /// Column indices used by the header in `ui/app.slint`.

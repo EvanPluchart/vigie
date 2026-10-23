@@ -83,6 +83,7 @@ pub(crate) fn build(
     sort: Sort,
     expanded: &HashSet<ProcKey>,
     collapsed: &HashSet<Group>,
+    flat: bool,
 ) -> Tree {
     let index: HashMap<Pid, usize> = nodes
         .iter()
@@ -186,6 +187,24 @@ pub(crate) fn build(
     let matching = nodes.iter().filter(|n| filter(n.p)).count();
     let searching = matching < nodes.len();
     let mut entries = Vec::with_capacity(nodes.len() + 4);
+    if flat {
+        // One list without sections or nesting, each process with its own figures (Task
+        // Manager's Details tab, or the Processes view not grouped by type).
+        let mut matches: Vec<usize> = (0..nodes.len()).filter(|&i| filter(nodes[i].p)).collect();
+        matches.sort_by(|&a, &b| compare(a, b, &own));
+        entries.extend(matches.into_iter().map(|node| Entry::Process {
+            node,
+            depth: 0,
+            total: false,
+        }));
+        return Tree {
+            entries,
+            totals,
+            descendants,
+            matching,
+            group,
+        };
+    }
     for section in [Group::Apps, Group::Background, Group::System, Group::All] {
         if searching {
             // Searching shows matches flat, each with its own figures.

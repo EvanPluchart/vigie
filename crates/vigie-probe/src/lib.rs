@@ -347,6 +347,15 @@ pub struct Service {
     pub pid: Option<Pid>,
 }
 
+/// The account signed in to a login session (Task Manager's Users tab).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionUser {
+    /// Account name; empty for a session nobody is signed in to.
+    pub name: String,
+    /// Connected (as opposed to disconnected or locked out by a fast user switch).
+    pub active: bool,
+}
+
 /// An icon as straight (not premultiplied) RGBA pixels, row by row from the top.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Icon {
@@ -412,6 +421,10 @@ pub trait Probe: Send {
     /// Starts (`true`) or stops a service by its short name. Callers confirm stopping first.
     fn control_service(&mut self, _name: &str, _start: bool) -> Result<()> {
         Err(ProbeError::Unsupported)
+    }
+    /// Who is signed in to a login session. Cheap, but cache it: names rarely change.
+    fn session_user(&mut self, _session: u32) -> Option<SessionUser> {
+        None
     }
     /// Facts that do not change while Vigie runs. Call once.
     fn system_info(&mut self) -> SystemInfo {

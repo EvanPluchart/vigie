@@ -5,8 +5,8 @@ use std::time::Duration;
 use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes|performance|diagnostics] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] \
-[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--notify-test] [--mini] [--palette[=TEXT]] [--lang=en|fr]";
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--menu=1|2|3] [--no-adaptive] \
+[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=details|users|ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--notify-test] [--mini] [--palette[=TEXT]] [--lang=en|fr]";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
@@ -14,7 +14,8 @@ pub struct Options {
     pub filter: String,
     /// `None` keeps the interval from the settings.
     pub interval: Option<Duration>,
-    /// View at start: 0 processes, 1 performance, 2 diagnostics.
+    /// View at start: 0 processes, 1 performance, 2 diagnostics, 3 ports, 4 files, 5 startup,
+    /// 6 settings, 7 details, 8 users.
     pub tab: i32,
     /// Range of the Performance graphs at start, as an index into `Range::SPANS`.
     pub range: i32,
@@ -53,6 +54,9 @@ pub struct Options {
     pub columns: Option<Vec<String>>,
     /// Process to select at start, for screenshots.
     pub select: Option<u32>,
+    /// Opens a context menu at start, for screenshots: 1 the selected process (with
+    /// `--select`), 2 the table header, 3 the ··· menu. Nothing runs without a click.
+    pub menu: Option<i32>,
     /// Keep the chosen interval in the background too (benchmarks measure the focused cost).
     pub no_adaptive: bool,
 }
@@ -79,6 +83,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--tab", Some("files")) => options.tab = 4,
             ("--tab", Some("startup")) => options.tab = 5,
             ("--tab", Some("settings")) => options.tab = 6,
+            ("--tab", Some("details")) => options.tab = 7,
+            ("--tab", Some("users")) => options.tab = 8,
             ("--tab", Some("services")) => {
                 options.tab = 5;
                 options.services = true;
@@ -118,6 +124,15 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             }
             ("--lang", Some(lang @ ("en" | "fr"))) => options.lang = Some(lang.to_owned()),
             ("--palette", value) => options.palette = Some(value.unwrap_or_default().to_owned()),
+            ("--menu", Some(value)) => {
+                options.menu = Some(
+                    value
+                        .parse::<i32>()
+                        .ok()
+                        .filter(|m| (1..=3).contains(m))
+                        .ok_or_else(|| format!("invalid --menu `{value}`"))?,
+                );
+            }
             ("--ask", Some(value)) => {
                 let parsed = value
                     .split_once(':')

@@ -19,7 +19,10 @@ use windows_sys::Wdk::System::SystemInformation::{
 use windows_sys::Win32::Foundation::{FILETIME, HWND, LPARAM};
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
-use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+use windows_sys::Win32::System::RemoteDesktop::{
+    ProcessIdToSessionId, WTS_CONNECTSTATE_CLASS, WTS_CURRENT_SERVER_HANDLE, WTSActive,
+    WTSConnectState, WTSFreeMemory, WTSQuerySessionInformationW, WTSUserName,
+};
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::System::Threading::{
     ALL_PROCESSOR_GROUPS, GetActiveProcessorCount, GetProcessTimes, OpenProcess,
@@ -485,6 +488,49 @@ fn find_windows(windowed: &mut HashSet<Pid>) -> Option<Pid> {
     }
 }
 
+/// The user name and connection state of a login session, from the Terminal Services API
+/// (works without elevation, unlike opening every process's token).
+fn session_user(session: u32) -> Option<crate::SessionUser> {
+    let query = |class| -> Option<Vec<u8>> {
+        let mut buffer: windows_sys::core::PWSTR = std::ptr::null_mut();
+        let mut bytes = 0u32;
+        // SAFETY: valid out pointers; the buffer is freed below with WTSFreeMemory.
+        let ok = unsafe {
+            WTSQuerySessionInformationW(
+                WTS_CURRENT_SERVER_HANDLE,
+                session,
+                class,
+                &mut buffer,
+                &mut bytes,
+            )
+        };
+        if ok == 0 || buffer.is_null() {
+            return None;
+        }
+        // SAFETY: the API wrote `bytes` bytes at `buffer`.
+        let copy =
+            unsafe { std::slice::from_raw_parts(buffer.cast::<u8>(), bytes as usize) }.to_vec();
+        // SAFETY: allocated by WTSQuerySessionInformationW.
+        unsafe { WTSFreeMemory(buffer.cast()) };
+        Some(copy)
+    };
+    let name_bytes = query(WTSUserName)?;
+    let units: Vec<u16> = name_bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| u16::from_le_bytes(c))
+        .take_while(|&u| u != 0)
+        .collect();
+    let state = query(WTSConnectState)
+        .filter(|b| b.len() >= 4)
+        .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as WTS_CONNECTSTATE_CLASS);
+    Some(crate::SessionUser {
+        name: String::from_utf16_lossy(&units),
+        active: state == Some(WTSActive),
+    })
+}
+
 fn unavailable(status: i32) -> ProbeError {
     ProbeError::Unavailable(format!("NtQuerySystemInformation failed: {status:#x}"))
 }
@@ -630,6 +676,10 @@ impl Probe for WindowsProbe {
         self.gpus.read(&mut out.gpus);
         out.gpus_at_ns = self.now_ns();
         Ok(())
+    }
+
+    fn session_user(&mut self, session: u32) -> Option<crate::SessionUser> {
+        session_user(session)
     }
 
     fn system_info(&mut self) -> crate::SystemInfo {

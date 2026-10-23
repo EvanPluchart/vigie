@@ -1,4 +1,6 @@
 import { AboutSlint, ListView, Palette } from "std-widgets.slint";
+import { MenuEntry, MenuNav, MenuPanel } from "menu.slint";
+import { UserRowUi, UsersView } from "users.slint";
 import { VButton, VField } from "controls.slint";
 import { Theme } from "theme.slint";
 import { DiskCard, GpuCard, PerfView, PerformanceView } from "performance.slint";
@@ -8,7 +10,7 @@ import { FilesView, LockRowUi, PortRowUi, PortsView, ServiceRowUi, StartupRowUi,
 import { SettingsView } from "settings.slint";
 import { MiniRow, MiniWindow } from "mini.slint";
 
-export { CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, MiniRow, MiniWindow, PerfView, PortRowUi, ServiceRowUi, StartupRowUi }
+export { CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, MenuEntry, MenuNav, MiniRow, UserRowUi, MiniWindow, PerfView, PortRowUi, ServiceRowUi, StartupRowUi }
 
 export struct PaletteItem {
     id: int,
@@ -22,19 +24,35 @@ export global PaletteText {
         return id == 0 ? @tr("Go to Processes") : id == 1 ? @tr("Go to Performance")
             : id == 2 ? @tr("Go to Diagnostics") : id == 3 ? @tr("Go to Ports")
             : id == 4 ? @tr("Go to Files (who is using a file)") : id == 5 ? @tr("Go to Startup and services")
-            : id == 6 ? @tr("Go to Settings") : id == 10 ? @tr("Search processes")
+            : id == 6 ? @tr("Go to Settings") : id == 7 ? @tr("Go to Details")
+            : id == 8 ? @tr("Go to Users") : id == 10 ? @tr("Search processes")
             : id == 11 ? @tr("End the selected task") : id == 12 ? @tr("Show or hide the history of the selected process")
             : id == 13 ? @tr("Switch between dark and light theme") : id == 14 ? @tr("About Vigie")
             : id == 15 ? @tr("Quit Vigie") : "";
     }
 
     pure public function hint(id: int) -> string {
-        return id >= 0 && id <= 6 ? "Ctrl+" + (id + 1) : id == 10 ? "Ctrl+F" : id == 12 ? "Ctrl+H"
+        return id >= 0 && id <= 8 ? "Ctrl+" + RailOrder.position(id) : id == 10 ? "Ctrl+F" : id == 12 ? "Ctrl+H"
             : id == 11 ? @tr("Del") : "";
     }
 
     pure public function search-for(text: string) -> string {
         return @tr("Search processes for “{}”", text);
+    }
+}
+
+// The rail's views, top to bottom: Ctrl+1 to Ctrl+9 follow this order.
+export global RailOrder {
+    // Tab shown by Ctrl+`n` (1-based).
+    pure public function tab(n: int) -> int {
+        return n == 1 ? 0 : n == 2 ? 1 : n == 3 ? 7 : n == 4 ? 8 : n == 5 ? 2 : n == 6 ? 3
+            : n == 7 ? 4 : n == 8 ? 5 : 6;
+    }
+
+    // Position of a tab in the rail (1-based), for the shortcut hints.
+    pure public function position(tab: int) -> int {
+        return tab == 0 ? 1 : tab == 1 ? 2 : tab == 7 ? 3 : tab == 8 ? 4 : tab == 2 ? 5 : tab == 3 ? 6
+            : tab == 4 ? 7 : tab == 5 ? 8 : 9;
     }
 }
 
@@ -80,6 +98,9 @@ export struct ProcRow {
     // Start time (low 31 bits): with the PID, names this process for actions.
     start: int,
     publisher: string,
+    // Executable file name ("brave.exe") and full path (empty when unreadable).
+    file: string,
+    path: string,
     // Processes "end process tree" ends besides this one (real descendants).
     tree-size: int,
     // Vigie itself: it must not suspend itself.
@@ -145,6 +166,8 @@ component SortHeader inherits Rectangle {
     // Machine-wide figure shown above the label, as Task Manager does ("34 %" over "CPU").
     in property <string> total;
     callback clicked(int);
+    // Right click, at this point of the window.
+    callback menu(length, length);
     property <bool> active: column == sort-column;
 
     // Labels share the bottom line, with or without a total above.
@@ -167,6 +190,11 @@ component SortHeader inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(root.column); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
     }
 }
 
@@ -363,6 +391,26 @@ component Rail inherits Rectangle {
         HorizontalLayout {
             alignment: center;
             RailItem {
+                label: @tr("Details");
+                // A list with bullets.
+                icon: "M 4 6 L 5 6 M 4 12 L 5 12 M 4 18 L 5 18 M 9 6 L 20 6 M 9 12 L 20 12 M 9 18 L 20 18";
+                active: root.tab == 7;
+                clicked => { root.selected(7); }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            RailItem {
+                label: @tr("Users");
+                // Two people.
+                icon: "M 12 8 A 3 3 0 1 1 6 8 A 3 3 0 1 1 12 8 M 3 19 A 6 5 0 0 1 15 19 M 15 5.3 A 3 3 0 0 1 15 10.7 M 17 14.3 A 6 5 0 0 1 21 19";
+                active: root.tab == 8;
+                clicked => { root.selected(8); }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            RailItem {
                 label: @tr("Diagnostics");
                 // A magnifying glass.
                 icon: "M 17 10.5 A 6.5 6.5 0 1 1 4 10.5 A 6.5 6.5 0 1 1 17 10.5 M 15.2 15.2 L 20 20";
@@ -480,8 +528,24 @@ export component AppWindow inherits Window {
     // The selected process. Rust keeps `selected` up to date as rows refresh, and clears
     // `has-selection` when the process leaves the table.
     in-out property <bool> has-selection;
-    // Shown view: 0 processes, 1 performance, 2 diagnostics.
+    // Shown view: 0 processes, 1 performance, 2 diagnostics, 3 ports, 4 files, 5 startup,
+    // 6 settings, 7 details, 8 users.
     in-out property <int> tab;
+    // The Processes view groups by type (sections and trees); Details is always flat.
+    in-out property <bool> grouped: true;
+    callback grouped-changed(bool);
+    in property <[UserRowUi]> users;
+    callback user-toggled(int);
+    callback expand-all();
+    callback collapse-all();
+    // Desktop actions of the context menus (vigie-shell).
+    callback copy-text(string);
+    callback reveal-path(string);
+    callback show-properties(string);
+    callback search-online(string);
+    // "Go to process": the PID to select once its row arrives (-1 for none), see src/model.rs.
+    in-out property <int> pending-select: -1;
+    in-out property <int> pending-tries;
     callback tab-changed(int);
     in property <PerfView> perf;
     in property <[float]> perf-cores;
@@ -588,7 +652,7 @@ export component AppWindow inherits Window {
     callback move-selection(int);
     // Last action's outcome, shown in the status bar (see src/model.rs for the codes).
     in-out property <int> notice-kind;
-    in property <string> notice-name;
+    in-out property <string> notice-name;
     in property <int> notice-pid;
     in property <int> notice-count;
     callback request-action(int, int, int);
@@ -604,6 +668,240 @@ export component AppWindow inherits Window {
     property <bool> searching: root.search-text != "";
     // Stopping a service (confirm-action 20): its short name.
     property <string> confirm-service;
+
+    // Context menu (ui/menu.slint). Contexts: 1 a process row, 2 the table header, 3 the ··· menu,
+    // 4 a port, 5 a process holding a file, 6 a startup app, 7 a service.
+    property <bool> menu-open;
+    property <int> menu-context;
+    property <length> menu-x;
+    property <length> menu-y;
+    // Open submenu (0 none) and where its entry sits in the main panel.
+    property <int> menu-sub;
+    property <length> menu-sub-y;
+    property <int> menu-index: -1;
+    property <int> menu-sub-index: -1;
+    // The keyboard is in the submenu.
+    property <bool> menu-in-sub;
+    // What the menu acts on.
+    property <ProcRow> menu-row;
+    property <PortRowUi> menu-port;
+    property <LockRowUi> menu-lock;
+    property <StartupRowUi> menu-startup;
+    property <ServiceRowUi> menu-service;
+
+    public function open-menu(context: int, x: length, y: length) {
+        root.menu-context = context;
+        root.menu-x = x;
+        root.menu-y = y;
+        root.menu-sub = 0;
+        root.menu-index = -1;
+        root.menu-sub-index = -1;
+        root.menu-in-sub = false;
+        root.menu-open = true;
+    }
+
+    // For screenshots (--menu): the menu of the selection, of the header, or ···.
+    public function open-test-menu(context: int) {
+        root.menu-row = root.selected;
+        root.open-menu(context, context == 3 ? root.width - 248px : 360px, context == 3 ? 92px : 220px);
+    }
+
+    function close-menu() {
+        root.menu-open = false;
+        root.menu-sub = 0;
+    }
+
+    function column-entries() -> [MenuEntry] {
+        return [
+            { id: 200, title: @tr("Publisher"), checkable: true, checked: root.columns.publisher },
+            { id: 201, title: @tr("PID"), checkable: true, checked: root.columns.pid },
+            { id: 202, title: @tr("CPU"), checkable: true, checked: root.columns.cpu },
+            { id: 203, title: @tr("Memory"), checkable: true, checked: root.columns.memory },
+        ];
+    }
+
+    // The entries of a context. Entries that do not apply are hidden or disabled, so each
+    // context keeps one fixed list.
+    function menu-items(context: int) -> [MenuEntry] {
+        if (context == 1) {
+            return [
+                { id: 110, title: root.menu-row.expanded ? @tr("Collapse") : @tr("Expand"), hidden: !root.menu-row.expandable || root.tab == 7, hint: root.menu-row.expanded ? "←" : "→" },
+                { separator: true, hidden: !root.menu-row.expandable || root.tab == 7 },
+                { id: 100, title: @tr("End task"), danger: true, hint: @tr("Del") },
+                { id: 101, title: @tr("End process tree"), danger: true, disabled: root.menu-row.tree-size == 0 },
+                { separator: true },
+                { id: 102, title: @tr("Suspend"), disabled: root.menu-row.own },
+                { id: 103, title: @tr("Resume") },
+                { id: 104, title: @tr("Priority"), submenu: 1 },
+                { separator: true },
+                { id: 112, title: @tr("Show history"), hint: "Ctrl+H" },
+                { id: 109, title: @tr("Go to details"), hidden: root.tab == 7 },
+                { id: 113, title: @tr("Go to process"), hidden: root.tab != 7 },
+                { separator: true },
+                { id: 105, title: @tr("Open file location"), disabled: root.menu-row.path == "" },
+                { id: 107, title: @tr("Search online") },
+                { id: 108, title: @tr("Properties"), disabled: root.menu-row.path == "" },
+                { id: 106, title: @tr("Copy command line") },
+            ];
+        }
+        if (context == 2) {
+            return root.column-entries();
+        }
+        if (context == 3) {
+            return [
+                { id: 102, title: @tr("Suspend"), disabled: !root.has-selection || root.selected.own },
+                { id: 103, title: @tr("Resume"), disabled: !root.has-selection },
+                { id: 104, title: @tr("Priority"), submenu: 1, disabled: !root.has-selection },
+                { id: 105, title: @tr("Open file location"), disabled: !root.has-selection || root.selected.path == "" },
+                { id: 106, title: @tr("Copy command line"), disabled: !root.has-selection },
+                { separator: true },
+                { id: 120, title: @tr("View"), submenu: 2 },
+                { id: 121, title: @tr("Columns"), submenu: 3 },
+                { separator: true },
+                { id: 122, title: @tr("About Vigie") },
+            ];
+        }
+        if (context == 4) {
+            return [
+                { id: 400, title: @tr("End task"), danger: true, hint: @tr("Del"), disabled: !root.menu-port.can-end },
+                { separator: true },
+                { id: 401, title: @tr("Go to process"), disabled: root.menu-port.name == "" },
+                { id: 402, title: @tr("Copy local address") },
+                { id: 403, title: @tr("Copy remote address"), hidden: root.menu-port.remote == "" },
+                { id: 404, title: @tr("Copy process name"), disabled: root.menu-port.name == "" },
+            ];
+        }
+        if (context == 5) {
+            return [
+                { id: 410, title: @tr("End task"), danger: true, disabled: !root.menu-lock.can-end },
+                { separator: true },
+                { id: 411, title: @tr("Go to process") },
+                { id: 412, title: @tr("Copy process name") },
+            ];
+        }
+        if (context == 6) {
+            return [
+                { id: 420, title: root.menu-startup.enabled ? @tr("Disable") : @tr("Enable") },
+                { separator: true },
+                { id: 421, title: @tr("Open file location"), disabled: root.menu-startup.exe == "" },
+                { id: 422, title: @tr("Search online") },
+                { id: 423, title: @tr("Properties"), disabled: root.menu-startup.exe == "" },
+                { id: 424, title: @tr("Copy command line") },
+            ];
+        }
+        if (context == 7) {
+            return [
+                { id: 430, title: @tr("Start"), disabled: root.menu-service.state != 4 || root.menu-service.start-type == 3 },
+                { id: 431, title: @tr("Stop"), danger: true, disabled: root.menu-service.state != 0 },
+                { separator: true },
+                { id: 432, title: @tr("Go to process"), disabled: root.menu-service.pid <= 0 },
+                { id: 433, title: @tr("Search online") },
+                { id: 434, title: @tr("Copy name") },
+            ];
+        }
+        return [];
+    }
+
+    // Submenus: 1 priority, 2 view, 3 columns.
+    function submenu-items(id: int) -> [MenuEntry] {
+        if (id == 1) {
+            return [
+                { id: 140, title: root.priority-name(4) },
+                { id: 141, title: root.priority-name(5) },
+                { id: 142, title: root.priority-name(6) },
+                { id: 143, title: root.priority-name(7) },
+                { id: 144, title: root.priority-name(8) },
+            ];
+        }
+        if (id == 2) {
+            return [
+                { id: 300, title: @tr("Group by type"), checkable: true, checked: root.grouped },
+                { separator: true },
+                { id: 301, title: @tr("Expand all"), disabled: !root.grouped },
+                { id: 302, title: @tr("Collapse all"), disabled: !root.grouped },
+            ];
+        }
+        if (id == 3) {
+            return root.column-entries();
+        }
+        return [];
+    }
+
+    // The process the process entries act on: the clicked row, or the selection (··· menu).
+    function menu-target() -> ProcRow {
+        return root.menu-context == 1 ? root.menu-row : root.selected;
+    }
+
+    function go-to-process(pid: int) {
+        root.search-text = "";
+        root.search-edited("");
+        root.pending-select = pid;
+        root.pending-tries = 4;
+        root.show-tab(7);
+    }
+
+    public function run-menu(id: int) {
+        let target = root.menu-target();
+        root.close-menu();
+        if (id == 100) { root.ask(target, 0); }
+        else if (id == 101) { root.ask(target, 1); }
+        else if (id == 102) { root.ask(target, 2); }
+        else if (id == 103) { root.ask(target, 3); }
+        else if (id >= 140 && id <= 144) { root.ask(target, id - 136); }
+        else if (id == 105) { root.reveal-path(target.path); }
+        else if (id == 106) { root.ask(target, 10); }
+        else if (id == 107) { root.search-online(target.name == target.file ? target.file : target.file + " " + target.name); }
+        else if (id == 108) { root.show-properties(target.path); }
+        else if (id == 109) { root.go-to-process(target.pid); }
+        else if (id == 110) { root.toggle-clicked(target.pid); }
+        else if (id == 112) {
+            if (root.tab != 0 && root.tab != 7) { root.show-tab(0); }
+            root.select(target);
+            root.history-open = true;
+            root.history-toggled(true);
+        }
+        else if (id == 113) {
+            root.search-text = "";
+            root.search-edited("");
+            root.pending-select = target.pid;
+            root.pending-tries = 4;
+            root.show-tab(0);
+        }
+        else if (id == 122) { root.show-about(); }
+        else if (id == 200) { root.columns.publisher = !root.columns.publisher; }
+        else if (id == 201) { root.columns.pid = !root.columns.pid; }
+        else if (id == 202) { root.columns.cpu = !root.columns.cpu; }
+        else if (id == 203) { root.columns.memory = !root.columns.memory; }
+        else if (id == 300) {
+            root.grouped = !root.grouped;
+            root.grouped-changed(root.grouped);
+        }
+        else if (id == 301) { root.expand-all(); }
+        else if (id == 302) { root.collapse-all(); }
+        else if (id == 400) { root.ask({ name: root.menu-port.name, pid: root.menu-port.pid, start: root.menu-port.start }, 0); }
+        else if (id == 401) { root.go-to-process(root.menu-port.pid); }
+        else if (id == 402) { root.copy-text(root.menu-port.address + ":" + root.menu-port.port); }
+        else if (id == 403) { root.copy-text(root.menu-port.remote); }
+        else if (id == 404) { root.copy-text(root.menu-port.name); }
+        else if (id == 410) { root.ask({ name: root.menu-lock.name, pid: root.menu-lock.pid, start: root.menu-lock.start }, 0); }
+        else if (id == 411) { root.go-to-process(root.menu-lock.pid); }
+        else if (id == 412) { root.copy-text(root.menu-lock.name); }
+        else if (id == 420) { root.startup-toggled(root.menu-startup.location, root.menu-startup.name, !root.menu-startup.enabled); }
+        else if (id == 421) { root.reveal-path(root.menu-startup.exe); }
+        else if (id == 422) { root.search-online(root.menu-startup.title); }
+        else if (id == 423) { root.show-properties(root.menu-startup.exe); }
+        else if (id == 424) { root.copy-text(root.menu-startup.command); }
+        else if (id == 430) { root.service-control(root.menu-service.name, true); }
+        else if (id == 431) {
+            root.confirm-action = 20;
+            root.confirm-name = root.menu-service.display;
+            root.confirm-service = root.menu-service.name;
+            root.confirm-open = true;
+        }
+        else if (id == 432) { root.go-to-process(root.menu-service.pid); }
+        else if (id == 433) { root.search-online(root.menu-service.display + " " + root.menu-service.name); }
+        else if (id == 434) { root.copy-text(root.menu-service.name); }
+    }
 
     // Destructive actions ask first and name their target; the others run at once.
     public function ask(item: ProcRow, action: int) {
@@ -643,7 +941,7 @@ export component AppWindow inherits Window {
     // Commands of the palette (ids from PaletteText).
     public function run-command(id: int) {
         root.palette-open = false;
-        if (id >= 0 && id <= 6) {
+        if (id >= 0 && id <= 8) {
             root.show-tab(id);
         } else if (id == 10) {
             root.show-tab(0);
@@ -710,12 +1008,15 @@ export component AppWindow inherits Window {
             : root.notice-kind == 18 ? @tr("Ctrl+Shift+Esc opens Task Manager again")
             : root.notice-kind == 19 ? @tr("Nothing changed: the administrator prompt was declined")
             : root.notice-kind == 20 ? @tr("Could not change what Ctrl+Shift+Esc opens")
+            : root.notice-kind == 21 ? @tr("Copied “{}”", root.notice-name)
+            : root.notice-kind == 22 ? @tr("Could not copy: the clipboard is busy")
             : "";
     }
 
     // Notices that report a failure (see src/model.rs for the codes).
     function notice-failed() -> bool {
-        return (root.notice-kind >= 7 && root.notice-kind <= 9) || (root.notice-kind >= 14 && root.notice-kind <= 16) || root.notice-kind >= 19;
+        return (root.notice-kind >= 7 && root.notice-kind <= 9) || (root.notice-kind >= 14 && root.notice-kind <= 16)
+            || (root.notice-kind >= 19 && root.notice-kind <= 20) || root.notice-kind == 22;
     }
 
     function clear-search() {
@@ -758,13 +1059,13 @@ export component AppWindow inherits Window {
                 root.open-palette();
                 return accept;
             }
-            // Ctrl+1 to Ctrl+7 switch views, in rail order.
-            if (event.modifiers.control && event.text >= "1" && event.text <= "7" && event.text.character-count == 1) {
-                root.show-tab(event.text.to-float() - 1);
+            // Ctrl+1 to Ctrl+9 switch views, in rail order.
+            if (event.modifiers.control && event.text >= "1" && event.text <= "9" && event.text.character-count == 1) {
+                root.show-tab(RailOrder.tab(event.text.to-float()));
                 return accept;
             }
             // Ctrl+H shows or hides the history of the selected process.
-            if (event.modifiers.control && (event.text == "h" || event.text == "H") && root.tab == 0) {
+            if (event.modifiers.control && (event.text == "h" || event.text == "H") && (root.tab == 0 || root.tab == 7)) {
                 root.history-open = !root.history-open;
                 root.history-toggled(root.history-open);
                 return accept;
@@ -787,15 +1088,16 @@ export component AppWindow inherits Window {
             Rectangle {
             horizontal-stretch: 1;
             // The process view stays alive while hidden, so it keeps its scroll and selection.
+            // Details (tab 7) shows the same table as one flat list.
             VerticalLayout {
-            visible: root.tab == 0;
+            visible: root.tab == 0 || root.tab == 7;
             HorizontalLayout {
                 padding: Theme.space-3;
                 padding-left: Theme.space-4;
                 padding-right: Theme.space-4;
                 spacing: Theme.space-2;
                 Text {
-                    text: @tr("Processes");
+                    text: root.tab == 7 ? @tr("Details") : @tr("Processes");
                     color: Theme.text;
                     font-size: Theme.font-section;
                     font-weight: Theme.weight-strong;
@@ -809,57 +1111,14 @@ export component AppWindow inherits Window {
                     text <=> root.search-text;
                     edited(text) => { root.search-edited(text); }
                 }
-                // Everything else: process actions, columns, About.
-                more := ContextMenuArea {
+                // Everything else: process actions, view, columns, About.
+                more-button := VButton {
                     width: 32px;
-                    Menu {
-                        MenuItem {
-                            title: @tr("Suspend");
-                            enabled: root.has-selection && !root.selected.own;
-                            activated => { root.ask(root.selected, 2); }
-                        }
-                        MenuItem {
-                            title: @tr("Resume");
-                            enabled: root.has-selection;
-                            activated => { root.ask(root.selected, 3); }
-                        }
-                        Menu {
-                            title: @tr("Priority");
-                            enabled: root.has-selection;
-                            MenuItem { title: root.priority-name(4); activated => { root.ask(root.selected, 4); } }
-                            MenuItem { title: root.priority-name(5); activated => { root.ask(root.selected, 5); } }
-                            MenuItem { title: root.priority-name(6); activated => { root.ask(root.selected, 6); } }
-                            MenuItem { title: root.priority-name(7); activated => { root.ask(root.selected, 7); } }
-                            MenuItem { title: root.priority-name(8); activated => { root.ask(root.selected, 8); } }
-                        }
-                        MenuItem {
-                            title: @tr("Open file location");
-                            enabled: root.has-selection;
-                            activated => { root.ask(root.selected, 9); }
-                        }
-                        MenuItem {
-                            title: @tr("Copy command line");
-                            enabled: root.has-selection;
-                            activated => { root.ask(root.selected, 10); }
-                        }
-                        MenuSeparator { }
-                        Menu {
-                            title: @tr("Columns");
-                            MenuItem { title: @tr("Publisher"); checkable: true; checked: root.columns.publisher; activated => { root.columns.publisher = !root.columns.publisher; } }
-                            MenuItem { title: @tr("PID"); checkable: true; checked: root.columns.pid; activated => { root.columns.pid = !root.columns.pid; } }
-                            MenuItem { title: @tr("CPU"); checkable: true; checked: root.columns.cpu; activated => { root.columns.cpu = !root.columns.cpu; } }
-                            MenuItem { title: @tr("Memory"); checkable: true; checked: root.columns.memory; activated => { root.columns.memory = !root.columns.memory; } }
-                        }
-                        MenuSeparator { }
-                        MenuItem {
-                            title: @tr("About Vigie");
-                            activated => { root.show-about(); }
-                        }
-                    }
-                    more-button := VButton {
-                        width: 32px;
-                        text: "···";
-                        clicked => { more.show({ x: 0, y: self.height }); }
+                    text: "···";
+                    clicked => {
+                        root.open-menu(3, self.absolute-position.x + self.width, self.absolute-position.y + self.height + 4px);
+                        // Right-aligned under the button.
+                        root.menu-x = self.absolute-position.x + self.width - 232px;
                     }
                 }
             }
@@ -910,19 +1169,21 @@ export component AppWindow inherits Window {
 
             // Right-click the header to choose the columns (also in the ··· menu). Two lines high:
             // machine totals sit above the CPU and memory labels.
-            ContextMenuArea {
+            Rectangle {
                 height: 40px;
-                Menu {
-                    MenuItem { title: @tr("Publisher"); checkable: true; checked: root.columns.publisher; activated => { root.columns.publisher = !root.columns.publisher; } }
-                    MenuItem { title: @tr("PID"); checkable: true; checked: root.columns.pid; activated => { root.columns.pid = !root.columns.pid; } }
-                    MenuItem { title: @tr("CPU"); checkable: true; checked: root.columns.cpu; activated => { root.columns.cpu = !root.columns.cpu; } }
-                    MenuItem { title: @tr("Memory"); checkable: true; checked: root.columns.memory; activated => { root.columns.memory = !root.columns.memory; } }
+                TouchArea {
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                            root.open-menu(2, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                        }
+                    }
                 }
                 Columns {
                     SortHeader {
                         label: @tr("Name"); column: 0; horizontal-stretch: 1;
                         sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                         clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
                     }
                     if root.columns.publisher: VerticalLayout {
                         width: 160px;
@@ -934,16 +1195,19 @@ export component AppWindow inherits Window {
                         label: @tr("PID"); column: 1; width: 72px; alignment: right;
                         sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                         clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
                     }
                     if root.columns.cpu: SortHeader {
                         label: @tr("CPU"); column: 2; width: 88px; alignment: right; total: root.total-cpu;
                         sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                         clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
                     }
                     if root.columns.memory: SortHeader {
                         label: @tr("Memory"); column: 3; width: 120px; alignment: right; total: root.total-memory;
                         sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                         clicked(c) => { root.sort-clicked(c); }
+                        menu(x, y) => { root.open-menu(2, x, y); }
                     }
                 }
                 Rectangle {
@@ -980,6 +1244,11 @@ export component AppWindow inherits Window {
                         root.ask(root.selected, 0);
                         return accept;
                     }
+                    if (event.text == Key.Menu || (event.modifiers.shift && event.text == Key.F10)) {
+                        root.menu-row = root.selected;
+                        root.open-menu(1, self.absolute-position.x + 160px, self.absolute-position.y + Theme.row-height);
+                        return accept;
+                    }
                     return reject;
                 }
 
@@ -993,45 +1262,7 @@ export component AppWindow inherits Window {
                             open: row.expanded;
                             toggle => { root.group-clicked(row.group); }
                         }
-                        if row.kind != 0: ContextMenuArea {
-                            Menu {
-                                MenuItem {
-                                    title: @tr("End task");
-                                    activated => { root.ask(row, 0); }
-                                }
-                                MenuItem {
-                                    title: @tr("End process tree");
-                                    enabled: row.tree-size > 0;
-                                    activated => { root.ask(row, 1); }
-                                }
-                                MenuSeparator { }
-                                MenuItem {
-                                    title: @tr("Suspend");
-                                    enabled: !row.own;
-                                    activated => { root.ask(row, 2); }
-                                }
-                                MenuItem {
-                                    title: @tr("Resume");
-                                    activated => { root.ask(row, 3); }
-                                }
-                                Menu {
-                                    title: @tr("Priority");
-                                    MenuItem { title: root.priority-name(4); activated => { root.ask(row, 4); } }
-                                    MenuItem { title: root.priority-name(5); activated => { root.ask(row, 5); } }
-                                    MenuItem { title: root.priority-name(6); activated => { root.ask(row, 6); } }
-                                    MenuItem { title: root.priority-name(7); activated => { root.ask(row, 7); } }
-                                    MenuItem { title: root.priority-name(8); activated => { root.ask(row, 8); } }
-                                }
-                                MenuSeparator { }
-                                MenuItem {
-                                    title: @tr("Open file location");
-                                    activated => { root.ask(row, 9); }
-                                }
-                                MenuItem {
-                                    title: @tr("Copy command line");
-                                    activated => { root.ask(row, 10); }
-                                }
-                            }
+                        if row.kind != 0: Rectangle {
                             // Hover and selection tints, under the content.
                             Rectangle {
                                 background: is-selected ? Theme.selection
@@ -1052,6 +1283,10 @@ export component AppWindow inherits Window {
                                 pointer-event(event) => {
                                     if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
                                         root.select(row);
+                                    }
+                                    if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                                        root.menu-row = row;
+                                        root.open-menu(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                                     }
                                 }
                             }
@@ -1184,6 +1419,19 @@ export component AppWindow inherits Window {
             }
             }
 
+            if root.tab == 8: UsersView {
+                rows: root.users;
+                icons: root.icons;
+                available: root.tools-available;
+                total-cpu: root.total-cpu;
+                total-memory: root.total-memory;
+                toggle(session) => { root.user-toggled(session); }
+                menu(row, x, y) => {
+                    root.menu-row = { key: row.pid * 2, kind: 1, name: row.name, pid: row.pid, start: row.start, file: row.file, path: row.path };
+                    root.open-menu(1, x, y);
+                }
+            }
+
             if root.tab == 1: PerformanceView {
                 view: root.perf;
                 cores: root.perf-cores;
@@ -1226,6 +1474,10 @@ export component AppWindow inherits Window {
                 selected <=> root.ports-selected;
                 filter-edited(text) => { root.ports-filter-edited(text); }
                 end(row) => { root.ask({ name: row.name, pid: row.pid, start: row.start }, 0); }
+                menu(row, x, y) => {
+                    root.menu-port = row;
+                    root.open-menu(4, x, y);
+                }
             }
 
             if root.tab == 4: FilesView {
@@ -1238,6 +1490,10 @@ export component AppWindow inherits Window {
                 path <=> root.file-path;
                 check(path) => { root.check-file(path); }
                 end(row) => { root.ask({ name: row.name, pid: row.pid, start: row.start }, 0); }
+                menu(row, x, y) => {
+                    root.menu-lock = row;
+                    root.open-menu(5, x, y);
+                }
             }
 
             if root.tab == 6: SettingsView {
@@ -1277,6 +1533,14 @@ export component AppWindow inherits Window {
                 refresh => { root.startup-refresh(); }
                 service-filter-edited(text) => { root.service-filter-edited(text); }
                 start-service(service) => { root.service-control(service.name, true); }
+                item-menu(item, x, y) => {
+                    root.menu-startup = item;
+                    root.open-menu(6, x, y);
+                }
+                service-menu(service, x, y) => {
+                    root.menu-service = service;
+                    root.open-menu(7, x, y);
+                }
                 // Stopping can break what depends on the service: ask first, naming it.
                 stop-service(service) => {
                     root.confirm-action = 20;
@@ -1324,6 +1588,95 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                     }
                 }
+            }
+        }
+    }
+
+    // The context menu: a click outside or Escape closes it; arrows, Enter and Right/Left work.
+    if root.menu-open: Rectangle {
+        TouchArea {
+            clicked => { root.close-menu(); }
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                    root.close-menu();
+                }
+            }
+        }
+        FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                let items = root.menu-in-sub ? root.submenu-items(root.menu-sub) : root.menu-items(root.menu-context);
+                let index = root.menu-in-sub ? root.menu-sub-index : root.menu-index;
+                if (event.text == Key.Escape) {
+                    if (root.menu-in-sub) {
+                        root.menu-in-sub = false;
+                        root.menu-sub = 0;
+                    } else {
+                        root.close-menu();
+                    }
+                    return accept;
+                }
+                if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                    let next = MenuNav.next(items, index, event.text == Key.DownArrow ? 1 : -1);
+                    if (root.menu-in-sub) { root.menu-sub-index = next; } else { root.menu-index = next; }
+                    return accept;
+                }
+                if (event.text == Key.LeftArrow && root.menu-in-sub) {
+                    root.menu-in-sub = false;
+                    root.menu-sub = 0;
+                    return accept;
+                }
+                if ((event.text == Key.RightArrow || event.text == Key.Return || event.text == " ") && !root.menu-in-sub
+                    && index >= 0 && index < items.length && items[index].submenu > 0) {
+                    root.menu-sub = items[index].submenu;
+                    root.menu-sub-y = MenuNav.offset(items, index);
+                    root.menu-in-sub = true;
+                    root.menu-sub-index = MenuNav.next(root.submenu-items(root.menu-sub), -1, 1);
+                    return accept;
+                }
+                if ((event.text == Key.Return || event.text == " ") && index >= 0 && index < items.length) {
+                    root.run-menu(items[index].id);
+                    return accept;
+                }
+                return accept;
+            }
+            main-menu := MenuPanel {
+                items: root.menu-items(root.menu-context);
+                current <=> root.menu-index;
+                open-submenu: root.menu-sub > 0 ? MenuNav.submenu-at(self.items, root.menu-sub) : -1;
+                x: clamp(root.menu-x, 4px, root.width - self.width - 4px);
+                y: root.menu-y + self.height > root.height - 4px ? max(4px, root.menu-y - self.height) : root.menu-y;
+                activated(index) => {
+                    let item = self.items[index];
+                    if (item.submenu > 0) {
+                        root.menu-sub = item.submenu;
+                        root.menu-sub-y = MenuNav.offset(self.items, index);
+                        root.menu-in-sub = true;
+                        root.menu-sub-index = -1;
+                    } else {
+                        root.run-menu(item.id);
+                    }
+                }
+                hovered(index, y) => {
+                    let item = self.items[index];
+                    root.menu-in-sub = false;
+                    if (item.submenu > 0) {
+                        root.menu-sub = item.submenu;
+                        root.menu-sub-y = y;
+                        root.menu-sub-index = -1;
+                    } else {
+                        root.menu-sub = 0;
+                    }
+                }
+            }
+            if root.menu-sub > 0: sub-menu := MenuPanel {
+                items: root.submenu-items(root.menu-sub);
+                current <=> root.menu-sub-index;
+                // To the right of the main panel, or to its left when there is no room.
+                x: main-menu.x + main-menu.width + self.width + 2px <= root.width ? main-menu.x + main-menu.width - 2px : max(4px, main-menu.x - self.width + 2px);
+                y: min(main-menu.y + root.menu-sub-y, max(4px, root.height - self.height - 4px));
+                activated(index) => { root.run-menu(self.items[index].id); }
+                hovered(index, y) => { root.menu-in-sub = true; }
             }
         }
     }

@@ -3,6 +3,8 @@
 //! crate never depends on Slint, so `vigie-app` makes no OS calls of its own.
 
 #[cfg(windows)]
+mod desktop_windows;
+#[cfg(windows)]
 mod instance_windows;
 pub mod settings_file;
 #[cfg(windows)]
@@ -12,6 +14,81 @@ mod tray_windows;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Small actions on the desktop, for the context menus. Each returns false when it could not be
+/// done (or does not exist on this system).
+pub mod desktop {
+    use std::path::Path;
+
+    /// Puts `text` on the clipboard.
+    pub fn copy_text(text: &str) -> bool {
+        #[cfg(windows)]
+        {
+            crate::desktop_windows::copy_text(text)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = text;
+            false
+        }
+    }
+
+    /// Opens the folder of `path` in the file manager, with the file highlighted.
+    pub fn reveal(path: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            crate::desktop_windows::reveal(path)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            false
+        }
+    }
+
+    /// Shows the system's Properties dialog of a file. Call on the UI thread: the dialog lives
+    /// on the caller's message loop.
+    pub fn properties(path: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            crate::desktop_windows::properties(path)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            false
+        }
+    }
+
+    /// Searches the web for `query` in the default browser, as Task Manager's "Search online".
+    pub fn search_online(query: &str) -> bool {
+        let url = search_url(query);
+        #[cfg(windows)]
+        {
+            crate::desktop_windows::open_url(&url)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = url;
+            false
+        }
+    }
+
+    /// A Bing search for `query`, as Task Manager uses, with the query percent-encoded.
+    pub fn search_url(query: &str) -> String {
+        let mut url = String::from("https://www.bing.com/search?q=");
+        for byte in query.trim().bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    url.push(char::from(byte));
+                }
+                b' ' => url.push('+'),
+                _ => url.push_str(&format!("%{byte:02X}")),
+            }
+        }
+        url
+    }
+}
 
 /// Held while this process is the running Vigie (decision 0009).
 pub struct Instance {
@@ -294,6 +371,18 @@ fn clamp_into(area: Rect, x: i32, y: i32, width: i32, height: i32) -> (i32, i32)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_queries_are_encoded() {
+        assert_eq!(
+            desktop::search_url(" brave.exe Brave Browser "),
+            "https://www.bing.com/search?q=brave.exe+Brave+Browser"
+        );
+        assert_eq!(
+            desktop::search_url("a&b=é"),
+            "https://www.bing.com/search?q=a%26b%3D%C3%A9"
+        );
+    }
 
     #[test]
     fn windows_stay_in_the_work_area() {

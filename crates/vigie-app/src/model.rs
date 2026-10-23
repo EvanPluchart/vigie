@@ -17,7 +17,7 @@ use vigie_probe::{
 
 use crate::{
     AppWindow, CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, MiniRow,
-    PerfView, PortRowUi, ProcRow, ServiceRowUi, StartupRowUi,
+    PerfView, PortRowUi, ProcRow, ServiceRowUi, StartupRowUi, UserRowUi,
 };
 
 /// Row kinds as `ui/app.slint` reads them.
@@ -60,6 +60,8 @@ pub struct UiFrame {
     pub tooltip: Option<(SharedString, SharedString)>,
     /// `Some` while the tray mini view is open.
     pub mini: Option<MiniUi>,
+    /// `Some` while the Users view is shown.
+    pub users: Option<Vec<UserRowUi>>,
 }
 
 /// The Performance view's data, ready for its models.
@@ -109,6 +111,7 @@ impl UiFrame {
             alerts: Vec::new(),
             tooltip: None,
             mini: None,
+            users: None,
             rows: with_rows.then(|| frame.rows.iter().map(proc_row).collect()),
             process_count: frame.process_count.to_string().into(),
             matching_count: frame.matching_count.to_string().into(),
@@ -194,6 +197,8 @@ fn proc_row(row: &Row) -> ProcRow {
         pid,
         start: (row.start_time & 0x7fff_ffff) as i32,
         publisher: row.publisher.as_deref().unwrap_or_default().into(),
+        file: row.file.as_str().into(),
+        path: row.path.as_deref().unwrap_or_default().into(),
         tree_size: i32::try_from(row.tree_size).unwrap_or(i32::MAX),
         own: row.own,
         cpu: if figures {
@@ -231,6 +236,7 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
     ) {
         patch(model, new_rows);
         refresh_selection(&app, model);
+        select_pending(&app, model);
     }
     if let Some(perf) = frame.perf {
         app.set_perf(perf.view);
@@ -252,6 +258,9 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
             app.set_perf_disk_graphs(models(graphs.disks));
             app.set_perf_gpu_graphs(models(graphs.gpus));
         }
+    }
+    if let Some(users) = frame.users {
+        patch_values(&app.get_users(), users);
     }
     if let Some(diagnostics) = frame.diagnostics {
         // Patched, not replaced: replacing would rebuild every card each time and lose a
@@ -1139,6 +1148,12 @@ pub fn startup_rows_ui(items: &[StartupItem], details: &[Option<Details>]) -> Ve
                 location: location_code(item.location),
                 enabled: item.enabled,
                 icon: icon_index(details.and_then(|d| d.icon)),
+                exe: item
+                    .exe
+                    .as_deref()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+                    .into(),
             }
         })
         .collect()
@@ -1210,6 +1225,34 @@ fn refresh_selection(app: &AppWindow, model: &VecModel<ProcRow>) {
     }
 }
 
+/// "Go to process" from another view: selects the process once its row arrives. Gives up after
+/// a few frames (the process may have exited meanwhile).
+fn select_pending(app: &AppWindow, model: &VecModel<ProcRow>) {
+    let pid = app.get_pending_select();
+    if pid < 0 {
+        return;
+    }
+    let found = model
+        .iter()
+        .position(|r| r.kind == KIND_PROCESS && r.pid == pid);
+    match found {
+        Some(index) => {
+            if let Some(row) = model.row_data(index) {
+                app.invoke_select(row);
+                app.invoke_scroll_to(index as i32);
+            }
+            app.set_pending_select(-1);
+        }
+        None => {
+            let tries = app.get_pending_tries() - 1;
+            app.set_pending_tries(tries);
+            if tries <= 0 {
+                app.set_pending_select(-1);
+            }
+        }
+    }
+}
+
 /// Index of the process row `delta` rows away from the selection (headers skipped, clamped to
 /// the table). With no selection, the first process row.
 pub fn step_selection(
@@ -1262,6 +1305,70 @@ fn unit(english: &'static str, french_unit: &'static str) -> &'static str {
 }
 
 /// "—" when there is no value yet, never a misleading 0.
+/// The Users view's rows: each user session, then its processes when expanded.
+pub fn user_rows_ui(
+    groups: &[vigie_core::users::UserGroup],
+    names: &std::collections::HashMap<u32, vigie_probe::SessionUser>,
+    expanded: &HashSet<u32>,
+    memory_total: u64,
+) -> Vec<UserRowUi> {
+    use vigie_core::{CPU_HEAT, MEMORY_HEAT, heat, memory_share};
+    let heats = |cpu: Option<f32>, memory: u64| {
+        (
+            i32::from(cpu.map_or(0, |c| heat(c, CPU_HEAT))),
+            i32::from(heat(memory_share(memory, memory_total), MEMORY_HEAT)),
+        )
+    };
+    let mut rows = Vec::new();
+    for group in groups {
+        let session = i32::try_from(group.session).unwrap_or(i32::MAX);
+        let user = names.get(&group.session);
+        let open = expanded.contains(&group.session);
+        let (cpu_heat, memory_heat) = heats(group.cpu_percent, group.memory_bytes);
+        rows.push(UserRowUi {
+            key: -1 - session,
+            kind: 0,
+            session,
+            name: match user {
+                Some(u) if !u.name.is_empty() => u.name.as_str().into(),
+                _ => format!("Session {}", group.session).into(),
+            },
+            active: user.is_some_and(|u| u.active),
+            expanded: open,
+            count: i32::try_from(group.members.len()).unwrap_or(i32::MAX),
+            cpu: format_cpu(group.cpu_percent),
+            memory: format_memory(group.memory_bytes),
+            cpu_heat,
+            memory_heat,
+            icon: -1,
+            ..UserRowUi::default()
+        });
+        if !open {
+            continue;
+        }
+        for member in &group.members {
+            let (cpu_heat, memory_heat) = heats(member.cpu_percent, member.memory_bytes);
+            rows.push(UserRowUi {
+                key: i32::try_from(member.target.pid).unwrap_or(i32::MAX),
+                kind: 1,
+                session,
+                name: member.name.as_str().into(),
+                cpu: format_cpu(member.cpu_percent),
+                memory: format_memory(member.memory_bytes),
+                cpu_heat,
+                memory_heat,
+                pid: i32::try_from(member.target.pid).unwrap_or(i32::MAX),
+                start: start_bits(member.target.start_time),
+                file: member.file.as_str().into(),
+                path: member.path.as_deref().unwrap_or_default().into(),
+                icon: icon_index(member.icon),
+                ..UserRowUi::default()
+            });
+        }
+    }
+    rows
+}
+
 pub fn format_cpu(percent: Option<f32>) -> SharedString {
     match percent {
         Some(p) => format!("{}\u{a0}%", decimal(f64::from(p), 1)).into(),
@@ -1378,6 +1485,8 @@ mod tests {
             expanded: true,
             icon: None,
             publisher: None,
+            file: "p.exe".into(),
+            path: None,
             tree_size: 1,
             own: false,
         };

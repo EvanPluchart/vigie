@@ -48,6 +48,8 @@ export struct StartupRowUi {
     location: int,
     enabled: bool,
     icon: int,
+    // The program it starts, when known: for Open file location and Properties.
+    exe: string,
 }
 
 export struct ServiceRowUi {
@@ -137,6 +139,8 @@ export component PortsView inherits Rectangle {
     callback filter-edited(string);
     // Ask to end the process of a row (the window confirms first).
     callback end(PortRowUi);
+    // Right click on a row: the window opens its menu at this point.
+    callback menu(PortRowUi, length, length);
     // A copy of the selected row: the action checks the process is still the same one. Rust
     // clears it when the row leaves the list.
     in-out property <PortRowUi> selected;
@@ -167,8 +171,8 @@ export component PortsView inherits Rectangle {
             HorizontalLayout {
                 padding-left: Theme.space-4;
                 padding-right: Theme.space-4;
-                padding-top: Theme.space-1;
-                padding-bottom: Theme.space-1;
+                padding-top: 6px;
+                padding-bottom: 6px;
                 spacing: Theme.space-2;
                 property <PortRowUi> current: root.selected;
                 Cell {
@@ -231,10 +235,18 @@ if root.available && root.rows.length > 0: ports-keys := FocusScope {
                     background: self.is-selected ? Theme.selection : touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
                     touch := TouchArea {
                         clicked => {
-                        root.selected = row;
-                        root.cursor = i;
-                        ports-keys.focus();
-                    }
+                            root.selected = row;
+                            root.cursor = i;
+                            ports-keys.focus();
+                        }
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                                root.selected = row;
+                                root.cursor = i;
+                                ports-keys.focus();
+                                root.menu(row, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                        }
                     }
                     HorizontalLayout {
                         padding-left: Theme.space-4;
@@ -283,6 +295,7 @@ export component FilesView inherits Rectangle {
     in-out property <string> path;
     callback check(string);
     callback end(LockRowUi);
+    callback menu(LockRowUi, length, length);
 
     function kind-text(kind: int, service: string) -> string {
         return kind == 1 ? @tr("Service {}", service) : kind == 2 ? @tr("Desktop shell")
@@ -349,12 +362,27 @@ export component FilesView inherits Rectangle {
                 font-size: Theme.font-body;
                 wrap: word-wrap;
             }
+            // Viewers such as Photos read a file, then close it: it shows on screen, yet nothing
+            // holds it.
+            if root.available && root.status == 1 && root.rows.length == 0: Text {
+                text: @tr("You can delete, move or rename it. A program can still show it on screen: many viewers, Photos among them, read a file and then close it.");
+                color: Theme.text-muted;
+                font-size: Theme.font-caption;
+                wrap: word-wrap;
+            }
             for row in root.rows: Rectangle {
                 height: 40px;
                 background: Theme.surface;
                 border-radius: Theme.radius-control;
                 border-width: 1px;
                 border-color: Theme.border;
+                TouchArea {
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                            root.menu(row, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                        }
+                    }
+                }
                 HorizontalLayout {
                     padding-left: Theme.space-3;
                     padding-right: Theme.space-3;
@@ -394,6 +422,8 @@ export component StartupView inherits Rectangle {
     callback refresh();
     callback service-filter-edited(string);
     callback start-service(ServiceRowUi);
+    callback item-menu(StartupRowUi, length, length);
+    callback service-menu(ServiceRowUi, length, length);
     // Ask to stop (the window confirms first).
     callback stop-service(ServiceRowUi);
     property <int> selected-service: -1;
@@ -457,7 +487,13 @@ export component StartupView inherits Rectangle {
                 for item in root.items: Rectangle {
                     height: 36px;
                     background: row-touch.has-hover ? Theme.text.with-alpha(0.04) : transparent;
-                    row-touch := TouchArea { }
+                    row-touch := TouchArea {
+                        pointer-event(event) => {
+                            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                                root.item-menu(item, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                        }
+                    }
                     HorizontalLayout {
                         padding-left: Theme.space-4;
                         padding-right: Theme.space-4;
@@ -509,8 +545,8 @@ export component StartupView inherits Rectangle {
                 HorizontalLayout {
                     padding-left: Theme.space-4;
                     padding-right: Theme.space-4;
-                    padding-top: Theme.space-1;
-                    padding-bottom: Theme.space-1;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
                     spacing: Theme.space-2;
                     property <ServiceRowUi> current: root.selected-service >= 0 && root.selected-service < root.services.length ? root.services[root.selected-service] : { name: "" };
                     VField {
@@ -578,9 +614,16 @@ if root.services-ready: services-keys := FocusScope {
                         background: i == root.selected-service ? Theme.selection : service-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
                         service-touch := TouchArea {
                             clicked => {
-                            root.selected-service = i;
-                            services-keys.focus();
-                        }
+                                root.selected-service = i;
+                                services-keys.focus();
+                            }
+                            pointer-event(event) => {
+                                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                                    root.selected-service = i;
+                                    services-keys.focus();
+                                    root.service-menu(service, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                                }
+                            }
                         }
                         HorizontalLayout {
                             padding-left: Theme.space-4;

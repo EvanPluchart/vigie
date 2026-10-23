@@ -9,6 +9,7 @@ pub mod settings;
 pub mod tools;
 pub mod tracker;
 mod tree;
+pub mod users;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -102,6 +103,10 @@ pub struct Row {
     /// Icon of the process's executable, as an index chosen by the caller of `set_details`.
     pub icon: Option<u32>,
     pub publisher: Option<Arc<str>>,
+    /// The executable's file name ("brave.exe"), even when `name` is a product name.
+    pub file: String,
+    /// Full path of the executable, when it could be read.
+    pub path: Option<Arc<str>>,
     /// Processes "end process tree" would end besides this one: all real descendants, which
     /// may include processes the display tree shows elsewhere (another app, say).
     pub tree_size: u32,
@@ -116,12 +121,13 @@ pub struct Details {
     pub icon: Option<u32>,
     pub publisher: Option<Arc<str>>,
     pub description: Option<Arc<str>>,
+    pub path: Option<Arc<str>>,
 }
 
 /// Heat thresholds: CPU in percent of the whole machine, memory in percent of physical memory.
 /// One busy core on a 16-thread machine is about 6 %, so it reads as warm, not hot.
-const CPU_HEAT: [f32; 3] = [2.0, 10.0, 30.0];
-const MEMORY_HEAT: [f32; 3] = [2.0, 5.0, 15.0];
+pub const CPU_HEAT: [f32; 3] = [2.0, 10.0, 30.0];
+pub const MEMORY_HEAT: [f32; 3] = [2.0, 5.0, 15.0];
 
 /// 0 below the first threshold, then 1, 2 or 3.
 pub fn heat(value: f32, thresholds: [f32; 3]) -> u8 {
@@ -162,6 +168,10 @@ pub struct Core {
     details: HashMap<ProcKey, Details>,
     /// Sections folded to their header.
     collapsed_groups: HashSet<Group>,
+    /// One flat list instead of sections and trees.
+    flat: bool,
+    /// Rows named by their executable file, never by product name (Details).
+    file_names: bool,
     /// Real parent links of the last sample (start times checked), for ending a whole tree.
     children: HashMap<Pid, Vec<Pid>>,
     /// History of the top consumers and of the selected process.
@@ -209,6 +219,36 @@ impl Core {
                 self.expanded.insert(key);
             }
         }
+    }
+
+    /// Shows one flat list (true) or sections with process trees.
+    pub fn set_flat(&mut self, flat: bool) {
+        self.flat = flat;
+    }
+
+    pub fn flat(&self) -> bool {
+        self.flat
+    }
+
+    /// Names every row by its executable file ("AppleMusic.exe"), as Task Manager's Details tab.
+    pub fn set_file_names(&mut self, file_names: bool) {
+        self.file_names = file_names;
+    }
+
+    /// Expands every process that has children, and unfolds every section.
+    pub fn expand_all(&mut self) {
+        let starts = &self.starts;
+        self.expanded.extend(
+            self.children
+                .keys()
+                .filter_map(|pid| starts.get(pid).map(|&start| (*pid, start))),
+        );
+        self.collapsed_groups.clear();
+    }
+
+    /// Collapses every process tree (sections stay as they are).
+    pub fn collapse_all(&mut self) {
+        self.expanded.clear();
     }
 
     /// Folds or unfolds a section of the table. Searching shows every section.
@@ -270,6 +310,16 @@ impl Core {
                 icon: details.and_then(|d| d.icon),
             }
         })
+    }
+
+    /// CPU % of a process at the last update.
+    pub(crate) fn cpu_of(&self, key: ProcKey) -> Option<f32> {
+        self.prev.get(&key).and_then(|m| m.percent)
+    }
+
+    /// Executable path of a process, when its details were read.
+    pub(crate) fn path_of(&self, key: ProcKey) -> Option<Arc<str>> {
+        self.details.get(&key).and_then(|d| d.path.clone())
     }
 
     /// Per-process histories.
@@ -371,6 +421,7 @@ impl Core {
             self.sort,
             &self.expanded,
             &self.collapsed_groups,
+            self.flat,
         );
         frame.matching_count = tree.matching;
         self.groups.clear();
@@ -383,7 +434,9 @@ impl Core {
                 .get(&(p.pid, p.start_time))
                 .and_then(|d| d.description.as_deref())
             {
-                Some(description) if tree.group[node] == Group::Apps => description,
+                Some(description) if tree.group[node] == Group::Apps && !self.file_names => {
+                    description
+                }
                 _ => &p.name,
             }
         };
@@ -417,6 +470,10 @@ impl Core {
                 publisher: details
                     .get(&(p.pid, p.start_time))
                     .and_then(|d| d.publisher.clone()),
+                file: p.name.clone(),
+                path: details
+                    .get(&(p.pid, p.start_time))
+                    .and_then(|d| d.path.clone()),
                 kind,
                 pid: p.pid,
                 start_time: p.start_time,
@@ -452,6 +509,8 @@ impl Core {
                     expanded: !collapsed,
                     icon: None,
                     publisher: None,
+                    file: String::new(),
+                    path: None,
                     tree_size: 0,
                     own: false,
                 },
@@ -483,7 +542,7 @@ impl Core {
 }
 
 /// Memory use as a percentage of physical memory; 0 when the total is unknown.
-fn memory_share(bytes: u64, total: u64) -> f32 {
+pub fn memory_share(bytes: u64, total: u64) -> f32 {
     if total == 0 {
         return 0.0;
     }
@@ -870,6 +929,60 @@ mod tests {
     }
 
     #[test]
+    fn flat_lists_every_process_alone() {
+        let mut core = by_memory();
+        core.set_flat(true);
+        let frame = core.update(&desktop_sample());
+        // No section headers, no nesting, own figures: the app is 100, not its subtree's 135.
+        assert_eq!(pids(&frame), [20, 10, 22, 21, 30, 23, 41, 40]);
+        assert!(
+            frame
+                .rows
+                .iter()
+                .all(|r| r.kind == RowKind::Process && r.depth == 0)
+        );
+        assert_eq!(row(&frame, 20).memory_bytes, 100);
+        core.set_filter("svc");
+        assert_eq!(pids(&core.update(&desktop_sample())), [41, 40]);
+    }
+
+    #[test]
+    fn expand_all_then_collapse_all() {
+        let mut core = by_memory();
+        core.toggle_group(Group::System);
+        core.update(&desktop_sample());
+        core.expand_all();
+        let frame = core.update(&desktop_sample());
+        assert!(row(&frame, 20).expanded && row(&frame, 22).expanded);
+        assert!(pids(&frame).contains(&23), "the grandchild shows");
+        assert!(pids(&frame).contains(&41), "folded sections open too");
+        core.collapse_all();
+        let frame = core.update(&desktop_sample());
+        assert!(!pids(&frame).contains(&23));
+    }
+
+    #[test]
+    fn rows_name_the_executable_file() {
+        let mut core = by_memory();
+        let s = desktop_sample();
+        core.set_details(
+            (20, 100),
+            Details {
+                description: Some("App Deluxe".into()),
+                path: Some(r"C:\Apps\app.exe".into()),
+                ..Details::default()
+            },
+        );
+        let frame = core.update(&s);
+        let app = row(&frame, 20);
+        assert_eq!(
+            (app.name.as_str(), app.file.as_str()),
+            ("App Deluxe", "app")
+        );
+        assert_eq!(app.path.as_deref(), Some(r"C:\Apps\app.exe"));
+    }
+
+    #[test]
     fn stale_parent_is_ignored() {
         // PID 22's parent 20 started after it: 20 is a reused PID, not its parent.
         let mut processes = desktop();
@@ -908,6 +1021,7 @@ mod tests {
                 icon: Some(3),
                 publisher: Some("Lagoon Labs".into()),
                 description: Some("App Deluxe".into()),
+                path: None,
             },
         );
         for pid in core.missing_details(&s) {

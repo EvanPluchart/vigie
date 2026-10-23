@@ -25,6 +25,12 @@ msgstr "Aller au démarrage et aux services"
 msgid "Go to Settings"
 msgstr "Aller aux réglages"
 
+msgid "Go to Details"
+msgstr "Aller aux détails"
+
+msgid "Go to Users"
+msgstr "Aller aux utilisateurs"
+
 msgid "Search processes"
 msgstr "Rechercher des processus"
 
@@ -94,6 +100,12 @@ msgstr "Processus"
 msgid "Performance"
 msgstr "Performances"
 
+msgid "Details"
+msgstr "Détails"
+
+msgid "Users"
+msgstr "Utilisateurs"
+
 msgid "Diagnostics"
 msgstr "Diagnostics"
 
@@ -117,6 +129,99 @@ msgstr "Un gestionnaire de tâches rapide et multiplateforme."
 
 msgid "History in memory: {}"
 msgstr "Historique en mémoire : {}"
+
+msgid "Publisher"
+msgstr "Éditeur"
+
+msgid "PID"
+msgstr "PID"
+
+msgid "CPU"
+msgstr "Processeur"
+
+msgid "Memory"
+msgstr "Mémoire"
+
+msgid "Collapse"
+msgstr "Réduire"
+
+msgid "Expand"
+msgstr "Développer"
+
+msgid "End task"
+msgstr "Fin de tâche"
+
+msgid "End process tree"
+msgstr "Fin de l’arborescence"
+
+msgid "Suspend"
+msgstr "Suspendre"
+
+msgid "Resume"
+msgstr "Reprendre"
+
+msgid "Priority"
+msgstr "Priorité"
+
+msgid "Show history"
+msgstr "Historique"
+
+msgid "Go to details"
+msgstr "Accéder aux détails"
+
+msgid "Go to process"
+msgstr "Accéder au processus"
+
+msgid "Open file location"
+msgstr "Ouvrir l’emplacement du fichier"
+
+msgid "Search online"
+msgstr "Rechercher en ligne"
+
+msgid "Properties"
+msgstr "Propriétés"
+
+msgid "Copy command line"
+msgstr "Copier la ligne de commande"
+
+msgid "View"
+msgstr "Affichage"
+
+msgid "Columns"
+msgstr "Colonnes"
+
+msgid "Copy local address"
+msgstr "Copier l’adresse locale"
+
+msgid "Copy remote address"
+msgstr "Copier l’adresse distante"
+
+msgid "Copy process name"
+msgstr "Copier le nom du processus"
+
+msgid "Disable"
+msgstr "Désactiver"
+
+msgid "Enable"
+msgstr "Activer"
+
+msgid "Start"
+msgstr "Démarrer"
+
+msgid "Stop"
+msgstr "Arrêter"
+
+msgid "Copy name"
+msgstr "Copier le nom"
+
+msgid "Group by type"
+msgstr "Regrouper par type"
+
+msgid "Expand all"
+msgstr "Développer tout"
+
+msgid "Collapse all"
+msgstr "Réduire tout"
 
 msgid "Low"
 msgstr "Basse"
@@ -193,38 +298,14 @@ msgstr "Rien n’a changé : l’invite administrateur a été refusée"
 msgid "Could not change what Ctrl+Shift+Esc opens"
 msgstr "Impossible de changer ce qu’ouvre Ctrl+Maj+Échap"
 
+msgid "Copied “{}”"
+msgstr "« {} » copié"
+
+msgid "Could not copy: the clipboard is busy"
+msgstr "Copie impossible : le presse-papiers est occupé"
+
 msgid "Search name, PID or publisher (Ctrl+F)"
 msgstr "Nom, PID ou éditeur (Ctrl+F)"
-
-msgid "Suspend"
-msgstr "Suspendre"
-
-msgid "Resume"
-msgstr "Reprendre"
-
-msgid "Priority"
-msgstr "Priorité"
-
-msgid "Open file location"
-msgstr "Ouvrir l’emplacement du fichier"
-
-msgid "Copy command line"
-msgstr "Copier la ligne de commande"
-
-msgid "Columns"
-msgstr "Colonnes"
-
-msgid "Publisher"
-msgstr "Éditeur"
-
-msgid "PID"
-msgstr "PID"
-
-msgid "CPU"
-msgstr "Processeur"
-
-msgid "Memory"
-msgstr "Mémoire"
 
 msgid "{} · PID {}"
 msgstr "{} · PID {}"
@@ -234,15 +315,6 @@ msgstr "Sélectionnez un processus pour agir dessus"
 
 msgid "Hide history"
 msgstr "Masquer l’historique"
-
-msgid "Show history"
-msgstr "Historique"
-
-msgid "End process tree"
-msgstr "Fin de l’arborescence"
-
-msgid "End task"
-msgstr "Fin de tâche"
 
 msgid "Name"
 msgstr "Nom"
@@ -778,6 +850,9 @@ msgstr "Aucun programme n’utilise « {} »."
 msgid "Programs using “{}”:"
 msgstr "Programmes qui utilisent « {} » :"
 
+msgid "You can delete, move or rename it. A program can still show it on screen: many viewers, Photos among them, read a file and then close it."
+msgstr "Vous pouvez le supprimer, le déplacer ou le renommer. Un programme peut quand même l’afficher : beaucoup de visionneuses, dont Photos, lisent le fichier puis le referment."
+
 msgid "PID {}"
 msgstr "PID {}"
 
@@ -844,12 +919,6 @@ msgstr "Lecture…"
 msgid "Enabled"
 msgstr "Activé"
 
-msgid "Disable"
-msgstr "Désactiver"
-
-msgid "Enable"
-msgstr "Activer"
-
 msgid "Lists the Run keys and the startup folders. Packaged apps that start with Windows and scheduled tasks are not listed yet. Disabling keeps the entry: enable it again at any time."
 msgstr "Liste les clés Run et les dossiers Démarrage. Les applications du Store qui démarrent avec Windows et les tâches planifiées n’y sont pas encore. Désactiver garde l’entrée : réactivez-la à tout moment."
 
@@ -859,12 +928,6 @@ msgstr "Rechercher des services"
 msgid "Select a service to start or stop it"
 msgstr "Sélectionnez un service pour le démarrer ou l’arrêter"
 
-msgid "Start"
-msgstr "Démarrer"
-
-msgid "Stop"
-msgstr "Arrêter"
-
 msgid "Service"
 msgstr "Service"
 
@@ -873,3 +936,12 @@ msgstr "Type de démarrage"
 
 msgid "Starting and stopping most services needs Vigie to run as administrator."
 msgstr "Démarrer ou arrêter la plupart des services demande de lancer Vigie en administrateur."
+
+msgid "User"
+msgstr "Utilisateur"
+
+msgid "({} processes)"
+msgstr "({} processus)"
+
+msgid "Disconnected"
+msgstr "Déconnecté"
