@@ -76,7 +76,9 @@ impl Tracker {
     pub fn wants_round(&self, at_ns: u64) -> bool {
         self.last_round_ns
             .is_none_or(|last| at_ns.saturating_sub(last) >= ROUND_NS)
-            || self.pinned.is_some_and(|key| !self.by_key.contains_key(&key))
+            || self
+                .pinned
+                .is_some_and(|key| !self.by_key.contains_key(&key))
     }
 
     /// Every ten seconds, starts tracking the top consumers, replacing the weakest tracked
@@ -271,6 +273,9 @@ mod tests {
         assert!(tracker.get((99, 1)).is_some_and(|t| t.pinned));
         let busy: Vec<Candidate> = (200..260).map(|n| candidate(n, 50.0, 0)).collect();
         tracker.round(20 * SECOND, 0, &busy);
-        assert!(tracker.get((99, 1)).is_some(), "pinned survives a busy round");
+        assert!(
+            tracker.get((99, 1)).is_some(),
+            "pinned survives a busy round"
+        );
     }
 }

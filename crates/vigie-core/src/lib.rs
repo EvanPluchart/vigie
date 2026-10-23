@@ -1,6 +1,7 @@
 //! Process model: CPU % from deltas, tree, grouping, history, diagnostics.
 //! No UI and no OS calls here. See docs/ARCHITECTURE.md.
 
+pub mod diagnose;
 pub mod history;
 pub mod perf;
 pub mod tracker;
@@ -9,8 +10,8 @@ mod tree;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-pub use tree::Group;
 use tracker::{Candidate, Tracker};
+pub use tree::Group;
 use tree::{Entry, Figures, Node};
 pub use vigie_probe::{Pid, ProcSample, Sample, Target};
 
@@ -359,8 +360,7 @@ impl Core {
                     memory: n.p.memory_bytes,
                 })
                 .collect();
-            self.tracker
-                .round(sample.at_ns, total_memory, &candidates);
+            self.tracker.round(sample.at_ns, total_memory, &candidates);
         }
         let row = |kind, node: usize, depth, figures: Figures, count, expanded| {
             let p = nodes[node].p;

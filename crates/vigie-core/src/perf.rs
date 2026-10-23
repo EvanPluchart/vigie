@@ -180,7 +180,7 @@ impl Performance {
         };
 
         // CPU: busy share of each core over the interval, and of the whole machine.
-        if !first && self.prev_cores.len() == sample.cores.len() {
+        if !first && !sample.cores.is_empty() && self.prev_cores.len() == sample.cores.len() {
             let (mut busy, mut total) = (0u64, 0u64);
             for (now, before) in sample.cores.iter().zip(&self.prev_cores) {
                 let b = now.busy_ns.saturating_sub(before.busy_ns);

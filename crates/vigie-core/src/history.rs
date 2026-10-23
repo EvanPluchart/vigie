@@ -197,7 +197,11 @@ impl Tier {
         };
         let at = (newest + self.capacity - (i - 1)) % self.capacity;
         let mean = self.means[at];
-        let peak = if self.keep_peaks { self.peaks[at] } else { mean };
+        let peak = if self.keep_peaks {
+            self.peaks[at]
+        } else {
+            mean
+        };
         Some((mean, peak))
     }
 
@@ -315,7 +319,14 @@ impl History {
     /// Fills `out` with the window ending `offset_s` seconds before `now_ns` and lasting
     /// `span_s`, in at most `columns` columns (oldest first). Each column holds the mean of
     /// its buckets and their peak; NaN where nothing was recorded.
-    pub fn window(&self, now_ns: u64, span_s: u64, offset_s: u64, columns: usize, out: &mut Series) {
+    pub fn window(
+        &self,
+        now_ns: u64,
+        span_s: u64,
+        offset_s: u64,
+        columns: usize,
+        out: &mut Series,
+    ) {
         out.means.clear();
         out.peaks.clear();
         let tier = self.tier_for(span_s);
@@ -405,7 +416,13 @@ pub fn graph_paths(
         let _ = write!(
             line,
             "{}{:.1} {:.1}",
-            if drawing { " L " } else if line.is_empty() { "M " } else { " M " },
+            if drawing {
+                " L "
+            } else if line.is_empty() {
+                "M "
+            } else {
+                " M "
+            },
             x(i),
             y(v)
         );
