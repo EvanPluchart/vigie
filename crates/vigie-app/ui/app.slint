@@ -1,8 +1,10 @@
 import { AboutSlint, Button, LineEdit, ListView, Palette } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { DiskCard, GpuCard, PerfView, PerformanceView } from "performance.slint";
+import { Graph, GraphData, RangeBar, Spans } from "timeline.slint";
+import { CheckSummary, DiagnosticsView, FindingRow } from "diagnostics.slint";
 
-export { DiskCard, GpuCard, PerfView }
+export { CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, PerfView }
 
 export struct ProcRow {
     // Identity for model patching (see src/model.rs).
@@ -85,15 +87,22 @@ component SortHeader inherits Rectangle {
     in property <int> sort-column;
     in property <bool> sort-ascending;
     in property <TextHorizontalAlignment> alignment: left;
+    // Machine-wide figure shown before the label, as Task Manager does ("34 % CPU").
+    in property <string> total;
     callback clicked(int);
     property <bool> active: column == sort-column;
 
-    HeaderCell {
-        width: 100%;
-        height: 100%;
-        horizontal-alignment: root.alignment;
-        text: root.active ? (root.sort-ascending ? root.label + " ↑" : root.label + " ↓") : root.label;
-        color: root.active || touch.has-hover ? Theme.text : Theme.text-muted;
+    HorizontalLayout {
+        alignment: root.alignment == TextHorizontalAlignment.right ? end : start;
+        spacing: Theme.space-1;
+        if root.total != "": HeaderCell {
+            text: root.total;
+            color: Theme.text;
+        }
+        HeaderCell {
+            text: root.active ? (root.sort-ascending ? root.label + " ↑" : root.label + " ↓") : root.label;
+            color: root.active || touch.has-hover ? Theme.text : Theme.text-muted;
+        }
     }
 
     touch := TouchArea {
@@ -200,8 +209,8 @@ component ProcessLine inherits Rectangle {
         }
         if root.columns.publisher: Cell { text: root.item.publisher; width: 160px; color: Theme.text-muted; }
         if root.columns.pid: Cell { text: root.item.pid; width: 72px; horizontal-alignment: right; color: Theme.text-muted; }
-        if root.columns.cpu: HeatCell { text: root.item.cpu; heat: root.item.cpu-heat; width: 72px; }
-        if root.columns.memory: HeatCell { text: root.item.memory; heat: root.item.memory-heat; width: 96px; }
+        if root.columns.cpu: HeatCell { text: root.item.cpu; heat: root.item.cpu-heat; width: 88px; }
+        if root.columns.memory: HeatCell { text: root.item.memory; heat: root.item.memory-heat; width: 120px; }
     }
 }
 
@@ -210,6 +219,8 @@ component RailItem inherits Rectangle {
     in property <string> icon;
     in property <string> label;
     in property <bool> active;
+    // A dot in the corner: something needs a look (0 none, 1 warning, 2 critical).
+    in property <int> badge;
     callback clicked();
     width: 36px;
     height: 36px;
@@ -227,15 +238,24 @@ component RailItem inherits Rectangle {
         stroke-width: 1.6px;
         fill: transparent;
     }
+    if root.badge > 0: Rectangle {
+        x: parent.width - 11px;
+        y: 5px;
+        width: 7px;
+        height: 7px;
+        border-radius: 3.5px;
+        background: root.badge == 2 ? Theme.danger : Theme.warning;
+    }
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
 
-// Navigation between the views: Processes and Performance.
+// Navigation between the views: Processes, Performance and Diagnostics.
 component Rail inherits Rectangle {
     in property <int> tab;
+    in property <int> badge;
     callback selected(int);
     width: 52px;
     background: Theme.surface;
@@ -266,10 +286,23 @@ component Rail inherits Rectangle {
                 clicked => { root.selected(1); }
             }
         }
+        HorizontalLayout {
+            alignment: center;
+            RailItem {
+                label: @tr("Diagnostics");
+                // A magnifying glass.
+                icon: "M 17 10.5 A 6.5 6.5 0 1 1 4 10.5 A 6.5 6.5 0 1 1 17 10.5 M 15.2 15.2 L 20 20";
+                active: root.tab == 2;
+                badge: root.badge;
+                clicked => { root.selected(2); }
+            }
+        }
     }
 }
 
 export component AboutWindow inherits Window {
+    // Memory held by the history, formatted ("412 KB").
+    in property <string> history-memory;
     title: @tr("About Vigie");
     icon: @image-url("../../../assets/brand/icons/vigie-256.png");
     background: Theme.background;
@@ -296,6 +329,12 @@ export component AboutWindow inherits Window {
             font-size: Theme.font-body;
             horizontal-alignment: center;
         }
+        if root.history-memory != "": Text {
+            text: @tr("History in memory: {}", root.history-memory);
+            color: Theme.text-muted;
+            font-size: Theme.font-caption;
+            horizontal-alignment: center;
+        }
         AboutSlint { }
     }
 }
@@ -307,6 +346,9 @@ export component AppWindow inherits Window {
     // Processes matching the search, shown as "12 of 434" while searching.
     in property <string> matching-count;
     in property <string> self-cpu: "—";
+    // Machine-wide CPU and memory in use, shown in their column headers.
+    in property <string> total-cpu;
+    in property <string> total-memory;
     in property <string> self-memory: "—";
     in property <int> sort-column: 2;
     in property <bool> sort-ascending;
@@ -315,13 +357,42 @@ export component AppWindow inherits Window {
     // The selected process. Rust keeps `selected` up to date as rows refresh, and clears
     // `has-selection` when the process leaves the table.
     in-out property <bool> has-selection;
-    // Shown view: 0 processes, 1 performance.
+    // Shown view: 0 processes, 1 performance, 2 diagnostics.
     in-out property <int> tab;
     callback tab-changed(int);
     in property <PerfView> perf;
     in property <[float]> perf-cores;
     in property <[DiskCard]> perf-disks;
     in property <[GpuCard]> perf-gpus;
+    in property <GraphData> perf-cpu-graph;
+    in property <GraphData> perf-memory-graph;
+    in property <GraphData> perf-network-graph;
+    in property <[GraphData]> perf-disk-graphs;
+    in property <[GraphData]> perf-gpu-graphs;
+    // The range graphs show: index into Spans.seconds, and how far back it ends (seconds).
+    in-out property <int> perf-span-index;
+    in-out property <int> perf-offset;
+    callback range-changed(int, int);
+    in property <[FindingRow]> findings;
+    in property <CheckSummary> checks;
+    in property <bool> diagnostics-ready;
+    // Highest severity among the findings worth a look: 0 none, 1 warning, 2 critical.
+    in property <int> diagnostics-badge;
+    in property <string> history-memory;
+    // History panel under the table, for the selected process.
+    in-out property <bool> history-open;
+    callback history-toggled(bool);
+    in property <GraphData> process-cpu-graph;
+    in property <GraphData> process-memory-graph;
+    // False until the selected process has a history (it starts when it is selected).
+    in property <bool> process-tracked;
+    in property <int> process-history-age;
+    in property <string> process-memory-scale;
+    in-out property <int> process-span-index: 1;
+    in-out property <int> process-offset;
+    callback process-range-changed(int, int);
+    // The selection changed: Rust keeps a history of the selected process.
+    callback selection-changed(int, int);
     in-out property <ProcRow> selected;
     callback show-about();
     callback sort-clicked(int);
@@ -363,9 +434,17 @@ export component AppWindow inherits Window {
     }
 
     public function select(item: ProcRow) {
+        if (!root.has-selection || root.selected.key != item.key) {
+            root.selection-changed(item.pid, item.start);
+        }
         root.selected = item;
         root.has-selection = true;
         table.focus();
+    }
+
+    public function show-tab(index: int) {
+        root.tab = index;
+        root.tab-changed(index);
     }
 
     // Scrolls the table just enough to show row `index`.
@@ -426,10 +505,15 @@ export component AppWindow inherits Window {
                 search.focus();
                 return accept;
             }
-            // Ctrl+1 and Ctrl+2 switch views, in rail order.
-            if (event.modifiers.control && (event.text == "1" || event.text == "2")) {
-                root.tab = event.text == "1" ? 0 : 1;
-                root.tab-changed(root.tab);
+            // Ctrl+1 to Ctrl+3 switch views, in rail order.
+            if (event.modifiers.control && (event.text == "1" || event.text == "2" || event.text == "3")) {
+                root.show-tab(event.text == "1" ? 0 : event.text == "2" ? 1 : 2);
+                return accept;
+            }
+            // Ctrl+H shows or hides the history of the selected process.
+            if (event.modifiers.control && (event.text == "h" || event.text == "H") && root.tab == 0) {
+                root.history-open = !root.history-open;
+                root.history-toggled(root.history-open);
                 return accept;
             }
             if (event.text == Key.Escape && root.searching) {
@@ -444,10 +528,8 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             Rail {
                 tab: root.tab;
-                selected(index) => {
-                    root.tab = index;
-                    root.tab-changed(index);
-                }
+                badge: root.diagnostics-badge;
+                selected(index) => { root.show-tab(index); }
             }
             Rectangle {
             horizontal-stretch: 1;
@@ -549,6 +631,13 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                     }
                     Button {
+                        text: root.history-open ? @tr("Hide history") : @tr("Show history");
+                        clicked => {
+                            root.history-open = !root.history-open;
+                            root.history-toggled(root.history-open);
+                        }
+                    }
+                    Button {
                         text: @tr("End process tree");
                         enabled: root.has-selection && root.selected.tree-size > 0;
                         clicked => { root.ask(root.selected, 1); }
@@ -587,12 +676,12 @@ export component AppWindow inherits Window {
                         clicked(c) => { root.sort-clicked(c); }
                     }
                     if root.columns.cpu: SortHeader {
-                        label: @tr("CPU"); column: 2; width: 72px; alignment: right;
+                        label: @tr("CPU"); column: 2; width: 88px; alignment: right; total: root.total-cpu;
                         sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                         clicked(c) => { root.sort-clicked(c); }
                     }
                     if root.columns.memory: SortHeader {
-                        label: @tr("Memory"); column: 3; width: 96px; alignment: right;
+                        label: @tr("Memory"); column: 3; width: 120px; alignment: right; total: root.total-memory;
                         sort-column: root.sort-column; sort-ascending: root.sort-ascending;
                         clicked(c) => { root.sort-clicked(c); }
                     }
@@ -735,6 +824,80 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+
+            // History of the selected process: CPU and memory over the chosen range.
+            if root.history-open: Rectangle {
+                height: 216px;
+                background: Theme.surface;
+                Rectangle { y: 0; height: 1px; background: Theme.border; }
+                if !root.has-selection: Text {
+                    text: @tr("Select a process to see its history.");
+                    color: Theme.text-muted;
+                    font-size: Theme.font-body;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                if root.has-selection: VerticalLayout {
+                    alignment: start;
+                    padding: Theme.space-3;
+                    padding-left: Theme.space-4;
+                    padding-right: Theme.space-4;
+                    spacing: Theme.space-2;
+                    HorizontalLayout {
+                        spacing: Theme.space-3;
+                        Text {
+                            text: @tr("History of {}", root.selected.name);
+                            color: Theme.text;
+                            font-size: Theme.font-body;
+                            font-weight: Theme.weight-strong;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        process-range := RangeBar {
+                            process: true;
+                            span-index <=> root.process-span-index;
+                            offset <=> root.process-offset;
+                            history-age: root.process-history-age;
+                            changed(index, offset) => { root.process-range-changed(index, offset); }
+                        }
+                    }
+                    if !root.process-tracked: Text {
+                        text: @tr("Recording starts now: Vigie keeps a history of the busiest processes and of the one you select.");
+                        color: Theme.text-muted;
+                        font-size: Theme.font-caption;
+                        wrap: word-wrap;
+                    }
+                    graphs := HorizontalLayout {
+                        spacing: Theme.space-4;
+                        property <int> drag-origin;
+                        VerticalLayout {
+                            spacing: Theme.space-1;
+                            Text { text: @tr("CPU"); color: Theme.text-muted; font-size: Theme.font-caption; }
+                            Graph {
+                                height: 120px;
+                                data: root.process-cpu-graph;
+                                span: Spans.seconds[root.process-span-index];
+                                offset: root.process-offset;
+                                drag-started => { graphs.drag-origin = root.process-offset; }
+                                dragged(share) => { process-range.set(root.process-span-index, graphs.drag-origin + round(share * Spans.seconds[root.process-span-index])); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: Theme.space-1;
+                            Text { text: @tr("Memory (scale {})", root.process-memory-scale); color: Theme.text-muted; font-size: Theme.font-caption; }
+                            Graph {
+                                height: 120px;
+                                data: root.process-memory-graph;
+                                unit: 2;
+                                span: Spans.seconds[root.process-span-index];
+                                offset: root.process-offset;
+                                drag-started => { graphs.drag-origin = root.process-offset; }
+                                dragged(share) => { process-range.set(root.process-span-index, graphs.drag-origin + round(share * Spans.seconds[root.process-span-index])); }
+                            }
+                        }
+                    }
+                }
+            }
             }
 
             if root.tab == 1: PerformanceView {
@@ -742,6 +905,31 @@ export component AppWindow inherits Window {
                 cores: root.perf-cores;
                 disks: root.perf-disks;
                 gpus: root.perf-gpus;
+                cpu-graph: root.perf-cpu-graph;
+                memory-graph: root.perf-memory-graph;
+                network-graph: root.perf-network-graph;
+                disk-graphs: root.perf-disk-graphs;
+                gpu-graphs: root.perf-gpu-graphs;
+                span-index <=> root.perf-span-index;
+                offset <=> root.perf-offset;
+                range-changed(index, offset) => { root.range-changed(index, offset); }
+            }
+
+            if root.tab == 2: DiagnosticsView {
+                findings: root.findings;
+                checks: root.checks;
+                ready: root.diagnostics-ready;
+                show-performance => { root.show-tab(1); }
+                // The same confirmation as the table: it names the process and checks it is
+                // still the one the finding named.
+                end(f) => {
+                    root.confirm-action = 0;
+                    root.confirm-name = f.name;
+                    root.confirm-pid = f.pid;
+                    root.confirm-start = f.start;
+                    root.confirm-count = 0;
+                    root.confirm-open = true;
+                }
             }
             }
             }

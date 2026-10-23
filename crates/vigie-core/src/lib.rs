@@ -534,6 +534,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_busiest_processes_get_a_history_but_not_vigie() {
+        let mut core = Core::new(Sort::default(), "");
+        let procs = |cpu: u64| {
+            vec![
+                proc(1, 1, "vigie", cpu, 900 << 20),
+                proc(2, 1, "big", 0, 500 << 20),
+                proc(3, 1, "busy", cpu, 1 << 20),
+            ]
+        };
+        core.update(&sample(SEC, procs(0)));
+        core.update(&sample(2 * SEC, procs(SEC)));
+        assert!(core.tracker().get((2, 1)).is_some(), "largest memory");
+        assert!(core.tracker().get((1, 1)).is_none(), "never Vigie itself");
+        // Process 3 had no CPU figure on the first tick; the next round, 10 s on, takes it.
+        core.update(&sample(12 * SEC, procs(4 * SEC)));
+        let busy = core.tracker().get((3, 1)).expect("busiest CPU");
+        assert_eq!(busy.name, "busy");
+        core.update(&sample(13 * SEC, procs(5 * SEC)));
+        assert_eq!(busy_cpu(&core), Some(25.0));
+    }
+
+    fn busy_cpu(core: &Core) -> Option<f32> {
+        core.tracker().get((3, 1)).and_then(|t| t.cpu.last())
+    }
+
     /// The process row of `pid` (not a group header, not an "itself" line).
     fn row(frame: &Frame, pid: Pid) -> &Row {
         frame

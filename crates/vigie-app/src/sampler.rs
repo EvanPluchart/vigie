@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use vigie_core::diagnose::{Diagnostics, Finding, Input};
+use vigie_core::history::SECOND;
 use vigie_core::perf::{PerfFrame, Performance};
 use vigie_core::{Core, Details, Group, Pid, Sort};
 use vigie_probe::{
@@ -12,7 +14,7 @@ use vigie_probe::{
 };
 
 use crate::AppWindow;
-use crate::model::{self, Notice, UiFrame};
+use crate::model::{self, Notice, Range, Timeline, UiFrame};
 
 /// What the UI asks of the sampler. Sorting and filtering run here, not on the UI thread.
 #[derive(Debug)]
@@ -28,8 +30,16 @@ pub enum Command {
     },
     /// Fold or unfold a section of the table.
     ToggleGroup(Group),
-    /// The shown view changed: 0 processes, 1 performance.
+    /// The shown view changed: 0 processes, 1 performance, 2 diagnostics.
     Tab(i32),
+    /// The range of the Performance graphs.
+    Range(Range),
+    /// The range of the process history panel.
+    ProcessRange(Range),
+    /// The selected process (PID and low 31 bits of its start time), or none.
+    Select(Option<(Pid, u32)>),
+    /// The process history panel opened or closed.
+    History(bool),
     /// Act on a process, named by its PID and the low 31 bits of its start time. The UI has
     /// already asked the user to confirm when the action is destructive.
     Act {
@@ -55,8 +65,11 @@ pub struct Settings {
     pub icon_size: u32,
     /// Slow down when the window is in the background (see `Pace`).
     pub adaptive: bool,
-    /// View at start: 0 processes, 1 performance.
+    /// View at start: 0 processes, 1 performance, 2 diagnostics.
     pub tab: i32,
+    pub range: Range,
+    pub process_range: Range,
+    pub history_open: bool,
 }
 
 /// Starts the sampler. It stops when every `Command` sender is dropped or the event loop quits.
@@ -94,25 +107,37 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
     let mut views = Views {
         tab: settings.tab,
         info: probe.system_info(),
+        range: settings.range,
+        process_range: settings.process_range,
+        history_open: settings.history_open,
         ..Views::default()
     };
     loop {
         match probe.sample(&mut sample) {
             Ok(()) => {
                 let icons = exes.fill(&mut probe, &mut core, &sample);
-                // Machine-wide figures every tick (about 0.25 ms), so the graphs are full when
-                // the Performance view opens.
-                // GPU counters cost driver round trips: only while the Performance view is
-                // shown, every other tick (decision 0005).
+                // Machine-wide figures every tick (about 0.25 ms): they feed the history.
+                // GPU counters cost driver round trips: every other tick while the Performance
+                // view is shown, every 10 s otherwise, for the history (decisions 0005, 0006).
                 views.ticks = views.ticks.wrapping_add(1);
-                if views.tab == 1 && views.ticks % 2 == 1 {
+                let gpu_due = if views.tab == 1 {
+                    views.ticks % 2 == 1
+                } else {
+                    views
+                        .gpus_at
+                        .is_none_or(|at| at.elapsed() >= GPU_BACKGROUND)
+                };
+                if gpu_due {
                     let _ = probe.gpus(&mut views.system);
+                    views.gpus_at = Some(Instant::now());
                 }
                 views.last = match probe.system(&mut views.system) {
                     Ok(()) => Some(views.perf.update(&views.system)),
                     Err(_) => None,
                 };
-                if !send(&window, &mut core, &sample, &views, icons, None) {
+                views.started_ns.get_or_insert(sample.at_ns);
+                views.diagnose(&core, sample.logical_cores, false);
+                if !send(&window, &mut core, &sample, &mut views, icons, None) {
                     return;
                 }
             }
@@ -127,36 +152,63 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
         loop {
             let wait = next_tick.saturating_duration_since(Instant::now());
             match commands.recv_timeout(wait) {
-                Ok(command) => {
+                Ok(first) => {
                     let mut notice = None;
                     let mut resample = false;
-                    match command {
-                        Command::Sort(sort) => core.set_sort(sort),
-                        Command::Filter(filter) => core.set_filter(&filter),
-                        Command::Toggle(pid) => core.toggle(pid),
-                        Command::ToggleGroup(group) => core.toggle_group(group),
-                        Command::Tab(tab) => views.tab = tab,
-                        Command::Window { focused, visible } => {
-                            let woke = (focused && !pace.focused) || (visible && !pace.visible);
-                            pace.focused = focused;
-                            pace.visible = visible;
-                            // Back in front: refresh now rather than at the end of a slow interval.
-                            if woke {
+                    // Commands come in bursts (a drag sends one per mouse move): take them all,
+                    // then send one frame.
+                    for command in std::iter::once(first).chain(commands.try_iter()) {
+                        match command {
+                            Command::Sort(sort) => core.set_sort(sort),
+                            Command::Filter(filter) => core.set_filter(&filter),
+                            Command::Toggle(pid) => core.toggle(pid),
+                            Command::ToggleGroup(group) => core.toggle_group(group),
+                            Command::Tab(tab) => {
+                                views.tab = tab;
+                                views.timeline.invalidate();
+                                if tab == 2 {
+                                    views.diagnose(&core, sample.logical_cores, true);
+                                }
+                            }
+                            Command::Range(range) => views.range = range,
+                            Command::ProcessRange(range) => views.process_range = range,
+                            Command::Select(process) => {
+                                views.selected = process;
+                                core.select(process);
+                                views.process_timeline.invalidate();
+                            }
+                            Command::History(open) => {
+                                views.history_open = open;
+                                views.process_timeline.invalidate();
+                            }
+                            Command::Window { focused, visible } => {
+                                let woke = (focused && !pace.focused) || (visible && !pace.visible);
+                                pace.focused = focused;
+                                pace.visible = visible;
+                                // Back in front: refresh now rather than at the end of a slow interval.
+                                if woke {
+                                    resample = true;
+                                }
+                            }
+                            Command::Act {
+                                pid,
+                                start_low_bits,
+                                action,
+                            } => {
+                                notice = execute(
+                                    &mut probe,
+                                    &core,
+                                    &sample,
+                                    pid,
+                                    start_low_bits,
+                                    action,
+                                );
+                                // Show the effect (a process gone, say) without waiting for the tick.
                                 resample = true;
                             }
                         }
-                        Command::Act {
-                            pid,
-                            start_low_bits,
-                            action,
-                        } => {
-                            notice =
-                                execute(&mut probe, &core, &sample, pid, start_low_bits, action);
-                            // Show the effect (a process gone, say) without waiting for the tick.
-                            resample = true;
-                        }
                     }
-                    if !send(&window, &mut core, &sample, &views, Vec::new(), notice) {
+                    if !send(&window, &mut core, &sample, &mut views, Vec::new(), notice) {
                         return;
                     }
                     if resample {
@@ -239,10 +291,15 @@ fn execute(
     }
 }
 
-/// The views and what only the Performance view needs.
+/// How often GPU counters are read while the Performance view is hidden, for the history.
+const GPU_BACKGROUND: Duration = Duration::from_secs(10);
+/// How often the diagnostics run (decision 0006).
+const DIAGNOSE_EVERY_NS: u64 = 5 * SECOND;
+
+/// The views, the histories and the diagnostics.
 #[derive(Default)]
 struct Views {
-    /// Shown view: 0 processes, 1 performance.
+    /// Shown view: 0 processes, 1 performance, 2 diagnostics.
     tab: i32,
     perf: Performance,
     system: SystemSample,
@@ -250,6 +307,51 @@ struct Views {
     /// The last tick's machine-wide figures; `None` where the probe has none.
     last: Option<PerfFrame>,
     ticks: u32,
+    gpus_at: Option<Instant>,
+    /// First sample, for how long history has been recorded.
+    started_ns: Option<u64>,
+    range: Range,
+    timeline: Timeline,
+    process_range: Range,
+    process_timeline: Timeline,
+    history_open: bool,
+    selected: Option<(Pid, u32)>,
+    diagnostics: Diagnostics,
+    findings: Vec<Finding>,
+    diagnosed_ns: Option<u64>,
+}
+
+impl Views {
+    /// Runs the rules every 5 s, or now when `force`d (the view just opened).
+    fn diagnose(&mut self, core: &Core, logical_cores: u32, force: bool) {
+        let Some(last) = &self.last else { return };
+        let due = self
+            .diagnosed_ns
+            .is_none_or(|at| last.at_ns.saturating_sub(at) >= DIAGNOSE_EVERY_NS);
+        if !(due || force) {
+            return;
+        }
+        // The first ranking of processes happens after the first diagnosis: until processes
+        // are tracked, run again on the next tick so findings name their culprits early.
+        if core.tracker().iter().next().is_some() {
+            self.diagnosed_ns = Some(last.at_ns);
+        }
+        self.findings = self.diagnostics.run(&Input {
+            now_ns: last.at_ns,
+            perf: &self.perf,
+            last,
+            tracker: core.tracker(),
+            logical_cores,
+        });
+    }
+
+    /// Seconds of history recorded so far.
+    fn history_age_s(&self) -> u64 {
+        match (&self.last, self.started_ns) {
+            (Some(last), Some(start)) => last.at_ns.saturating_sub(start) / SECOND,
+            _ => 0,
+        }
+    }
 }
 
 /// Builds a frame with what the shown view needs and hands it to the UI thread. False once the
@@ -258,15 +360,54 @@ fn send(
     window: &slint::Weak<AppWindow>,
     core: &mut Core,
     sample: &Sample,
-    views: &Views,
+    views: &mut Views,
     icons: Vec<(u32, Icon)>,
     notice: Option<Notice>,
 ) -> bool {
+    let age = views.history_age_s();
     let perf = (views.tab == 1).then(|| match &views.last {
-        Some(last) => model::perf_ui(last, &views.perf, &views.info),
+        Some(last) => model::perf_ui(
+            last,
+            &views.perf,
+            &views.info,
+            views.range,
+            age,
+            &mut views.timeline,
+        ),
         None => model::PerfUi::unavailable(),
     });
-    let frame = UiFrame::new(core.update(sample), views.tab == 0, icons, notice, perf);
+    let mut frame = UiFrame::new(core.update(sample), views.tab == 0, icons, notice, perf);
+    frame.badge = model::badge(&views.findings);
+    if let Some(last) = &views.last {
+        frame.total_cpu = model::format_total(last.cpu_percent);
+        frame.total_memory =
+            model::format_total((last.memory.total > 0).then_some(last.memory_used_percent));
+    }
+    frame.history_memory =
+        model::format_kilobytes(views.perf.history_bytes() + core.tracker().bytes());
+    if views.tab == 2
+        && let Some(last) = &views.last
+    {
+        frame.diagnostics = Some(model::diagnostics_ui(
+            &views.findings,
+            &views.perf,
+            last,
+            core.tracker(),
+            age,
+        ));
+    }
+    if views.tab == 0 && views.history_open {
+        let tracked = views
+            .selected
+            .and_then(|(pid, bits)| core.identify(pid, bits))
+            .and_then(|t| core.tracker().get((t.pid, t.start_time)));
+        frame.process = model::process_ui(
+            tracked,
+            sample.at_ns,
+            views.process_range,
+            &mut views.process_timeline,
+        );
+    }
     let window = window.clone();
     slint::invoke_from_event_loop(move || model::apply(&window, frame)).is_ok()
 }

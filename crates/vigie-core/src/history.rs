@@ -408,8 +408,18 @@ pub fn graph_paths(
     let x = |i: usize| if n == 1 { width } else { step * i as f32 };
     let y = |v: f32| height - (v / max).clamp(0.0, 1.0) * height;
     let mut drawing = false;
+    // A lone value draws nothing as a path: give it a short dash so it shows.
+    let dash = |line: &mut String, i: usize, v: f32| {
+        let to = if x(i) >= 2.0 { x(i) - 2.0 } else { x(i) + 2.0 };
+        let _ = write!(line, " L {to:.1} {:.1}", y(v));
+    };
     for (i, &v) in series.means.iter().enumerate() {
         if !v.is_finite() {
+            if drawing && i >= 2 && !series.means[i - 2].is_finite() {
+                dash(line, i - 1, series.means[i - 1]);
+            } else if drawing && i == 1 {
+                dash(line, 0, series.means[0]);
+            }
             drawing = false;
             continue;
         }
@@ -427,6 +437,10 @@ pub fn graph_paths(
             y(v)
         );
         drawing = true;
+    }
+    let lone_last = n == 1 || (n >= 2 && !series.means[n - 2].is_finite());
+    if drawing && lone_last {
+        dash(line, n - 1, series.means[n - 1]);
     }
     // One closed shape per run of values.
     let mut start = None;
@@ -564,7 +578,7 @@ mod tests {
         };
         let (mut line, mut area) = (String::new(), String::new());
         graph_paths(&series, 100.0, 300.0, 100.0, &mut line, &mut area);
-        assert_eq!(line, "M 0.0 100.0 L 100.0 50.0 M 300.0 0.0");
+        assert_eq!(line, "M 0.0 100.0 L 100.0 50.0 M 300.0 0.0 L 298.0 0.0");
         assert_eq!(area.matches('Z').count(), 2);
         graph_paths(&Series::default(), 100.0, 1.0, 1.0, &mut line, &mut area);
         assert!(line.is_empty() && area.is_empty());

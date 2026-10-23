@@ -130,10 +130,15 @@ impl Finding {
 
     pub fn suggestion(&self) -> Suggestion {
         match self {
+            // The first culprit that is not part of the system: system processes such as
+            // memory compression are often a symptom, not the cause.
             Finding::CpuSaturated { culprits, .. } | Finding::MemoryPressure { culprits, .. } => {
-                match culprits.first() {
-                    Some(c) => end_or_leave(c),
-                    None => Suggestion::ClosePrograms,
+                match culprits.iter().find(|c| c.group != Group::System) {
+                    Some(c) => Suggestion::End(c.clone()),
+                    None => match culprits.first() {
+                        Some(c) => Suggestion::LeaveSystem(c.clone()),
+                        None => Suggestion::ClosePrograms,
+                    },
                 }
             }
             Finding::CpuHog { culprit, .. } | Finding::MemoryGrowth { culprit, .. } => {
@@ -607,11 +612,28 @@ mod tests {
         assert_eq!((*level, *cause), (Pressure::High, PressureCause::Available));
         assert_eq!(culprits[0].memory, 6 * GB);
         assert_eq!(findings[0].severity(), Severity::Critical);
+        assert!(matches!(findings[0].suggestion(), Suggestion::End(c) if c.target.pid == 1));
         // 22 % available: below the medium threshold no more, but not clear yet (25 %).
         w.tick(5.0, GB * 22 / 10 * 16 / 10, 0.0, &[]);
         assert!(matches!(w.run()[0], Finding::MemoryPressure { .. }));
         w.tick(5.0, 8 * GB, 0.0, &[]);
         assert_eq!(w.run(), []);
+    }
+
+    #[test]
+    fn suggestions_skip_system_culprits() {
+        let mut w = World::new();
+        let procs = [
+            (1, 1.0, 5 * GB, Group::System),
+            (2, 1.0, 2 * GB, Group::Apps),
+        ];
+        w.tick(5.0, GB, 0.0, &procs);
+        w.tick(5.0, GB, 0.0, &procs);
+        let findings = w.run();
+        assert!(
+            matches!(findings[0].suggestion(), Suggestion::End(c) if c.target.pid == 2),
+            "{findings:?}"
+        );
     }
 
     #[test]

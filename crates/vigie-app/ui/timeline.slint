@@ -1,0 +1,244 @@
+// Timelines: a graph that reads out the value under the pointer and pans when dragged, and the
+// range bar that picks how far back graphs look (decision 0006).
+
+import { Theme } from "theme.slint";
+
+// One graph, drawn by Rust in a 300 × 100 box: the mean as a line, the peak as the area under
+// it. `values` are the column means behind the line (NaN for gaps), oldest first.
+export struct GraphData {
+    line: string,
+    area: string,
+    second-line: string,
+    values: [float],
+    second-values: [float],
+}
+
+// Spans offered by the range bar, in seconds; the process panel offers the first four.
+export global Spans {
+    out property <[int]> seconds: [60, 600, 3600, 21600, 86400, 604800];
+
+    pure public function label(index: int) -> string {
+        return index == 0 ? @tr("1 min") : index == 1 ? @tr("10 min") : index == 2 ? @tr("1 h")
+            : index == 3 ? @tr("6 h") : index == 4 ? @tr("24 h") : @tr("7 days");
+    }
+
+    // How far back the history behind a span goes: the tier that draws it.
+    pure public function reach(span: int, process: bool) -> int {
+        return span <= 600 ? 600 : process || span <= 21600 ? 21600 : 604800;
+    }
+}
+
+export global Format {
+    // "now", "45 s ago", "12 min ago", "3 h 20 min ago", "2 d 4 h ago".
+    pure public function ago(seconds: int) -> string {
+        if (seconds <= 0) { return @tr("now"); }
+        if (seconds < 60) { return @tr("{} s ago", seconds); }
+        if (seconds < 3600) { return @tr("{} min ago", floor(seconds / 60)); }
+        if (seconds < 86400) {
+            let minutes = mod(floor(seconds / 60), 60);
+            return minutes == 0 ? @tr("{} h ago", floor(seconds / 3600))
+                : @tr("{} h {} min ago", floor(seconds / 3600), minutes);
+        }
+        return @tr("{} d {} h ago", floor(seconds / 86400), mod(floor(seconds / 3600), 24));
+    }
+
+    // Unit 0: percent, 1: bytes per second shown in bits (link speeds), 2: bytes.
+    pure public function value(v: float, unit: int) -> string {
+        if (unit == 0) { return round(v) + " %"; }
+        if (unit == 1) {
+            let bits = v * 8;
+            return bits >= 1000000000 ? round(bits / 100000000) / 10 + " Gbps"
+                : bits >= 1000000 ? round(bits / 100000) / 10 + " Mbps"
+                : round(bits / 1000) + " kbps";
+        }
+        let mb = v / 1048576;
+        return mb >= 1024 ? round(mb / 10.24) / 100 + " GB" : round(mb * 10) / 10 + " MB";
+    }
+}
+
+export component Graph inherits Rectangle {
+    in property <GraphData> data;
+    in property <color> tint: Theme.accent;
+    in property <color> second-tint: Theme.warning;
+    in property <int> unit;
+    // The window shown: `span` seconds ending `offset` seconds ago.
+    in property <int> span: 60;
+    in property <int> offset;
+    // Dragging: started, then moved by this share of the graph width (right is back in time).
+    callback drag-started();
+    callback dragged(float);
+    height: 120px;
+    border-radius: Theme.radius-small;
+    border-width: 1px;
+    border-color: Theme.border;
+    clip: true;
+    property <int> count: root.data.values.length;
+    property <int> hovered: touch.has-hover && root.count > 0
+        ? clamp(round(touch.mouse-x / root.width * (root.count - 1)), 0, root.count - 1) : -1;
+    // Quarter grid lines, so levels read without numbers.
+    for i in 3: Rectangle {
+        y: parent.height * (i + 1) / 4;
+        height: 1px;
+        background: Theme.border.with-alpha(0.6);
+    }
+    if root.data.area != "": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 300;
+        viewbox-height: 100;
+        // Stretch to the graph box: the default keeps the 3:1 aspect and leaves a gap.
+        fit: fill;
+        commands: root.data.area;
+        fill: root.tint.with-alpha(0.14);
+    }
+    if root.data.line != "": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 300;
+        viewbox-height: 100;
+        fit: fill;
+        commands: root.data.line;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+    }
+    if root.data.second-line != "": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 300;
+        viewbox-height: 100;
+        fit: fill;
+        commands: root.data.second-line;
+        stroke: root.second-tint;
+        stroke-width: 1.5px;
+    }
+    // Readout under the pointer: a cursor line and the value with its time.
+    if root.hovered >= 0: Rectangle {
+        x: root.count > 1 ? root.width * root.hovered / (root.count - 1) - 0.5px : root.width - 1px;
+        width: 1px;
+        background: Theme.text-muted;
+    }
+    if root.hovered >= 0: tip := Rectangle {
+        property <float> v: root.data.values[root.hovered];
+        property <int> age: root.offset + (root.count > 1 ? round(root.span * (root.count - 1 - root.hovered) / (root.count - 1)) : 0);
+        x: touch.mouse-x > root.width / 2 ? Theme.space-1 : root.width - self.width - Theme.space-1;
+        y: Theme.space-1;
+        width: readout.preferred-width + 2 * Theme.space-2;
+        height: readout.preferred-height + Theme.space-1;
+        background: Theme.raised.with-alpha(0.92);
+        border-radius: Theme.radius-small;
+        readout := Text {
+            // NaN is the only value not equal to itself: a gap in the history.
+            text: (tip.v == tip.v ? Format.value(tip.v, root.unit) : "—")
+                + (root.data.second-values.length > root.hovered
+                    ? " · " + Format.value(root.data.second-values[root.hovered], root.unit) : "")
+                + " · " + Format.ago(tip.age);
+            color: Theme.text;
+            font-size: Theme.font-caption;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.default;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                root.drag-started();
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.dragged((self.mouse-x - self.pressed-x) / root.width);
+            }
+        }
+    }
+}
+
+// Chips for the span, buttons to go back and forth in time, and what the window covers.
+export component RangeBar inherits HorizontalLayout {
+    // Index into `Spans.seconds`.
+    in-out property <int> span-index;
+    in-out property <int> offset;
+    // How much history exists, in seconds: panning stops there.
+    in property <int> history-age;
+    // The process panel offers 1 min to 6 h.
+    in property <bool> process;
+    callback changed(int, int);
+    property <int> span: Spans.seconds[root.span-index];
+    property <int> max-offset: max(0, min(Spans.reach(root.span, root.process), root.history-age) - root.span);
+    spacing: Theme.space-1;
+
+    public function set(index: int, offset: int) {
+        root.span-index = index;
+        root.offset = clamp(offset, 0, max(0, min(Spans.reach(Spans.seconds[index], root.process), root.history-age) - Spans.seconds[index]));
+        root.changed(root.span-index, root.offset);
+    }
+
+    for label[i] in root.process ? 4 : 6: Rectangle {
+        width: chip.preferred-width + 2 * Theme.space-2;
+        height: 24px;
+        border-radius: Theme.radius-small;
+        background: i == root.span-index ? Theme.selection : chip-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+        accessible-role: button;
+        accessible-label: chip.text;
+        chip := Text {
+            text: Spans.label(i);
+            color: i == root.span-index ? Theme.text : Theme.text-muted;
+            font-size: Theme.font-caption;
+            font-weight: i == root.span-index ? Theme.weight-strong : Theme.weight-regular;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+        chip-touch := TouchArea {
+            mouse-cursor: pointer;
+            // A new span starts from now.
+            clicked => { root.set(i, 0); }
+        }
+    }
+    Rectangle { horizontal-stretch: 1; }
+    Text {
+        text: @tr("{} → {}", Format.ago(root.offset + root.span), Format.ago(root.offset));
+        color: Theme.text-muted;
+        font-size: Theme.font-caption;
+        vertical-alignment: center;
+    }
+    for step[i] in 2: Rectangle {
+        // 0: back in time, 1: forward.
+        property <bool> possible: i == 0 ? root.offset < root.max-offset : root.offset > 0;
+        width: 24px;
+        height: 24px;
+        border-radius: Theme.radius-small;
+        background: self.possible && step-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+        accessible-role: button;
+        accessible-label: i == 0 ? @tr("Earlier") : @tr("Later");
+        Path {
+            width: 14px;
+            height: 14px;
+            viewbox-width: 14;
+            viewbox-height: 14;
+            stroke: parent.possible ? Theme.text : Theme.text-muted.with-alpha(0.4);
+            stroke-width: 1.6px;
+            commands: i == 0 ? "M 8.5 3.5 L 5 7 L 8.5 10.5" : "M 5.5 3.5 L 9 7 L 5.5 10.5";
+        }
+        step-touch := TouchArea {
+            enabled: parent.possible;
+            mouse-cursor: parent.possible ? pointer : default;
+            clicked => { root.set(root.span-index, root.offset + (i == 0 ? 1 : -1) * root.span / 2); }
+        }
+    }
+    if root.offset > 0: Rectangle {
+        width: now.preferred-width + 2 * Theme.space-2;
+        height: 24px;
+        border-radius: Theme.radius-small;
+        background: now-touch.has-hover ? Theme.text.with-alpha(0.05) : transparent;
+        now := Text {
+            text: @tr("Now");
+            color: Theme.accent;
+            font-size: Theme.font-caption;
+            font-weight: Theme.weight-strong;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+        now-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.set(root.span-index, 0); }
+        }
+    }
+}

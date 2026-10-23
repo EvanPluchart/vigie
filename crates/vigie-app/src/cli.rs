@@ -4,16 +4,21 @@ use std::time::Duration;
 
 use vigie_core::{Sort, SortKey};
 
-pub const USAGE: &str = "usage: vigie [--tab=processes|performance] [--sort=cpu|memory|name|pid[:asc]] \
-[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive]";
+pub const USAGE: &str = "usage: vigie [--tab=processes|performance|diagnostics] [--sort=cpu|memory|name|pid[:asc]] \
+[--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] \
+[--range=1m|10m|1h|6h|24h|7d] [--history]";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
     pub sort: Sort,
     pub filter: String,
     pub interval: Duration,
-    /// View at start: 0 processes, 1 performance.
+    /// View at start: 0 processes, 1 performance, 2 diagnostics.
     pub tab: i32,
+    /// Range of the Performance graphs at start, as an index into `Range::SPANS`.
+    pub range: i32,
+    /// Opens the history panel of the selected process at start.
+    pub history: bool,
     /// `None` follows the system theme.
     pub dark: Option<bool>,
     /// Opens the About window at start, for screenshots.
@@ -38,6 +43,8 @@ impl Default for Options {
             filter: String::new(),
             interval: Duration::from_secs(1),
             tab: 0,
+            range: 0,
+            history: false,
             dark: None,
             about: false,
             expand: Vec::new(),
@@ -60,6 +67,15 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
         match (flag, value) {
             ("--tab", Some("processes")) => options.tab = 0,
             ("--tab", Some("performance")) => options.tab = 1,
+            ("--tab", Some("diagnostics")) => options.tab = 2,
+            ("--range", Some(range)) => {
+                options.range = ["1m", "10m", "1h", "6h", "24h", "7d"]
+                    .iter()
+                    .position(|&r| r == range)
+                    .ok_or_else(|| format!("invalid range `{range}`"))?
+                    as i32;
+            }
+            ("--history", None) => options.history = true,
             ("--tab", Some(tab)) => return Err(format!("tab `{tab}` is not available yet")),
             ("--sort", Some(sort)) => options.sort = parse_sort(sort)?,
             ("--filter", Some(filter)) => options.filter = filter.to_owned(),
@@ -148,6 +164,8 @@ mod tests {
                 filter: "code".into(),
                 interval: Duration::from_millis(500),
                 tab: 0,
+                range: 0,
+                history: false,
                 dark: Some(true),
                 about: false,
                 expand: Vec::new(),
@@ -165,5 +183,8 @@ mod tests {
         assert!(parse(args(&["--sort=size"])).is_err());
         assert!(parse(args(&["--interval=10"])).is_err());
         assert!(parse(args(&["--tab=ports"])).is_err());
+        let m3 = parse(args(&["--tab=diagnostics", "--range=6h", "--history"])).unwrap();
+        assert_eq!((m3.tab, m3.range, m3.history), (2, 3, true));
+        assert!(parse(args(&["--range=2h"])).is_err());
     }
 }

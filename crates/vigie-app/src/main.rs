@@ -40,6 +40,8 @@ fn main() -> anyhow::Result<()> {
     app.set_perf_disks(ModelRc::from(Rc::new(VecModel::<DiskCard>::default())));
     app.set_perf_gpus(ModelRc::from(Rc::new(VecModel::<GpuCard>::default())));
     app.set_tab(options.tab);
+    app.set_perf_span_index(options.range);
+    app.set_history_open(options.history);
     app.set_search_text(options.filter.as_str().into());
     show_sort(&app, options.sort);
     if let Some(columns) = &options.columns {
@@ -53,12 +55,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     let about: Rc<RefCell<Option<AboutWindow>>> = Rc::default();
+    let weak = app.as_weak();
     app.on_show_about(move || {
         let mut about = about.borrow_mut();
         if about.is_none() {
             *about = AboutWindow::new().ok();
         }
-        if let Some(window) = about.as_ref() {
+        if let (Some(window), Some(app)) = (about.as_ref(), weak.upgrade()) {
+            window.set_history_memory(app.get_history_memory());
             let _ = window.show();
         }
     });
@@ -93,6 +97,9 @@ fn main() -> anyhow::Result<()> {
         if let Some(index) = model::step_selection(model, selected, delta)
             && let Some(row) = model.row_data(index)
         {
+            if selected != Some(row.key) {
+                app.invoke_selection_changed(row.pid, row.start);
+            }
             app.set_selected(row);
             app.set_has_selection(true);
             app.invoke_scroll_to(index as i32);
@@ -104,6 +111,23 @@ fn main() -> anyhow::Result<()> {
     let tx = commands.clone();
     app.on_tab_changed(move |tab| {
         let _ = tx.send(Command::Tab(tab));
+    });
+    let tx = commands.clone();
+    app.on_range_changed(move |index, offset| {
+        let _ = tx.send(Command::Range(model::Range::new(index, offset)));
+    });
+    let tx = commands.clone();
+    app.on_process_range_changed(move |index, offset| {
+        let _ = tx.send(Command::ProcessRange(model::Range::new(index, offset)));
+    });
+    let tx = commands.clone();
+    app.on_selection_changed(move |pid, start| {
+        let process = u32::try_from(pid).ok().zip(u32::try_from(start).ok());
+        let _ = tx.send(Command::Select(process));
+    });
+    let tx = commands.clone();
+    app.on_history_toggled(move |open| {
+        let _ = tx.send(Command::History(open));
     });
     let tx = commands.clone();
     app.on_group_clicked(move |index| {
@@ -168,6 +192,9 @@ fn main() -> anyhow::Result<()> {
         icon_size,
         adaptive: !options.no_adaptive,
         tab: options.tab,
+        range: model::Range::new(options.range, 0),
+        process_range: model::Range::new(app.get_process_span_index(), 0),
+        history_open: options.history,
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
     if let Some(pid) = options.select {
@@ -211,6 +238,10 @@ fn main() -> anyhow::Result<()> {
     app.on_toggle_clicked(|_| {});
     app.on_group_clicked(|_| {});
     app.on_tab_changed(|_| {});
+    app.on_range_changed(|_, _| {});
+    app.on_process_range_changed(|_, _| {});
+    app.on_selection_changed(|_, _| {});
+    app.on_history_toggled(|_| {});
     app.on_request_action(|_, _, _| {});
     drop(pace_timer);
     let _ = sampler.join();

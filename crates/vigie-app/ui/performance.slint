@@ -1,53 +1,72 @@
-// The Performance view: one card per resource, each with a one-minute graph.
+// The Performance view: one card per resource, each with a graph over the chosen range.
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
+import { Graph, GraphData, RangeBar, Spans } from "timeline.slint";
 
 export struct DiskCard {
-    title: string,
+    index: int,
+    // Drive letters on the disk, "C: D:"; empty when it has none.
+    drives: string,
     active: string,
     read: string,
     write: string,
-    line: string,
-    area: string,
 }
 
 export struct GpuCard {
-    title: string,
+    index: int,
+    // Adapter name; empty when the system gives none.
+    name: string,
     value: string,
-    memory: string,
-    line: string,
-    area: string,
+    memory-used: string,
+    memory-total: string,
 }
 
-// Everything the view shows, formatted by Rust (src/model.rs). Graph paths use a 300 × 100 box.
+// Everything the view shows, formatted by Rust (src/model.rs). Graphs come separately.
 export struct PerfView {
     ready: bool,
     // False where the probe has no machine-wide figures (not Windows yet).
     available: bool,
     cpu-value: string,
     cpu-model: string,
-    cpu-detail: string,
-    cpu-line: string,
-    cpu-area: string,
+    logical-cores: int,
     memory-value: string,
-    memory-detail: string,
+    memory-used: string,
+    memory-total: string,
     memory-cached: string,
-    memory-committed: string,
+    committed-used: string,
+    committed-limit: string,
+    // Committed share of its limit, percent.
+    commit-percent: int,
     memory-compressed: string,
-    memory-slots: string,
-    // 0 low, 1 medium, 2 high (see vigie_core::perf::Pressure).
+    // "2 of 4 · 6000 MT/s" parts; slots-total 0 when the firmware does not say.
+    slots-used: int,
+    slots-total: int,
+    slots-speed: int,
+    // 0 low, 1 medium, 2 high (see vigie_core::perf::Pressure); cause 0 available, 1 commit.
     pressure: int,
-    memory-line: string,
-    memory-area: string,
+    pressure-cause: int,
     network-value: string,
     network-received: string,
     network-sent: string,
     network-scale: string,
-    received-line: string,
-    received-area: string,
-    sent-line: string,
-    uptime: string,
+    uptime-days: int,
+    uptime-hours: int,
+    uptime-minutes: int,
+    // Seconds of history kept so far.
+    history-age: int,
+}
+
+export global PerfText {
+    pure public function disk-title(card: DiskCard) -> string {
+        return card.drives == "" ? @tr("Disk {}", card.index) : @tr("Disk {} ({})", card.index, card.drives);
+    }
+
+    pure public function uptime(view: PerfView) -> string {
+        return view.uptime-days > 0 ? @tr("up {} d {} h", view.uptime-days, view.uptime-hours)
+            : view.uptime-hours > 0 ? @tr("up {} h {} min", view.uptime-hours, view.uptime-minutes)
+            : @tr("up {} min", view.uptime-minutes);
+    }
 }
 
 component Label inherits Text {
@@ -60,58 +79,6 @@ component Figure inherits Text {
     color: Theme.text;
     font-size: Theme.font-body;
     vertical-alignment: center;
-}
-
-// A one-minute graph: a filled area under a line, newest value at the right.
-component Graph inherits Rectangle {
-    in property <string> line;
-    in property <string> area;
-    in property <string> second-line;
-    in property <color> tint: Theme.accent;
-    in property <color> second-tint: Theme.warning;
-    height: 120px;
-    border-radius: Theme.radius-small;
-    border-width: 1px;
-    border-color: Theme.border;
-    clip: true;
-    // Quarter grid lines, so levels read without numbers.
-    for i in 3: Rectangle {
-        y: parent.height * (i + 1) / 4;
-        height: 1px;
-        background: Theme.border.with-alpha(0.6);
-    }
-    if root.area != "": Path {
-        width: 100%;
-        height: 100%;
-        viewbox-width: 300;
-        viewbox-height: 100;
-        // Stretch to the graph box: the default keeps the 3:1 aspect and leaves a gap.
-        fit: fill;
-        commands: root.area;
-        fill: root.tint.with-alpha(0.14);
-    }
-    if root.line != "": Path {
-        width: 100%;
-        height: 100%;
-        viewbox-width: 300;
-        viewbox-height: 100;
-        // Stretch to the graph box: the default keeps the 3:1 aspect and leaves a gap.
-        fit: fill;
-        commands: root.line;
-        stroke: root.tint;
-        stroke-width: 1.5px;
-    }
-    if root.second-line != "": Path {
-        width: 100%;
-        height: 100%;
-        viewbox-width: 300;
-        viewbox-height: 100;
-        // Stretch to the graph box: the default keeps the 3:1 aspect and leaves a gap.
-        fit: fill;
-        commands: root.second-line;
-        stroke: root.second-tint;
-        stroke-width: 1.5px;
-    }
 }
 
 component Card inherits Rectangle {
@@ -131,6 +98,7 @@ component Card inherits Rectangle {
                 font-size: Theme.font-section;
                 font-weight: Theme.weight-strong;
                 horizontal-stretch: 1;
+                overflow: elide;
             }
             Text {
                 text: root.value;
@@ -158,6 +126,20 @@ export component PerformanceView inherits Rectangle {
     in property <[float]> cores;
     in property <[DiskCard]> disks;
     in property <[GpuCard]> gpus;
+    in property <GraphData> cpu-graph;
+    in property <GraphData> memory-graph;
+    in property <GraphData> network-graph;
+    in property <[GraphData]> disk-graphs;
+    in property <[GraphData]> gpu-graphs;
+    in-out property <int> span-index;
+    in-out property <int> offset;
+    callback range-changed(int, int);
+    property <int> span: Spans.seconds[root.span-index];
+    property <int> drag-origin;
+
+    function drag(share: float) {
+        range.set(root.span-index, root.drag-origin + round(share * root.span));
+    }
 
     if !root.view.ready || !root.view.available: Text {
         text: root.view.ready ? @tr("Performance figures are not available on this system yet.") : @tr("Measuring…");
@@ -167,7 +149,28 @@ export component PerformanceView inherits Rectangle {
         vertical-alignment: center;
     }
 
-    if root.view.ready && root.view.available: ScrollView {
+    VerticalLayout {
+        visible: root.view.ready && root.view.available;
+        Rectangle {
+            height: 40px;
+            background: Theme.surface;
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+            HorizontalLayout {
+                padding-left: Theme.space-4;
+                padding-right: Theme.space-4;
+                padding-top: Theme.space-2;
+                padding-bottom: Theme.space-2;
+                range := RangeBar {
+                    span-index <=> root.span-index;
+                    offset <=> root.offset;
+                    history-age: root.view.history-age;
+                    changed(index, offset) => { root.range-changed(index, offset); }
+                }
+            }
+        }
+
+    ScrollView {
+        vertical-stretch: 1;
         VerticalLayout {
             padding: Theme.space-4;
             spacing: Theme.space-4;
@@ -178,7 +181,13 @@ export component PerformanceView inherits Rectangle {
                     title: @tr("CPU");
                     value: root.view.cpu-value;
                     horizontal-stretch: 1;
-                    Graph { line: root.view.cpu-line; area: root.view.cpu-area; }
+                    Graph {
+                        data: root.cpu-graph;
+                        span: root.span;
+                        offset: root.offset;
+                        drag-started => { root.drag-origin = root.offset; }
+                        dragged(share) => { root.drag(share); }
+                    }
                     // One bar per logical processor: rectangles stay cheap with many cores.
                     HorizontalLayout {
                         height: 36px;
@@ -194,26 +203,41 @@ export component PerformanceView inherits Rectangle {
                             }
                         }
                     }
-                    Label { text: root.view.cpu-model; }
-                    Stat { label: root.view.cpu-detail; value: root.view.uptime; }
+                    Label { text: root.view.cpu-model; overflow: elide; }
+                    Stat {
+                        label: @tr("{} logical processors", root.view.logical-cores);
+                        value: PerfText.uptime(root.view);
+                    }
                 }
                 Card {
                     title: @tr("Memory");
                     value: root.view.memory-value;
                     horizontal-stretch: 1;
                     Graph {
-                        line: root.view.memory-line;
-                        area: root.view.memory-area;
+                        data: root.memory-graph;
+                        span: root.span;
+                        offset: root.offset;
                         tint: root.view.pressure == 2 ? Theme.danger : root.view.pressure == 1 ? Theme.warning : Theme.accent;
+                        drag-started => { root.drag-origin = root.offset; }
+                        dragged(share) => { root.drag(share); }
                     }
-                    Stat { label: @tr("In use"); value: root.view.memory-detail; }
+                    Stat { label: @tr("In use"); value: @tr("{} of {}", root.view.memory-used, root.view.memory-total); }
                     Stat { label: @tr("Cached"); value: root.view.memory-cached; }
-                    Stat { label: @tr("Committed"); value: root.view.memory-committed; }
+                    Stat { label: @tr("Committed"); value: @tr("{} of {}", root.view.committed-used, root.view.committed-limit); }
                     Stat { label: @tr("Compressed"); value: root.view.memory-compressed; }
-                    Stat { label: @tr("Slots"); value: root.view.memory-slots; }
+                    Stat {
+                        label: @tr("Slots");
+                        value: root.view.slots-total == 0 ? "—"
+                            : root.view.slots-speed > 0 ? @tr("{} of {} · {} MT/s", root.view.slots-used, root.view.slots-total, root.view.slots-speed)
+                            : @tr("{} of {}", root.view.slots-used, root.view.slots-total);
+                    }
                     Stat {
                         label: @tr("Pressure");
-                        value: root.view.pressure == 2 ? @tr("High") : root.view.pressure == 1 ? @tr("Medium") : @tr("Low");
+                        // Say why when it is not low: physical memory, or commit near its limit.
+                        value: root.view.pressure == 0 ? @tr("Low")
+                            : root.view.pressure-cause == 1
+                                ? (root.view.pressure == 2 ? @tr("High (commit {} %)", root.view.commit-percent) : @tr("Medium (commit {} %)", root.view.commit-percent))
+                                : (root.view.pressure == 2 ? @tr("High") : @tr("Medium"));
                         value-color: root.view.pressure == 2 ? Theme.danger : root.view.pressure == 1 ? Theme.warning : Theme.text;
                     }
                 }
@@ -226,22 +250,31 @@ export component PerformanceView inherits Rectangle {
                     value: root.view.network-value;
                     horizontal-stretch: 1;
                     Graph {
-                        line: root.view.received-line;
-                        area: root.view.received-area;
-                        second-line: root.view.sent-line;
+                        data: root.network-graph;
+                        unit: 1;
+                        span: root.span;
+                        offset: root.offset;
+                        drag-started => { root.drag-origin = root.offset; }
+                        dragged(share) => { root.drag(share); }
                     }
                     Stat { label: @tr("Received"); value: root.view.network-received; }
                     Stat { label: @tr("Sent"); value: root.view.network-sent; value-color: Theme.warning; }
                     Stat { label: @tr("Graph scale"); value: root.view.network-scale; }
                 }
-                // Disks follow, two per row.
+                // Disks follow, one under the other.
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: Theme.space-4;
-                    for disk in root.disks: Card {
-                        title: disk.title;
+                    for disk[i] in root.disks: Card {
+                        title: PerfText.disk-title(disk);
                         value: disk.active;
-                        Graph { line: disk.line; area: disk.area; }
+                        Graph {
+                            data: root.disk-graphs[i];
+                            span: root.span;
+                            offset: root.offset;
+                            drag-started => { root.drag-origin = root.offset; }
+                            dragged(share) => { root.drag(share); }
+                        }
                         Stat { label: @tr("Read"); value: disk.read; }
                         Stat { label: @tr("Write"); value: disk.write; }
                     }
@@ -256,14 +289,24 @@ export component PerformanceView inherits Rectangle {
             // GPUs, side by side.
             HorizontalLayout {
                 spacing: Theme.space-4;
-                for gpu in root.gpus: Card {
-                    title: gpu.title;
+                for gpu[i] in root.gpus: Card {
+                    title: gpu.name == "" ? @tr("GPU {}", gpu.index) : gpu.name;
                     value: gpu.value;
                     horizontal-stretch: 1;
-                    Graph { line: gpu.line; area: gpu.area; }
-                    Stat { label: @tr("Dedicated memory"); value: gpu.memory; }
+                    Graph {
+                        data: root.gpu-graphs[i];
+                        span: root.span;
+                        offset: root.offset;
+                        drag-started => { root.drag-origin = root.offset; }
+                        dragged(share) => { root.drag(share); }
+                    }
+                    Stat {
+                        label: @tr("Dedicated memory");
+                        value: gpu.memory-total == "" ? "—" : @tr("{} of {}", gpu.memory-used, gpu.memory-total);
+                    }
                 }
             }
         }
+    }
     }
 }
