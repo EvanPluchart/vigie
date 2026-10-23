@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-const USAGE: &str = "usage: cargo xtask bench-overhead [--seconds=N] [--check] [--tab=processes|performance|diagnostics|ports|files|startup]";
+const USAGE: &str = "usage: cargo xtask bench-overhead [--seconds=N] [--check] [--tab=processes|performance|diagnostics|ports|files|startup]
+       cargo xtask dist";
 /// Performance budget from docs/ARCHITECTURE.md: CPU on an idle machine, private memory.
 const CPU_BUDGET_PERCENT: f64 = 1.0;
 const MEMORY_BUDGET_MB: f64 = 30.0;
@@ -36,6 +37,7 @@ fn main() -> Result<()> {
             }
             bench_overhead(Duration::from_secs(seconds), check, &tab)
         }
+        Some("dist") => dist(),
         _ => bail!("{USAGE}"),
     }
 }
@@ -45,6 +47,87 @@ fn workspace_root() -> PathBuf {
         .parent()
         .expect("xtask lives in the workspace")
         .to_path_buf()
+}
+
+/// The workspace version, from the root `Cargo.toml`.
+fn version(root: &Path) -> Result<String> {
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml"))?;
+    manifest
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("version = \"")?.strip_suffix('"'))
+        .map(str::to_owned)
+        .context("no version in Cargo.toml")
+}
+
+/// Builds the release binary and the packages for this system into `dist/` (decision 0009):
+/// on Windows, the Inno Setup installer and a portable zip.
+fn dist() -> Result<()> {
+    let root = workspace_root();
+    let version = version(&root)?;
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let status = Command::new(cargo)
+        .current_dir(&root)
+        .args(["build", "--release", "-p", "vigie"])
+        .status()
+        .context("running cargo build")?;
+    if !status.success() {
+        bail!("release build failed");
+    }
+    let out = root.join("dist");
+    std::fs::create_dir_all(&out)?;
+    if !cfg!(windows) {
+        println!(
+            "dist: packages for this system are built by the release workflow (decision 0009)"
+        );
+        return Ok(());
+    }
+    let exe = root.join("target/release/vigie.exe");
+    // Inno Setup 6, as winget or Chocolatey install it.
+    let iscc = std::env::var_os("ISCC")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(
+            std::env::var_os("LOCALAPPDATA")
+                .map(|d| PathBuf::from(d).join("Programs/Inno Setup 6/ISCC.exe")),
+        )
+        .chain([PathBuf::from(
+            r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+        )])
+        .find(|p| p.exists())
+        .context("Inno Setup 6 not found: install it, or set ISCC to ISCC.exe")?;
+    let status = Command::new(&iscc)
+        .current_dir(root.join("packaging/windows"))
+        .arg("/Q")
+        .arg(format!("/DAppVersion={version}"))
+        .arg(format!("/DSourceExe={}", exe.display()))
+        .arg(format!("/DOutputDir={}", out.display()))
+        .arg("vigie.iss")
+        .status()
+        .context("running ISCC")?;
+    if !status.success() {
+        bail!("the installer did not build");
+    }
+    // A portable zip next to it: the exe alone runs anywhere, settings in %APPDATA%.
+    let zip = out.join(format!("Vigie-{version}-portable.zip"));
+    let _ = std::fs::remove_file(&zip);
+    let status = Command::new("tar")
+        .current_dir(exe.parent().context("exe folder")?)
+        .arg("-a")
+        .arg("-c")
+        .arg("-f")
+        .arg(&zip)
+        .arg("vigie.exe")
+        .status()
+        .context("running tar")?;
+    if !status.success() {
+        bail!("the portable zip did not build");
+    }
+    println!(
+        "dist: {}",
+        out.join(format!("Vigie-{version}-setup.exe")).display()
+    );
+    println!("dist: {}", zip.display());
+    Ok(())
 }
 
 /// Builds Vigie in release, runs it with a 1 s interval and reads its own CPU time and memory.
