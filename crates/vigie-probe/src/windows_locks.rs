@@ -25,6 +25,8 @@ type RegisterResources =
 type GetList =
     unsafe extern "system" fn(u32, *mut u32, *mut u32, *mut RM_PROCESS_INFO, *mut u32) -> u32;
 type EndSession = unsafe extern "system" fn(u32) -> u32;
+/// What `GetProcAddress` returns.
+type Farproc = unsafe extern "system" fn() -> isize;
 
 /// The Restart Manager entry points, resolved once.
 pub(crate) struct RestartManager {
@@ -57,12 +59,12 @@ impl RestartManager {
         // SAFETY: the signatures match the documented Restart Manager functions.
         unsafe {
             Ok(Self {
-                start: std::mem::transmute::<_, StartSession>(symbol(b"RmStartSession\0")?),
-                register: std::mem::transmute::<_, RegisterResources>(symbol(
+                start: std::mem::transmute::<Farproc, StartSession>(symbol(b"RmStartSession\0")?),
+                register: std::mem::transmute::<Farproc, RegisterResources>(symbol(
                     b"RmRegisterResources\0",
                 )?),
-                list: std::mem::transmute::<_, GetList>(symbol(b"RmGetList\0")?),
-                end: std::mem::transmute::<_, EndSession>(symbol(b"RmEndSession\0")?),
+                list: std::mem::transmute::<Farproc, GetList>(symbol(b"RmGetList\0")?),
+                end: std::mem::transmute::<Farproc, EndSession>(symbol(b"RmEndSession\0")?),
             })
         }
     }
