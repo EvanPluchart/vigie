@@ -262,6 +262,9 @@ msgstr "Historique de {}"
 msgid "Recording starts now: Vigie keeps a history of the busiest processes and of the one you select."
 msgstr "L’enregistrement commence maintenant : Vigie garde l’historique des processus les plus gourmands et de celui que vous sélectionnez."
 
+msgid "Not recorded"
+msgstr "Non enregistré"
+
 msgid "Memory (scale {})"
 msgstr "Mémoire (échelle {})"
 
@@ -657,6 +660,9 @@ msgstr "{} Go"
 
 msgid "{} MB"
 msgstr "{} Mo"
+
+msgid "Before Vigie started"
+msgstr "Avant le lancement de Vigie"
 
 msgid "{} → {}"
 msgstr "{} → {}"

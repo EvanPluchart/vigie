@@ -60,11 +60,12 @@ impl Sort {
     }
 }
 
+/// Names from A to Z, as Task Manager opens: the table stays still while figures change.
 impl Default for Sort {
     fn default() -> Self {
         Self {
-            key: SortKey::Cpu,
-            ascending: false,
+            key: SortKey::Name,
+            ascending: true,
         }
     }
 }
@@ -705,8 +706,17 @@ mod tests {
 
     #[test]
     fn header_clicks_flip_or_reset_the_direction() {
-        let cpu = Sort::default();
-        assert!(!cpu.ascending);
+        assert_eq!(
+            Sort::default(),
+            Sort {
+                key: SortKey::Name,
+                ascending: true
+            }
+        );
+        let cpu = Sort {
+            key: SortKey::Cpu,
+            ascending: false,
+        };
         let flipped = cpu.clicked(SortKey::Cpu);
         assert_eq!((flipped.key, flipped.ascending), (SortKey::Cpu, true));
         let name = flipped.clicked(SortKey::Name);

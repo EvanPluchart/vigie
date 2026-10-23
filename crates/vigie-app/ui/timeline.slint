@@ -65,6 +65,10 @@ export component Graph inherits Rectangle {
     in property <int> span: 60;
     in property <int> offset;
     // Dragging: started, then moved by this share of the graph width (right is back in time).
+    // Seconds of history recorded so far; -1 when unknown. Older parts of the window are
+    // marked as not recorded: Vigie keeps history only while it runs.
+    in property <int> recorded: -1;
+    in property <string> unrecorded-label: @tr("Before Vigie started");
     callback drag-started();
     callback dragged(float);
     height: 120px;
@@ -75,6 +79,28 @@ export component Graph inherits Rectangle {
     property <int> count: root.data.values.length;
     property <int> hovered: touch.has-hover && root.count > 0
         ? clamp(round(touch.mouse-x / root.width * (root.count - 1)), 0, root.count - 1) : -1;
+    // The part of the window before Vigie started recording.
+    property <float> unrecorded: root.recorded < 0 ? 0 : clamp(1 - (root.recorded - root.offset) / root.span, 0, 1);
+    if root.unrecorded > 0: Rectangle {
+        x: 0;
+        width: root.width * root.unrecorded;
+        background: Theme.text.with-alpha(0.035);
+        Rectangle {
+            x: parent.width - 1px;
+            width: 1px;
+            background: Theme.text-muted.with-alpha(0.5);
+        }
+        if parent.width > 120px: Text {
+            x: Theme.space-2;
+            width: parent.width - 2 * Theme.space-2;
+            text: root.unrecorded-label;
+            color: Theme.text-muted;
+            font-size: Theme.font-caption;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
     // Quarter grid lines, so levels read without numbers.
     for i in 3: Rectangle {
         y: parent.height * (i + 1) / 4;

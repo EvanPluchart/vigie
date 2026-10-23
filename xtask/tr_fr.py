@@ -294,6 +294,8 @@ FR = {
     "Ctrl+Shift+Esc points to a Vigie that no longer exists ({}): Task Manager cannot open. Repair it to give Ctrl+Shift+Esc back to Task Manager.": "Ctrl+Maj+Échap pointe vers un Vigie qui n’existe plus ({}) : le Gestionnaire des tâches ne peut pas s’ouvrir. Réparez pour rendre Ctrl+Maj+Échap au Gestionnaire des tâches.",
     "Repair": "Réparer",
     "Starting and stopping most services needs Vigie to run as administrator.": "Démarrer ou arrêter la plupart des services demande de lancer Vigie en administrateur.",
+    "Before Vigie started": "Avant le lancement de Vigie",
+    "Not recorded": "Non enregistré",
 }
 
 

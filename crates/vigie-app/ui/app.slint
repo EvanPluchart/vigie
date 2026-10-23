@@ -311,6 +311,7 @@ component RailItem inherits Rectangle {
     }
     // Reachable with Tab; Enter or Space opens the view.
     focus := FocusScope {
+        focus-on-click: false;
         key-pressed(event) => {
             if (event.text == " " || event.text == Key.Return) {
                 root.clicked();
@@ -472,8 +473,8 @@ export component AppWindow inherits Window {
     in property <string> total-cpu;
     in property <string> total-memory;
     in property <string> self-memory: "—";
-    in property <int> sort-column: 2;
-    in property <bool> sort-ascending;
+    in property <int> sort-column: 0;
+    in property <bool> sort-ascending: true;
     in-out property <string> search-text;
     in-out property <ColumnSet> columns: { publisher: false, pid: true, cpu: true, memory: true };
     // The selected process. Rust keeps `selected` up to date as rows refresh, and clears
@@ -505,6 +506,13 @@ export component AppWindow inherits Window {
     // History panel under the table, for the selected process.
     in-out property <bool> history-open;
     callback history-toggled(bool);
+    // Height of the history panel; dragged from its top edge.
+    in-out property <length> history-height: 280px;
+    callback layout-edited();
+    // A smaller window shrinks the panel, so the table keeps a few rows.
+    changed height => {
+        root.history-height = min(root.history-height, max(150px, root.height - 300px));
+    }
     in property <GraphData> process-cpu-graph;
     in property <GraphData> process-memory-graph;
     // False until the selected process has a history (it starts when it is selected).
@@ -865,8 +873,9 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     padding-left: Theme.space-4;
                     padding-right: Theme.space-4;
-                    padding-top: Theme.space-1;
-                    padding-bottom: Theme.space-1;
+                    // (44 - 32) / 2: the buttons sit centred between the two rules.
+                    padding-top: 6px;
+                    padding-bottom: 6px;
                     spacing: Theme.space-2;
                     Cell {
                         // A failed action is said here, next to the buttons that started it.
@@ -1077,10 +1086,30 @@ export component AppWindow inherits Window {
             }
 
             // History of the selected process: CPU and memory over the chosen range.
-            if root.history-open: Rectangle {
-                height: 216px;
+            if root.history-open: history-panel := Rectangle {
+                // The table keeps at least a few rows above the panel.
+                height: max(150px, root.history-height);
                 background: Theme.surface;
+                clip: true;
                 Rectangle { y: 0; height: 1px; background: Theme.border; }
+                // Drag the top edge to resize. Each move resizes by the distance from where the
+                // edge was grabbed, which the edge follows.
+                Rectangle {
+                    y: 0;
+                    height: 6px;
+                    background: resize-touch.has-hover || resize-touch.pressed ? Theme.accent.with-alpha(0.5) : transparent;
+                    resize-touch := TouchArea {
+                        mouse-cursor: MouseCursor.row-resize;
+                        moved => {
+                            if (self.pressed) {
+                                root.history-height = clamp(history-panel.height - (self.mouse-y - self.pressed-y), 150px, max(150px, root.height - 300px));
+                            }
+                        }
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.up) { root.layout-edited(); }
+                        }
+                    }
+                }
                 if !root.has-selection: Text {
                     text: @tr("Select a process to see its history.");
                     color: Theme.text-muted;
@@ -1125,8 +1154,10 @@ export component AppWindow inherits Window {
                             spacing: Theme.space-1;
                             Text { text: @tr("CPU"); color: Theme.text-muted; font-size: Theme.font-caption; }
                             Graph {
-                                height: 120px;
+                                height: max(60px, history-panel.height - (root.process-tracked ? 84px : 104px));
                                 data: root.process-cpu-graph;
+                                recorded: root.process-tracked ? root.process-history-age : 0;
+                                unrecorded-label: @tr("Not recorded");
                                 span: Spans.seconds[root.process-span-index];
                                 offset: root.process-offset;
                                 drag-started => { graphs.drag-origin = root.process-offset; }
@@ -1137,8 +1168,10 @@ export component AppWindow inherits Window {
                             spacing: Theme.space-1;
                             Text { text: @tr("Memory (scale {})", root.process-memory-scale); color: Theme.text-muted; font-size: Theme.font-caption; }
                             Graph {
-                                height: 120px;
+                                height: max(60px, history-panel.height - (root.process-tracked ? 84px : 104px));
                                 data: root.process-memory-graph;
+                                recorded: root.process-tracked ? root.process-history-age : 0;
+                                unrecorded-label: @tr("Not recorded");
                                 unit: 2;
                                 span: Spans.seconds[root.process-span-index];
                                 offset: root.process-offset;

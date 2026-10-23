@@ -42,8 +42,11 @@ export component VButton inherits Rectangle {
         mouse-cursor: root.enabled ? pointer : default;
         clicked => { root.clicked(); }
     }
+    // Keyboard focus only: a click on an unfocused FocusScope takes the focus and eats the
+    // press, which made every button need two clicks.
     focus := FocusScope {
         enabled: root.enabled;
+        focus-on-click: false;
         key-pressed(event) => {
             if (event.text == " " || event.text == Key.Return) {
                 root.clicked();
@@ -186,7 +189,7 @@ export component VSwitch inherits Rectangle {
     width: 36px;
     height: 20px;
     border-radius: 10px;
-    background: root.checked ? Theme.accent : Theme.text.with-alpha(0.12);
+    background: root.checked ? Theme.accent : Theme.text.with-alpha(Theme.dark ? 0.22 : 0.18);
     border-width: focus.has-focus ? 2px : 0px;
     border-color: Theme.accent.with-alpha(0.5);
     opacity: root.enabled ? 1 : 0.4;
@@ -208,7 +211,9 @@ export component VSwitch inherits Rectangle {
         width: 14px;
         height: 14px;
         border-radius: 7px;
-        background: root.checked ? Theme.ink : Theme.text-muted;
+        background: #FFFFFF;
+        drop-shadow-blur: 2px;
+        drop-shadow-color: #000000.with-alpha(0.25);
         animate x { duration: 120ms; easing: ease-out; }
     }
     TouchArea {
@@ -216,8 +221,11 @@ export component VSwitch inherits Rectangle {
         mouse-cursor: root.enabled ? pointer : default;
         clicked => { root.flip(); }
     }
+    // Keyboard focus only: a click on an unfocused FocusScope takes the focus and eats the
+    // press, which made every button need two clicks.
     focus := FocusScope {
         enabled: root.enabled;
+        focus-on-click: false;
         key-pressed(event) => {
             if (event.text == " " || event.text == Key.Return) {
                 root.flip();
