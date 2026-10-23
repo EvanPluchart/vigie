@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 
 use slint::{Image, Model, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
-use vigie_core::perf::{HISTORY, PerfFrame, Performance, Pressure, graph_paths};
+use vigie_core::history::{History, Series, graph_paths};
+use vigie_core::perf::{PerfFrame, Performance, Pressure};
 use vigie_core::{Frame, Group, Row, RowKind};
 use vigie_probe::{Icon, SystemInfo};
 
@@ -212,12 +213,26 @@ fn patch_values<T: Clone + PartialEq + 'static>(model: &slint::ModelRc<T>, value
 pub fn perf_ui(frame: &PerfFrame, perf: &Performance, info: &SystemInfo) -> PerfUi {
     const W: f32 = 300.0;
     const H: f32 = 100.0;
-    let (cpu_line, cpu_area) = graph_paths(perf.cpu.iter(), HISTORY, 100.0, W, H);
-    let (memory_line, memory_area) = graph_paths(perf.memory.iter(), HISTORY, 100.0, W, H);
+    const SPAN_S: u64 = 60;
+    const COLUMNS: usize = 300;
+    let now = frame.at_ns;
+    let window = |history: &History| {
+        let mut series = Series::default();
+        history.window(now, SPAN_S, 0, COLUMNS, &mut series);
+        series
+    };
+    let paths = |series: &Series, max: f32| {
+        let (mut line, mut area) = (String::new(), String::new());
+        graph_paths(series, max, W, H, &mut line, &mut area);
+        (line, area)
+    };
+    let (cpu_line, cpu_area) = paths(&window(&perf.cpu), 100.0);
+    let (memory_line, memory_area) = paths(&window(&perf.memory), 100.0);
     // Network: both directions share one scale, at least 1 Mbit/s so idle links stay flat.
-    let net_max = (perf.received.max().max(perf.sent.max()) * 1.15).max(125_000.0);
-    let (received_line, received_area) = graph_paths(perf.received.iter(), HISTORY, net_max, W, H);
-    let (sent_line, _) = graph_paths(perf.sent.iter(), HISTORY, net_max, W, H);
+    let (received, sent) = (window(&perf.received), window(&perf.sent));
+    let net_max = (received.max().max(sent.max()) * 1.15).max(125_000.0);
+    let (received_line, received_area) = paths(&received, net_max);
+    let (sent_line, _) = paths(&sent, net_max);
     let memory = &frame.memory;
     let used = memory.total.saturating_sub(memory.available);
     let view = PerfView {
@@ -272,7 +287,7 @@ pub fn perf_ui(frame: &PerfFrame, perf: &Performance, info: &SystemInfo) -> Perf
         .iter()
         .zip(&perf.disks)
         .map(|(disk, history)| {
-            let (line, area) = graph_paths(history.iter(), HISTORY, 100.0, W, H);
+            let (line, area) = paths(&window(history), 100.0);
             DiskCard {
                 title: disk_title(disk.index, disk.letters).into(),
                 active: format_percent(disk.active_percent),
@@ -288,9 +303,8 @@ pub fn perf_ui(frame: &PerfFrame, perf: &Performance, info: &SystemInfo) -> Perf
         .iter()
         .map(|gpu| {
             let history = perf.gpus.get(gpu.index as usize);
-            let (line, area) = history.map_or_else(Default::default, |h| {
-                graph_paths(h.iter(), HISTORY, 100.0, W, H)
-            });
+            let (line, area) =
+                history.map_or_else(Default::default, |h| paths(&window(h), 100.0));
             let title = info
                 .gpus
                 .get(gpu.index as usize)

@@ -1,79 +1,16 @@
-//! Machine-wide figures for the Performance view: rates from counter deltas, short histories
-//! for the graphs, and the memory pressure definition the diagnostics (M3) will reuse.
+//! Machine-wide figures for the Performance view: rates from counter deltas, their tiered
+//! histories, and the memory pressure definition the diagnostics reuse.
 
+use crate::history::{GAUGE_TIERS, History, SYSTEM_TIERS};
 use vigie_probe::{CoreTimes, DiskCounters, GpuCounters, MemoryInfo, NetCounters, SystemSample};
 
-/// Points kept per graph: one minute at the default interval. M3 adds longer tiers.
-pub const HISTORY: usize = 60;
-
-/// A fixed-size history of values, oldest first. Allocated once.
-#[derive(Clone, Debug)]
-pub struct Ring {
-    values: Vec<f32>,
-    next: usize,
-    full: bool,
-}
-
-impl Default for Ring {
-    fn default() -> Self {
-        Self::new(HISTORY)
-    }
-}
-
-impl Ring {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            values: vec![0.0; capacity.max(1)],
-            next: 0,
-            full: false,
-        }
-    }
-
-    pub fn push(&mut self, value: f32) {
-        self.values[self.next] = value;
-        self.next = (self.next + 1) % self.values.len();
-        self.full |= self.next == 0;
-    }
-
-    pub fn len(&self) -> usize {
-        if self.full {
-            self.values.len()
-        } else {
-            self.next
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.values.len()
-    }
-
-    /// Values from the oldest to the newest.
-    pub fn iter(&self) -> impl Iterator<Item = f32> + '_ {
-        let start = if self.full { self.next } else { 0 };
-        (0..self.len()).map(move |i| self.values[(start + i) % self.values.len()])
-    }
-
-    pub fn last(&self) -> Option<f32> {
-        (!self.is_empty())
-            .then(|| self.values[(self.next + self.values.len() - 1) % self.values.len()])
-    }
-
-    pub fn max(&self) -> f32 {
-        self.iter().fold(0.0, f32::max)
-    }
-}
-
-/// How hard memory is pushed, for colour and, later, diagnostics.
+/// How hard memory is pushed, for colour and diagnostics.
 ///
 /// * `High`: less than 10 % of physical memory available, or commit above 90 % of its limit:
 ///   the system is paging or about to refuse allocations.
 /// * `Medium`: less than 20 % available, or commit above 80 %.
 /// * `Low` otherwise.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Pressure {
     #[default]
     Low,
@@ -81,24 +18,55 @@ pub enum Pressure {
     High,
 }
 
+/// What sets the pressure level: physical memory running out, or commit nearing its limit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PressureCause {
+    #[default]
+    Available,
+    Commit,
+}
+
 impl Pressure {
     pub fn of(memory: &MemoryInfo) -> Pressure {
+        Self::with_cause(memory).0
+    }
+
+    /// The level and what sets it. When both sides reach the same level, physical memory wins:
+    /// it is what makes the machine page.
+    pub fn with_cause(memory: &MemoryInfo) -> (Pressure, PressureCause) {
         if memory.total == 0 {
-            return Pressure::Low;
+            return (Pressure::Low, PressureCause::Available);
         }
         let available = memory.available as f64 / memory.total as f64;
-        let commit = if memory.commit_limit == 0 {
-            0.0
-        } else {
-            memory.committed as f64 / memory.commit_limit as f64
-        };
-        if available < 0.10 || commit > 0.90 {
+        let commit = commit_share(memory);
+        let by_available = if available < 0.10 {
             Pressure::High
-        } else if available < 0.20 || commit > 0.80 {
+        } else if available < 0.20 {
             Pressure::Medium
         } else {
             Pressure::Low
+        };
+        let by_commit = if commit > 0.90 {
+            Pressure::High
+        } else if commit > 0.80 {
+            Pressure::Medium
+        } else {
+            Pressure::Low
+        };
+        if by_commit > by_available {
+            (by_commit, PressureCause::Commit)
+        } else {
+            (by_available, PressureCause::Available)
         }
+    }
+}
+
+/// Committed memory as a share of its limit, 0 to 1 (0 when the limit is unknown).
+pub fn commit_share(memory: &MemoryInfo) -> f64 {
+    if memory.commit_limit == 0 {
+        0.0
+    } else {
+        memory.committed as f64 / memory.commit_limit as f64
     }
 }
 
@@ -127,11 +95,14 @@ pub struct GpuView {
 /// What the Performance view shows after one tick.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PerfFrame {
+    /// Monotonic time of the sample, same clock as `SystemSample::at_ns`.
+    pub at_ns: u64,
     pub cpu_percent: Option<f32>,
     pub core_percents: Vec<f32>,
     pub memory: MemoryInfo,
     pub memory_used_percent: f32,
     pub pressure: Pressure,
+    pub pressure_cause: PressureCause,
     pub received_per_s: Option<f64>,
     pub sent_per_s: Option<f64>,
     pub disks: Vec<DiskView>,
@@ -141,33 +112,69 @@ pub struct PerfFrame {
 }
 
 /// Turns successive system samples into rates and histories.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Performance {
     prev_at_ns: u64,
     prev_cores: Vec<CoreTimes>,
     prev_net: Option<NetCounters>,
     prev_disks: Vec<DiskCounters>,
-    pub cpu: Ring,
-    pub memory: Ring,
+    /// Total CPU, percent.
+    pub cpu: History,
+    /// Memory in use, percent.
+    pub memory: History,
     /// Received and sent, bytes per second.
-    pub received: Ring,
-    pub sent: Ring,
+    pub received: History,
+    pub sent: History,
     /// Active share per disk, by position in the last sample.
-    pub disks: Vec<Ring>,
+    pub disks: Vec<History>,
     /// Busiest-engine share per GPU, by index.
-    pub gpus: Vec<Ring>,
+    pub gpus: Vec<History>,
     prev_gpus: Vec<GpuCounters>,
     prev_gpus_at_ns: u64,
     gpu_views: Vec<GpuView>,
 }
 
+impl Default for Performance {
+    fn default() -> Self {
+        Self {
+            prev_at_ns: 0,
+            prev_cores: Vec::new(),
+            prev_net: None,
+            prev_disks: Vec::new(),
+            cpu: History::new(&SYSTEM_TIERS),
+            memory: History::new(&GAUGE_TIERS),
+            received: History::new(&SYSTEM_TIERS),
+            sent: History::new(&SYSTEM_TIERS),
+            disks: Vec::new(),
+            gpus: Vec::new(),
+            prev_gpus: Vec::new(),
+            prev_gpus_at_ns: 0,
+            gpu_views: Vec::new(),
+        }
+    }
+}
+
 impl Performance {
+    /// Bytes held by every history.
+    pub fn history_bytes(&self) -> usize {
+        [&self.cpu, &self.memory, &self.received, &self.sent]
+            .into_iter()
+            .chain(&self.disks)
+            .chain(&self.gpus)
+            .map(History::bytes)
+            .sum()
+    }
+
     pub fn update(&mut self, sample: &SystemSample) -> PerfFrame {
         let wall_ns = sample.at_ns.saturating_sub(self.prev_at_ns);
         let first = self.prev_at_ns == 0;
+        let (pressure, pressure_cause) = Pressure::with_cause(&sample.memory);
+        let at = sample.at_ns;
         let mut frame = PerfFrame {
+            at_ns: at,
             memory: sample.memory,
-            pressure: Pressure::of(&sample.memory),
+            pressure,
+            pressure_cause,
             uptime_s: sample.uptime_s,
             ..PerfFrame::default()
         };
@@ -184,14 +191,14 @@ impl Performance {
             }
             let cpu = share(busy, total);
             frame.cpu_percent = Some(cpu);
-            self.cpu.push(cpu);
+            self.cpu.record(at, cpu);
         }
 
         // Memory in use: what is not available.
         if sample.memory.total > 0 {
             let used = sample.memory.total.saturating_sub(sample.memory.available);
             frame.memory_used_percent = (used as f64 / sample.memory.total as f64 * 100.0) as f32;
-            self.memory.push(frame.memory_used_percent);
+            self.memory.record(at, frame.memory_used_percent);
         }
 
         // Network rates.
@@ -206,12 +213,13 @@ impl Performance {
             );
             frame.received_per_s = Some(rx);
             frame.sent_per_s = Some(tx);
-            self.received.push(rx as f32);
-            self.sent.push(tx as f32);
+            self.received.record(at, rx as f32);
+            self.sent.record(at, tx as f32);
         }
 
         // Disks: matched by number, so a disk plugged in mid-run starts without a value.
-        self.disks.resize_with(sample.disks.len(), Ring::default);
+        self.disks
+            .resize_with(sample.disks.len(), || History::new(&SYSTEM_TIERS));
         for (i, now) in sample.disks.iter().enumerate() {
             let before = self.prev_disks.iter().find(|d| d.index == now.index);
             let mut view = DiskView {
@@ -231,7 +239,7 @@ impl Performance {
                 view.active_percent = Some(active);
                 view.read_per_s = Some(per_s(now.read_bytes, before.read_bytes));
                 view.write_per_s = Some(per_s(now.written_bytes, before.written_bytes));
-                self.disks[i].push(active);
+                self.disks[i].record(at, active);
             }
             frame.disks.push(view);
         }
@@ -255,7 +263,8 @@ impl Performance {
         }
         let wall_ns = sample.gpus_at_ns.saturating_sub(self.prev_gpus_at_ns);
         let first = self.prev_gpus_at_ns == 0;
-        self.gpus.resize_with(sample.gpus.len(), Ring::default);
+        self.gpus
+            .resize_with(sample.gpus.len(), || History::new(&SYSTEM_TIERS));
         self.gpu_views.clear();
         for (i, now) in sample.gpus.iter().enumerate() {
             let before = self.prev_gpus.iter().find(|g| g.index == now.index);
@@ -276,7 +285,7 @@ impl Performance {
                     .fold(0.0, f32::max)
             });
             if let Some(p) = percent {
-                self.gpus[i].push(p);
+                self.gpus[i].record(sample.gpus_at_ns, p);
             }
             self.gpu_views.push(GpuView {
                 index: now.index,
@@ -299,53 +308,11 @@ fn share(part: u64, whole: u64) -> f32 {
     }
 }
 
-/// SVG path commands for a graph of `values` (oldest first) in a `width` × `height` box, with
-/// `max` at the top. The newest value sits at the right edge; a short history starts partway.
-/// Returns the line and the closed area under it.
-pub fn graph_paths(
-    values: impl Iterator<Item = f32>,
-    capacity: usize,
-    max: f32,
-    width: f32,
-    height: f32,
-) -> (String, String) {
-    let values: Vec<f32> = values.collect();
-    if values.is_empty() || max <= 0.0 {
-        return (String::new(), String::new());
-    }
-    let step = width / (capacity.max(2) - 1) as f32;
-    let x0 = width - step * (values.len() - 1) as f32;
-    let point = |i: usize, v: f32| {
-        let x = x0 + step * i as f32;
-        let y = height - (v / max).clamp(0.0, 1.0) * height;
-        (x, y)
-    };
-    let mut line = String::with_capacity(values.len() * 14);
-    for (i, &v) in values.iter().enumerate() {
-        let (x, y) = point(i, v);
-        line.push_str(if i == 0 { "M " } else { " L " });
-        line.push_str(&format!("{x:.1} {y:.1}"));
-    }
-    let area = format!("{line} L {width:.1} {height:.1} L {x0:.1} {height:.1} Z");
-    (line, area)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const SEC: u64 = 1_000_000_000;
-
-    #[test]
-    fn ring_keeps_the_last_values_in_order() {
-        let mut ring = Ring::new(3);
-        assert!(ring.is_empty() && ring.last().is_none());
-        for v in [1.0, 2.0, 3.0, 4.0] {
-            ring.push(v);
-        }
-        assert_eq!(ring.iter().collect::<Vec<_>>(), [2.0, 3.0, 4.0]);
-        assert_eq!((ring.len(), ring.last(), ring.max()), (3, Some(4.0), 4.0));
-    }
 
     fn system(at: u64, busy: [u64; 2], net: (u64, u64), disk: (u64, u64, u64)) -> SystemSample {
         SystemSample {
@@ -453,16 +420,14 @@ mod tests {
         assert_eq!(Pressure::of(&memory(5, 50)), Pressure::High);
         assert_eq!(Pressure::of(&memory(50, 95)), Pressure::High);
         assert_eq!(Pressure::of(&MemoryInfo::default()), Pressure::Low);
-    }
-
-    #[test]
-    fn graph_paths_fit_the_box() {
-        let (line, area) = graph_paths([0.0, 50.0, 100.0].into_iter(), 3, 100.0, 200.0, 100.0);
-        assert_eq!(line, "M 0.0 100.0 L 100.0 50.0 L 200.0 0.0");
-        assert!(area.starts_with(&line) && area.ends_with('Z'));
-        // A short history hugs the right edge.
-        let (line, _) = graph_paths([10.0].into_iter(), 60, 100.0, 200.0, 100.0);
-        assert_eq!(line, "M 200.0 90.0");
-        assert_eq!(graph_paths(std::iter::empty(), 60, 100.0, 1.0, 1.0).0, "");
+        assert_eq!(
+            Pressure::with_cause(&memory(50, 85)).1,
+            PressureCause::Commit
+        );
+        assert_eq!(
+            Pressure::with_cause(&memory(5, 95)).1,
+            PressureCause::Available,
+            "physical memory wins a tie"
+        );
     }
 }
