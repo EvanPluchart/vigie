@@ -4,6 +4,7 @@
 pub mod diagnose;
 pub mod history;
 pub mod perf;
+pub mod tools;
 pub mod tracker;
 mod tree;
 
@@ -162,6 +163,16 @@ pub struct Core {
     children: HashMap<Pid, Vec<Pid>>,
     /// History of the top consumers and of the selected process.
     tracker: Tracker,
+    /// Section of each process of the last sample, in sample order.
+    groups: Vec<Group>,
+}
+
+/// A process as the table names it, for the other views (ports, files).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Label<'a> {
+    pub target: Target,
+    pub name: &'a str,
+    pub group: Group,
 }
 
 impl Core {
@@ -232,6 +243,29 @@ impl Core {
             }
         }
         order
+    }
+
+    /// The processes of `sample` (the last one given to `update`), named as the table names
+    /// them (product names for apps), with their sections.
+    pub fn labels<'a>(&'a self, sample: &'a Sample) -> impl Iterator<Item = Label<'a>> + 'a {
+        sample.processes.iter().enumerate().map(move |(i, p)| {
+            let group = self.groups.get(i).copied().unwrap_or(Group::All);
+            let description = self
+                .details
+                .get(&(p.pid, p.start_time))
+                .and_then(|d| d.description.as_deref());
+            Label {
+                target: Target {
+                    pid: p.pid,
+                    start_time: p.start_time,
+                },
+                name: match description {
+                    Some(d) if group == Group::Apps => d,
+                    _ => &p.name,
+                },
+                group,
+            }
+        })
     }
 
     /// Per-process histories.
@@ -335,6 +369,8 @@ impl Core {
             &self.collapsed_groups,
         );
         frame.matching_count = tree.matching;
+        self.groups.clear();
+        self.groups.extend_from_slice(&tree.group);
         let total_memory = sample.memory_total_bytes;
         let display_name = |node: usize| -> &str {
             let p = nodes[node].p;
