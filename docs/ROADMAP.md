@@ -69,7 +69,7 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 ## M6 — Distribution
 
 * Windows installer, signed macOS `.dmg`, AppImage and Flatpak.
-* "Replace Task Manager" option on Windows (HKCU, reversible).
+* "Replace Task Manager" option on Windows (reversible; Image File Execution Options in HKLM, so one administrator prompt each way: decision 0009).
 * Landing page on evanpluchart.fr.
 
 ## Later, maybe

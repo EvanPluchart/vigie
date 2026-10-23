@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Vigie
+GenericName=Task Manager
+GenericName[fr]=Gestionnaire de tâches
+Comment=A fast task manager: processes, performance, diagnostics, ports
+Comment[fr]=Un gestionnaire de tâches rapide : processus, performances, diagnostics, ports
+Exec=vigie
+Icon=fr.evanpluchart.Vigie
+Terminal=false
+Categories=System;Monitor;
+Keywords=process;task;monitor;cpu;memory;port;
+Keywords[fr]=processus;tâche;moniteur;processeur;mémoire;port;
+StartupWMClass=vigie

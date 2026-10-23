@@ -1,8 +1,11 @@
 name: CI
 
-# Manual only during development, to save GitHub Actions minutes.
-# Push and pull request triggers come back once M0 is wrapped up.
+# Pull requests and pushes to main, and by hand. Pushes to dev stay manual, to save GitHub
+# Actions minutes (the author's choice during development).
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -37,3 +40,15 @@ jobs:
       - run: cargo check --workspace --all-targets
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  budget:
+    # The performance budget (docs/ARCHITECTURE.md) is defined on an idle machine; a shared
+    # runner is not one, so this reports without failing the run.
+    name: budget (windows)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask bench-overhead --seconds=30 --check
