@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use vigie_core::alerts::{Alert, Alerts, Rules};
 use vigie_core::diagnose::{Diagnostics, Finding, Input};
 use vigie_core::history::SECOND;
 use vigie_core::perf::{PerfFrame, Performance};
@@ -60,6 +61,12 @@ pub enum Command {
         name: String,
         start: bool,
     },
+    /// The refresh interval while focused changed (settings).
+    Interval(Duration),
+    /// Alert thresholds, or `None` with alerts turned off.
+    Alerts(Option<Rules>),
+    /// The tray mini view opened or closed: it needs the busiest processes.
+    Mini(bool),
     /// Act on a process, named by its PID and the low 31 bits of its start time. The UI has
     /// already asked the user to confirm when the action is destructive.
     Act {
@@ -90,6 +97,7 @@ pub struct Settings {
     pub range: Range,
     pub process_range: Range,
     pub history_open: bool,
+    pub alerts: Option<Rules>,
 }
 
 /// Starts the sampler. It stops when every `Command` sender is dropped or the event loop quits.
@@ -118,6 +126,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
         icon_size: settings.icon_size,
         ..ExeCache::default()
     };
+    let mut interval = settings.interval;
     let mut next_tick = Instant::now();
     let mut pace = Pace {
         adaptive: settings.adaptive,
@@ -132,6 +141,7 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
         history_open: settings.history_open,
         // Started on the Diagnostics view: send its state with the first frame.
         diagnosis_fresh: settings.tab == 2,
+        alert_rules: settings.alerts,
         tools: Tools {
             startup_dirty: settings.tab == 5,
             ..Tools::default()
@@ -178,10 +188,10 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
             }
             Err(err) => eprintln!("vigie: sampling failed: {err}"),
         }
-        next_tick += pace.interval(settings.interval);
+        next_tick += pace.interval(interval);
         // A late tick (machine asleep, debugger) starts a fresh schedule instead of catching up.
         if next_tick < Instant::now() {
-            next_tick = Instant::now() + pace.interval(settings.interval);
+            next_tick = Instant::now() + pace.interval(interval);
         }
         // Between ticks, answer commands right away by reusing the last sample.
         loop {
@@ -258,6 +268,13 @@ fn run(window: slint::Weak<AppWindow>, settings: Settings, commands: flume::Rece
                             Command::ControlService { name, start } => {
                                 notice = views.tools.control(&mut probe, &name, start);
                             }
+                            Command::Interval(chosen) => {
+                                interval = chosen;
+                                // Start the new pace now.
+                                resample = true;
+                            }
+                            Command::Alerts(rules) => views.alert_rules = rules,
+                            Command::Mini(open) => views.mini_open = open,
                             Command::Window { focused, visible } => {
                                 let woke = (focused && !pace.focused) || (visible && !pace.visible);
                                 pace.focused = focused;
@@ -410,6 +427,14 @@ struct Views {
     /// The findings changed since the Diagnostics view last got them.
     diagnosis_fresh: bool,
     tools: Tools,
+    alert_rules: Option<Rules>,
+    alerts: Alerts,
+    /// Notifications for the next frame.
+    pending_alerts: Vec<Alert>,
+    /// The tray mini view is open.
+    mini_open: bool,
+    /// When the tray tooltip was last refreshed.
+    tooltip_at: Option<Instant>,
 }
 
 impl Views {
@@ -435,6 +460,12 @@ impl Views {
             tracker: core.tracker(),
             logical_cores,
         });
+        if let Some(rules) = self.alert_rules {
+            let due = self
+                .alerts
+                .evaluate(last.at_ns, &self.perf, &self.findings, rules);
+            self.pending_alerts.extend(due);
+        }
     }
 
     /// Seconds of history recorded so far.
@@ -491,6 +522,22 @@ fn send(
         frame.perf_offset = views.range.shown_offset(sample.at_ns);
     }
     frame.tools = std::mem::take(&mut views.tools.ui);
+    frame.alerts = views
+        .pending_alerts
+        .drain(..)
+        .map(|alert| model::alert_ui(&alert))
+        .collect();
+    // The tray tooltip, at most every 2 s.
+    if views
+        .tooltip_at
+        .is_none_or(|at| at.elapsed() >= Duration::from_secs(2))
+    {
+        views.tooltip_at = Some(Instant::now());
+        frame.tooltip = Some((frame.total_cpu.clone(), frame.total_memory.clone()));
+    }
+    if views.mini_open {
+        frame.mini = Some(model::mini_ui(core, views.last.as_ref()));
+    }
     if views.tab == 0 && views.history_open {
         let tracked = views
             .selected

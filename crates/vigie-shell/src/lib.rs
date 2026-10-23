@@ -87,6 +87,21 @@ impl Tray {
     }
 }
 
+/// The user's language as a BCP 47 tag ("fr-FR"), from the system settings on Windows and from
+/// `LC_ALL`, `LC_MESSAGES` or `LANG` elsewhere.
+pub fn user_language() -> Option<String> {
+    #[cfg(windows)]
+    {
+        tray_windows::user_language()
+    }
+    #[cfg(not(windows))]
+    {
+        ["LC_ALL", "LC_MESSAGES", "LANG"]
+            .iter()
+            .find_map(|v| std::env::var(v).ok().filter(|v| !v.is_empty()))
+    }
+}
+
 /// Where to put a `width` × `height` window opened from the tray at screen point (`x`, `y`):
 /// next to the point, inside the work area of the monitor that holds it (the taskbar excluded).
 pub fn place_near(x: i32, y: i32, width: i32, height: i32) -> (i32, i32) {

@@ -1,0 +1,196 @@
+// Settings (decision 0008): changes apply at once and are saved, unless Vigie was started with
+// --no-settings.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { VSegment, VSwitch } from "controls.slint";
+
+component Section inherits Rectangle {
+    in property <string> title;
+    background: Theme.surface;
+    border-radius: Theme.radius-panel;
+    border-width: 1px;
+    border-color: Theme.border;
+    VerticalLayout {
+        padding: Theme.space-4;
+        spacing: Theme.space-3;
+        Text {
+            text: root.title;
+            color: Theme.text;
+            font-size: Theme.font-section;
+            font-weight: Theme.weight-strong;
+        }
+        @children
+    }
+}
+
+// A labelled line: the label on the left, the control on the right.
+component Line inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> hint;
+    spacing: Theme.space-3;
+    VerticalLayout {
+        horizontal-stretch: 1;
+        alignment: center;
+        Text {
+            text: root.label;
+            color: Theme.text;
+            font-size: Theme.font-body;
+            wrap: word-wrap;
+        }
+        if root.hint != "": Text {
+            text: root.hint;
+            color: Theme.text-muted;
+            font-size: Theme.font-caption;
+            wrap: word-wrap;
+        }
+    }
+    @children
+}
+
+component SwitchLine inherits Line {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+    VSwitch {
+        y: (parent.height - self.height) / 2;
+        label: root.label;
+        checked <=> root.checked;
+        enabled: root.enabled;
+        toggled(on) => { root.toggled(on); }
+    }
+}
+
+export component SettingsView inherits Rectangle {
+    // Indices into the choices of vigie_core::settings.
+    in-out property <int> interval;
+    in-out property <int> theme;
+    in-out property <int> language;
+    in-out property <bool> publisher;
+    in-out property <bool> pid;
+    in-out property <bool> cpu;
+    in-out property <bool> memory;
+    in-out property <bool> alerts;
+    in-out property <int> cpu-alert;
+    in-out property <int> cpu-minutes;
+    in-out property <int> memory-alert;
+    in-out property <bool> close-to-tray;
+    in property <bool> tray-available;
+    // Where the settings are saved; empty with --no-settings.
+    in property <string> path;
+    callback edited();
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding: Theme.space-3;
+            padding-left: Theme.space-4;
+            padding-right: Theme.space-4;
+            Text {
+                text: @tr("Settings");
+                color: Theme.text;
+                font-size: Theme.font-section;
+                font-weight: Theme.weight-strong;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: Theme.space-4;
+                spacing: Theme.space-4;
+                alignment: start;
+
+                Section {
+                    title: @tr("General");
+                    Line {
+                        label: @tr("Refresh every");
+                        hint: @tr("Vigie slows down on its own in the background and when minimised.");
+                        VSegment {
+                            labels: ["0.5 s", "1 s", "2 s", "5 s"];
+                            current <=> root.interval;
+                            changed => { root.edited(); }
+                        }
+                    }
+                    Line {
+                        label: @tr("Theme");
+                        VSegment {
+                            labels: [@tr("System"), @tr("Dark"), @tr("Light")];
+                            current <=> root.theme;
+                            changed => { root.edited(); }
+                        }
+                    }
+                    Line {
+                        label: @tr("Language");
+                        VSegment {
+                            labels: [@tr("System"), "English", "Français"];
+                            current <=> root.language;
+                            changed => { root.edited(); }
+                        }
+                    }
+                }
+
+                Section {
+                    title: @tr("Process table columns");
+                    SwitchLine { label: @tr("Publisher"); checked <=> root.publisher; toggled => { root.edited(); } }
+                    SwitchLine { label: @tr("PID"); checked <=> root.pid; toggled => { root.edited(); } }
+                    SwitchLine { label: @tr("CPU"); checked <=> root.cpu; toggled => { root.edited(); } }
+                    SwitchLine { label: @tr("Memory"); checked <=> root.memory; toggled => { root.edited(); } }
+                }
+
+                Section {
+                    title: @tr("Alerts");
+                    SwitchLine {
+                        label: @tr("Notify me when something slows the computer down");
+                        hint: @tr("A system notification when the processor is saturated, memory runs low, or a threshold below is crossed. At most one per resource every 15 minutes.");
+                        checked <=> root.alerts;
+                        enabled: root.tray-available;
+                        toggled => { root.edited(); }
+                    }
+                    Line {
+                        label: @tr("Processor above");
+                        VSegment {
+                            labels: [@tr("Off"), "80 %", "90 %", "95 %"];
+                            current <=> root.cpu-alert;
+                            changed => { root.edited(); }
+                        }
+                    }
+                    Line {
+                        label: @tr("For at least");
+                        VSegment {
+                            labels: [@tr("1 min"), @tr("2 min"), @tr("5 min")];
+                            current <=> root.cpu-minutes;
+                            changed => { root.edited(); }
+                        }
+                    }
+                    Line {
+                        label: @tr("Memory in use above");
+                        VSegment {
+                            labels: [@tr("Off"), "85 %", "90 %", "95 %"];
+                            current <=> root.memory-alert;
+                            changed => { root.edited(); }
+                        }
+                    }
+                }
+
+                Section {
+                    title: @tr("Window");
+                    SwitchLine {
+                        label: @tr("Closing the window keeps Vigie in the notification area");
+                        hint: root.tray-available ? @tr("Open it again from its icon; quit from the icon's menu.") : @tr("Not available: there is no notification area icon.");
+                        checked <=> root.close-to-tray;
+                        enabled: root.tray-available;
+                        toggled => { root.edited(); }
+                    }
+                }
+
+                Text {
+                    text: root.path == "" ? @tr("Settings are not saved in this session (--no-settings).") : @tr("Saved in {}", root.path);
+                    color: Theme.text-muted;
+                    font-size: Theme.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}

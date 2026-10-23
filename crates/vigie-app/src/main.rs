@@ -4,7 +4,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cli;
+mod desktop;
 mod model;
+mod prefs;
 mod sampler;
 
 use std::cell::{Cell, RefCell};
@@ -30,10 +32,14 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    // Settings from the file, with the flags on top for this session only (decision 0008).
+    let (prefs, session) = prefs::Prefs::load(&options);
+    prefs::select_language(session.language);
     let app = AppWindow::new().context("creating the main window")?;
-    if let Some(dark) = options.dark {
-        app.invoke_set_dark(dark);
-    }
+    app.invoke_set_scheme(prefs::scheme(session.theme));
+    prefs::show(&app, &session);
+    app.set_settings_path(prefs.path().into());
+    desktop::set_close_to_tray(session.close_to_tray);
     app.set_rows(ModelRc::from(Rc::new(VecModel::<ProcRow>::default())));
     app.set_icons(ModelRc::from(Rc::new(VecModel::<slint::Image>::default())));
     app.set_perf_cores(ModelRc::from(Rc::new(VecModel::<f32>::default())));
@@ -51,15 +57,6 @@ fn main() -> anyhow::Result<()> {
         app.set_search_text(options.filter.as_str().into());
     }
     show_sort(&app, options.sort);
-    if let Some(columns) = &options.columns {
-        let has = |name: &str| columns.iter().any(|c| c == name);
-        app.set_columns(ColumnSet {
-            publisher: has("publisher"),
-            pid: has("pid"),
-            cpu: has("cpu"),
-            memory: has("memory"),
-        });
-    }
 
     let about: Rc<RefCell<Option<AboutWindow>>> = Rc::default();
     let weak = app.as_weak();
@@ -250,9 +247,79 @@ fn main() -> anyhow::Result<()> {
         let _ = tx.send(Command::Filter(text.to_string()));
     });
 
+    // Changes in the Settings view apply at once; what the user changed is saved.
+    let prefs = Rc::new(RefCell::new(prefs));
+    let session = Rc::new(Cell::new(session));
+    let start = session.get();
+    let (weak, tx) = (app.as_weak(), commands.clone());
+    app.on_settings_edited(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let before = session.get();
+        let now = prefs.borrow_mut().edited(prefs::read(&app, &before));
+        session.set(now);
+        if now.interval_ms != before.interval_ms {
+            let _ = tx.send(Command::Interval(prefs::interval(&now)));
+        }
+        if now.theme != before.theme {
+            app.invoke_set_scheme(prefs::scheme(now.theme));
+            desktop::set_scheme(prefs::scheme(now.theme));
+        }
+        if now.language != before.language {
+            prefs::select_language(now.language);
+            desktop::refresh_language(&app);
+        }
+        if (
+            now.alerts,
+            now.cpu_alert,
+            now.cpu_alert_minutes,
+            now.memory_alert,
+        ) != (
+            before.alerts,
+            before.cpu_alert,
+            before.cpu_alert_minutes,
+            before.memory_alert,
+        ) {
+            let _ = tx.send(Command::Alerts(prefs::rules(
+                &now,
+                app.get_tray_available(),
+            )));
+        }
+        desktop::set_close_to_tray(now.close_to_tray);
+    });
+    // Closing hides to the tray when the user asked for it; otherwise it quits.
+    app.window().on_close_requested(|| {
+        if !desktop::closes_to_tray() {
+            let _ = slint::quit_event_loop();
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
+
     // Showing the window first gives its real scale factor, so icons are read at the size they
     // are drawn (16 logical pixels) and never scaled per frame.
     app.show().context("showing the main window")?;
+    desktop::install(
+        &app,
+        commands.clone(),
+        !options.no_tray,
+        prefs::scheme(start.theme),
+    );
+    if options.mini {
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+            if let Some(app) = weak.upgrade() {
+                // Far bottom right: the placement keeps it inside the work area.
+                desktop::open_mini_at(&app, i32::MAX / 2, i32::MAX / 2);
+            }
+        });
+    }
+    if options.notify_test {
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_secs(2), move || {
+            if let Some(app) = weak.upgrade() {
+                desktop::notify_test(&app);
+            }
+        });
+    }
     let icon_size = (16.0 * app.window().scale_factor()).round() as u32;
     let settings = Settings {
         sort: options.sort,
@@ -262,13 +329,14 @@ fn main() -> anyhow::Result<()> {
         } else {
             options.filter.clone()
         },
-        interval: options.interval,
+        interval: prefs::interval(&start),
         icon_size,
         adaptive: !options.no_adaptive,
         tab: options.tab,
         range: model::Range::new(options.range, 0),
         process_range: model::Range::new(app.get_process_span_index(), 0),
         history_open: options.history,
+        alerts: prefs::rules(&start, app.get_tray_available()),
     };
     let sampler = sampler::spawn(app.as_weak(), settings, receiver);
     if let Some(pid) = options.select {
@@ -317,7 +385,10 @@ fn main() -> anyhow::Result<()> {
         let _ = commands.send(Command::CheckFile(path));
     }
 
-    app.run().context("running the event loop")?;
+    // Runs until "Quit" (tray menu) or closing the window when it does not hide to the tray.
+    slint::run_event_loop_until_quit().context("running the event loop")?;
+    let _ = app.hide();
+    desktop::uninstall();
     // The callbacks hold senders too: replace them so the sampler sees the channel close.
     drop(commands);
     app.on_sort_clicked(|_| {});
@@ -336,6 +407,7 @@ fn main() -> anyhow::Result<()> {
     app.on_startup_toggled(|_, _, _| {});
     app.on_service_filter_edited(|_| {});
     app.on_service_control(|_, _| {});
+    app.on_settings_edited(|| {});
     app.window()
         .on_winit_window_event(|_, _| slint::winit_030::EventResult::Propagate);
     app.on_request_action(|_, _, _| {});

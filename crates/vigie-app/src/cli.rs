@@ -6,13 +6,14 @@ use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes|performance|diagnostics] [--sort=cpu|memory|name|pid[:asc]] \
 [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=publisher,pid,cpu,memory] [--select=PID] [--no-adaptive] \
-[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=ports|files|startup|services] [--locks=PATH]";
+[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--notify-test] [--mini]";
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
     pub sort: Sort,
     pub filter: String,
-    pub interval: Duration,
+    /// `None` keeps the interval from the settings.
+    pub interval: Option<Duration>,
     /// View at start: 0 processes, 1 performance, 2 diagnostics.
     pub tab: i32,
     /// Range of the Performance graphs at start, as an index into `Range::SPANS`.
@@ -23,6 +24,14 @@ pub struct Options {
     pub locks: Option<std::path::PathBuf>,
     /// Opens the Services pane of the Startup view (`--tab=services`).
     pub services: bool,
+    /// Reads and writes no settings file: defaults plus flags (benchmarks, screenshots).
+    pub no_settings: bool,
+    /// Creates no tray icon (benchmarks, screenshots: nothing left behind when killed).
+    pub no_tray: bool,
+    /// Sends one test notification at start.
+    pub notify_test: bool,
+    /// Opens the tray mini view at start, above the bottom right corner (screenshots).
+    pub mini: bool,
     /// `None` follows the system theme.
     pub dark: Option<bool>,
     /// Opens the About window at start, for screenshots.
@@ -40,28 +49,6 @@ pub struct Options {
     pub no_adaptive: bool,
 }
 
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            sort: Sort::default(),
-            filter: String::new(),
-            interval: Duration::from_secs(1),
-            tab: 0,
-            range: 0,
-            history: false,
-            locks: None,
-            services: false,
-            dark: None,
-            about: false,
-            expand: Vec::new(),
-            ask: None,
-            columns: None,
-            select: None,
-            no_adaptive: false,
-        }
-    }
-}
-
 /// Parses the arguments after the program name. `Err` carries the message to print.
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
     let mut options = Options::default();
@@ -77,6 +64,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--tab", Some("ports")) => options.tab = 3,
             ("--tab", Some("files")) => options.tab = 4,
             ("--tab", Some("startup")) => options.tab = 5,
+            ("--tab", Some("settings")) => options.tab = 6,
             ("--tab", Some("services")) => {
                 options.tab = 5;
                 options.services = true;
@@ -101,12 +89,16 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
                 if ms < 100 {
                     return Err("the interval must be at least 100 ms".into());
                 }
-                options.interval = Duration::from_millis(ms);
+                options.interval = Some(Duration::from_millis(ms));
             }
             ("--dark", None) => options.dark = Some(true),
             ("--light", None) => options.dark = Some(false),
             ("--about", None) => options.about = true,
             ("--no-adaptive", None) => options.no_adaptive = true,
+            ("--no-settings", None) => options.no_settings = true,
+            ("--no-tray", None) => options.no_tray = true,
+            ("--notify-test", None) => options.notify_test = true,
+            ("--mini", None) => options.mini = true,
             ("--ask", Some(value)) => {
                 let parsed = value
                     .split_once(':')
@@ -179,19 +171,9 @@ mod tests {
                     ascending: true
                 },
                 filter: "code".into(),
-                interval: Duration::from_millis(500),
-                tab: 0,
-                range: 0,
-                history: false,
-                locks: None,
-                services: false,
+                interval: Some(Duration::from_millis(500)),
                 dark: Some(true),
-                about: false,
-                expand: Vec::new(),
-                ask: None,
-                columns: None,
-                select: None,
-                no_adaptive: false,
+                ..Options::default()
             }
         );
     }

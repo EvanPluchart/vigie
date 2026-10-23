@@ -175,3 +175,54 @@ export component VSegment inherits HorizontalLayout {
         }
     }
 }
+
+// An on/off switch: the lagoon track when on, as the active rail item.
+export component VSwitch inherits Rectangle {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback toggled(bool);
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: root.checked ? Theme.accent : Theme.text.with-alpha(0.12);
+    border-width: focus.has-focus ? 2px : 0px;
+    border-color: Theme.accent.with-alpha(0.5);
+    opacity: root.enabled ? 1 : 0.4;
+    accessible-role: checkbox;
+    accessible-label: root.label;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.flip(); }
+    animate background { duration: 120ms; easing: ease-out; }
+
+    function flip() {
+        if (!root.enabled) { return; }
+        root.checked = !root.checked;
+        root.toggled(root.checked);
+    }
+
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: root.checked ? Theme.ink : Theme.text-muted;
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.flip(); }
+    }
+    focus := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == Key.Return) {
+                root.flip();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

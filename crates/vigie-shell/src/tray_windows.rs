@@ -359,6 +359,19 @@ fn show_menu(hwnd: HWND, state: &State, x: i32, y: i32) {
     }
 }
 
+/// The user's default locale name ("fr-FR").
+pub(crate) fn user_language() -> Option<String> {
+    let mut name = [0u16; 85];
+    // SAFETY: a buffer of LOCALE_NAME_MAX_LENGTH characters.
+    let len = unsafe {
+        windows_sys::Win32::Globalization::GetUserDefaultLocaleName(
+            name.as_mut_ptr(),
+            name.len() as i32,
+        )
+    };
+    (len > 1).then(|| String::from_utf16_lossy(&name[..len as usize - 1]))
+}
+
 /// The work area (screen minus taskbar) of the monitor holding (`x`, `y`).
 pub(crate) fn work_area(x: i32, y: i32) -> Option<Rect> {
     let mut info = MONITORINFO {

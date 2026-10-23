@@ -5,8 +5,33 @@ import { DiskCard, GpuCard, PerfView, PerformanceView } from "performance.slint"
 import { Graph, GraphData, RangeBar, Spans } from "timeline.slint";
 import { CheckSummary, DiagnosticsView, FindingRow } from "diagnostics.slint";
 import { FilesView, LockRowUi, PortRowUi, PortsView, ServiceRowUi, StartupRowUi, StartupView } from "tools.slint";
+import { SettingsView } from "settings.slint";
+import { MiniRow, MiniWindow } from "mini.slint";
 
-export { CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, PerfView, PortRowUi, ServiceRowUi, StartupRowUi }
+export { CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, MiniRow, MiniWindow, PerfView, PortRowUi, ServiceRowUi, StartupRowUi }
+
+// Words for the desktop: notifications and the tray, asked for by Rust so they follow the
+// language (see src/desktop.rs).
+export global NotifyText {
+    // Kinds: 0 CPU threshold, 1 memory threshold, 2 CPU saturated, 3 memory running low.
+    pure public function title(kind: int) -> string {
+        return kind == 0 || kind == 2 ? @tr("The processor is very busy") : @tr("Memory is running low");
+    }
+
+    pure public function body(kind: int, a: string, b: string, name: string) -> string {
+        let figure = kind == 0 || kind == 2 ? @tr("{} on average over {} min.", a, b)
+            : kind == 1 ? @tr("{} of memory in use.", a)
+            : @tr("Only {} % of memory is available.", a);
+        return name == "" ? figure : figure + " " + @tr("Busiest: {}.", name);
+    }
+
+    pure public function tooltip(cpu: string, memory: string) -> string {
+        return cpu == "" ? "Vigie" : @tr("Vigie · CPU {} · Memory {}", cpu, memory);
+    }
+
+    pure public function menu-open() -> string { return @tr("Open Vigie"); }
+    pure public function menu-quit() -> string { return @tr("Quit"); }
+}
 
 export struct ProcRow {
     // Identity for model patching (see src/model.rs).
@@ -269,7 +294,6 @@ component Rail inherits Rectangle {
     VerticalLayout {
         padding-top: Theme.space-3;
         spacing: Theme.space-2;
-        alignment: start;
         HorizontalLayout {
             alignment: center;
             RailItem {
@@ -327,6 +351,18 @@ component Rail inherits Rectangle {
                 icon: "M 12 3 L 12 11 M 7.2 6.5 A 7 7 0 1 0 16.8 6.5";
                 active: root.tab == 5;
                 clicked => { root.selected(5); }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            alignment: center;
+            padding-bottom: Theme.space-3;
+            RailItem {
+                label: @tr("Settings");
+                // Two sliders.
+                icon: "M 4 8 L 20 8 M 4 16 L 20 16 M 9 5 L 9 11 M 15 13 L 15 19";
+                active: root.tab == 6;
+                clicked => { root.selected(6); }
             }
         }
     }
@@ -451,6 +487,19 @@ export component AppWindow inherits Window {
     callback service-filter-edited(string);
     // Start (true) or stop a service, by short name.
     callback service-control(string, bool);
+    // Settings (decision 0008): indices into the choices of vigie_core::settings.
+    in-out property <int> setting-interval: 1;
+    in-out property <int> setting-theme;
+    in-out property <int> setting-language;
+    in-out property <bool> setting-alerts: true;
+    in-out property <int> setting-cpu-alert: 2;
+    in-out property <int> setting-cpu-minutes: 1;
+    in-out property <int> setting-memory-alert: 2;
+    in-out property <bool> setting-close-to-tray;
+    in property <bool> tray-available;
+    in property <string> settings-path;
+    callback settings-edited();
+    changed columns => { root.settings-edited(); }
     in-out property <ProcRow> selected;
     callback show-about();
     callback sort-clicked(int);
@@ -564,6 +613,11 @@ export component AppWindow inherits Window {
         Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
     }
 
+    // 0 follows the system, 1 dark, 2 light.
+    public function set-scheme(scheme: int) {
+        Palette.color-scheme = scheme == 1 ? ColorScheme.dark : scheme == 2 ? ColorScheme.light : ColorScheme.unknown;
+    }
+
     title: "Vigie";
     icon: @image-url("../../../assets/brand/icons/vigie-256.png");
     preferred-width: 820px;
@@ -577,8 +631,8 @@ export component AppWindow inherits Window {
                 search.focus();
                 return accept;
             }
-            // Ctrl+1 to Ctrl+6 switch views, in rail order.
-            if (event.modifiers.control && event.text >= "1" && event.text <= "6" && event.text.character-count == 1) {
+            // Ctrl+1 to Ctrl+7 switch views, in rail order.
+            if (event.modifiers.control && event.text >= "1" && event.text <= "7" && event.text.character-count == 1) {
                 root.show-tab(event.text.to-float() - 1);
                 return accept;
             }
@@ -1029,6 +1083,24 @@ export component AppWindow inherits Window {
                 path <=> root.file-path;
                 check(path) => { root.check-file(path); }
                 end(row) => { root.ask({ name: row.name, pid: row.pid, start: row.start }, 0); }
+            }
+
+            if root.tab == 6: SettingsView {
+                interval <=> root.setting-interval;
+                theme <=> root.setting-theme;
+                language <=> root.setting-language;
+                publisher <=> root.columns.publisher;
+                pid <=> root.columns.pid;
+                cpu <=> root.columns.cpu;
+                memory <=> root.columns.memory;
+                alerts <=> root.setting-alerts;
+                cpu-alert <=> root.setting-cpu-alert;
+                cpu-minutes <=> root.setting-cpu-minutes;
+                memory-alert <=> root.setting-memory-alert;
+                close-to-tray <=> root.setting-close-to-tray;
+                tray-available: root.tray-available;
+                path: root.settings-path;
+                edited => { root.settings-edited(); }
             }
 
             if root.tab == 5: StartupView {

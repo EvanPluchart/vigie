@@ -3,20 +3,21 @@
 use std::collections::HashSet;
 
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use vigie_core::alerts::Alert;
 use vigie_core::diagnose::{Culprit, Finding, Severity, Suggestion};
 use vigie_core::history::{History, SECOND, Series, graph_paths};
 use vigie_core::perf::{PerfFrame, Performance, Pressure, PressureCause, commit_share};
 use vigie_core::tools::{LockRow, PortRow};
 use vigie_core::tracker::{Tracked, Tracker};
-use vigie_core::{Details, Frame, Group, Row, RowKind};
+use vigie_core::{Core, Details, Frame, Group, Row, RowKind};
 use vigie_probe::{
     Icon, LockerKind, Protocol, Service, ServiceState, StartType, StartupItem, StartupLocation,
     SystemInfo, TcpState,
 };
 
 use crate::{
-    AppWindow, CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, PerfView,
-    PortRowUi, ProcRow, ServiceRowUi, StartupRowUi,
+    AppWindow, CheckSummary, DiskCard, FindingRow, GpuCard, GraphData, LockRowUi, MiniRow,
+    PerfView, PortRowUi, ProcRow, ServiceRowUi, StartupRowUi,
 };
 
 /// Row kinds as `ui/app.slint` reads them.
@@ -53,6 +54,12 @@ pub struct UiFrame {
     pub perf_offset: Option<i32>,
     pub process_offset: Option<i32>,
     pub tools: ToolsUi,
+    /// Notifications to send now.
+    pub alerts: Vec<AlertUi>,
+    /// Machine CPU and memory for the tray tooltip, at most every 2 s.
+    pub tooltip: Option<(SharedString, SharedString)>,
+    /// `Some` while the tray mini view is open.
+    pub mini: Option<MiniUi>,
 }
 
 /// The Performance view's data, ready for its models.
@@ -99,6 +106,9 @@ impl UiFrame {
             perf_offset: None,
             process_offset: None,
             tools: ToolsUi::default(),
+            alerts: Vec::new(),
+            tooltip: None,
+            mini: None,
             rows: with_rows.then(|| frame.rows.iter().map(proc_row).collect()),
             process_count: frame.process_count.to_string().into(),
             matching_count: frame.matching_count.to_string().into(),
@@ -261,6 +271,7 @@ pub fn apply(window: &slint::Weak<AppWindow>, frame: UiFrame) {
         app.set_process_offset(offset);
     }
     apply_tools(&app, frame.tools);
+    crate::desktop::on_frame(&app, frame.alerts, frame.tooltip, frame.mini);
     app.set_diagnostics_badge(frame.badge);
     app.set_history_memory(frame.history_memory);
     app.set_process_count(frame.process_count);
@@ -971,6 +982,108 @@ pub fn lock_rows_ui(rows: &[LockRow]) -> Vec<LockRowUi> {
             can_end: r.can_end,
         })
         .collect()
+}
+
+/// A notification, worded by `NotifyText` in `ui/app.slint` so it follows the language.
+pub struct AlertUi {
+    /// 0 CPU threshold (a: mean, b: minutes), 1 memory threshold (a: percent), 2 CPU saturated
+    /// (a: mean, b: minutes), 3 memory running low (a: available percent).
+    pub kind: i32,
+    pub a: SharedString,
+    pub b: SharedString,
+    /// The busiest process, if one is named.
+    pub name: SharedString,
+}
+
+pub fn alert_ui(alert: &Alert) -> AlertUi {
+    let name = |c: &Option<Culprit>| {
+        c.as_ref()
+            .map(|c| c.name.as_str().into())
+            .unwrap_or_default()
+    };
+    match alert {
+        Alert::CpuThreshold {
+            mean,
+            window_s,
+            culprit,
+        } => AlertUi {
+            kind: 0,
+            a: format_percent(Some(*mean)),
+            b: (window_s / 60).max(1).to_string().into(),
+            name: name(culprit),
+        },
+        Alert::MemoryThreshold { percent, culprit } => AlertUi {
+            kind: 1,
+            a: format_percent(Some(*percent)),
+            b: SharedString::new(),
+            name: name(culprit),
+        },
+        Alert::Critical(Finding::MemoryPressure {
+            available_percent,
+            culprits,
+            ..
+        }) => AlertUi {
+            kind: 3,
+            a: format!("{available_percent:.0}").into(),
+            b: SharedString::new(),
+            name: name(&culprits.first().cloned()),
+        },
+        Alert::Critical(Finding::CpuSaturated {
+            mean,
+            window_s,
+            culprits,
+        }) => AlertUi {
+            kind: 2,
+            a: format_percent(Some(*mean)),
+            b: (window_s / 60).max(1).to_string().into(),
+            name: name(&culprits.first().cloned()),
+        },
+        // Only the two findings above are critical; anything else reads as CPU.
+        Alert::Critical(_) => AlertUi {
+            kind: 2,
+            a: SharedString::new(),
+            b: SharedString::new(),
+            name: SharedString::new(),
+        },
+    }
+}
+
+/// The tray mini view: machine figures and the busiest processes.
+pub struct MiniUi {
+    pub cpu: SharedString,
+    pub memory: SharedString,
+    /// 0 to 100, for the bars.
+    pub cpu_share: f32,
+    pub memory_share: f32,
+    pub top: Vec<MiniRow>,
+}
+
+pub fn mini_ui(core: &Core, last: Option<&PerfFrame>) -> MiniUi {
+    let mut busiest: Vec<_> = core
+        .tracker()
+        .iter()
+        .filter_map(|t| t.cpu.last().map(|cpu| (cpu, t)))
+        .collect();
+    busiest.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let cpu = last.and_then(|l| l.cpu_percent);
+    let memory = last
+        .filter(|l| l.memory.total > 0)
+        .map(|l| l.memory_used_percent);
+    MiniUi {
+        cpu: format_percent(cpu),
+        memory: format_percent(memory),
+        cpu_share: cpu.unwrap_or(0.0),
+        memory_share: memory.unwrap_or(0.0),
+        top: busiest
+            .into_iter()
+            .take(4)
+            .map(|(cpu, t)| MiniRow {
+                name: t.name.as_str().into(),
+                cpu: format_cpu(Some(cpu)),
+                memory: format_memory(t.memory.last().unwrap_or(0.0) as u64),
+            })
+            .collect(),
+    }
 }
 
 /// Location codes shared with `ui/tools.slint`.
