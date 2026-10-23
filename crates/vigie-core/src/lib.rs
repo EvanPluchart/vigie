@@ -1,6 +1,7 @@
 //! Process model: CPU % from deltas, tree, grouping, history, diagnostics.
 //! No UI and no OS calls here. See docs/ARCHITECTURE.md.
 
+pub mod alerts;
 pub mod diagnose;
 pub mod history;
 pub mod perf;
