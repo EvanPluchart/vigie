@@ -334,6 +334,7 @@ FR = {
     "Open the release page": "Ouvrir la page de publication",
     "Update": "Mettre à jour",
     "Check now": "Vérifier maintenant",
+    "Vigie {} is installed · See what's new": "Vigie {} est installé · Voir les nouveautés",
     "Vigie {} is available": "Vigie {} est disponible",
     "Click to install it in one click from Vigie.": "Cliquez pour l’installer en un clic depuis Vigie.",
     "Installing Vigie {}…": "Installation de Vigie {}…",

@@ -388,6 +388,9 @@ msgstr "{} sur {} processus"
 msgid "{} processes"
 msgstr "{} processus"
 
+msgid "Vigie {} is installed · See what's new"
+msgstr "Vigie {} est installé · Voir les nouveautés"
+
 msgid "Downloading Vigie {}…"
 msgstr "Téléchargement de Vigie {}…"
 

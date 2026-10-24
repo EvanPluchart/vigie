@@ -6,7 +6,7 @@ use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes|performance|diagnostics] [--sort=cpu|memory|name|pid[:asc]] \
 [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=status,publisher,user,description,pid,threads,handles,cpu,memory,io] [--select=PID] [--menu=1|2|3] [--no-adaptive] \
-[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=details|users|ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--pretend-version=X.Y.Z] [--notify-test] [--mini] [--palette[=TEXT]] [--lang=en|fr]";
+[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=details|users|ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--pretend-version=X.Y.Z] [--updated] [--notify-test] [--mini] [--palette[=TEXT]] [--lang=en|fr]";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
@@ -62,6 +62,9 @@ pub struct Options {
     /// Tests updates (decision 0012): behaves as this older version and checks after 2 s,
     /// even with --no-settings; "Update" stops once the installer is checked.
     pub pretend_version: Option<String>,
+    /// Started again by the installer after an update from the app (decision 0012): the
+    /// status bar says so, with a link to what is new.
+    pub updated: bool,
 }
 
 /// Parses the arguments after the program name. `Err` carries the message to print.
@@ -118,6 +121,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--light", None) => options.dark = Some(false),
             ("--about", None) => options.about = true,
             ("--no-adaptive", None) => options.no_adaptive = true,
+            ("--updated", None) => options.updated = true,
             ("--pretend-version", Some(version)) => {
                 if vigie_core::update::Version::parse(version).is_none() {
                     return Err(format!("invalid version `{version}`"));
