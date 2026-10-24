@@ -88,7 +88,7 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 * Check GitHub for a newer release at launch and every 6 hours; can be turned off (decision 0012).
 * An "Update" button: download the installer, check its SHA-256, install and relaunch.
 
-**Status (2026-10-24):** in progress, Windows only.
+**Status (2026-10-24):** in 0.1.2, Windows only. The first update through the button will be 0.1.2 to the next version.
 
 ## Later, maybe
 
