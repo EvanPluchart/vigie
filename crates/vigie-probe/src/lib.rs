@@ -475,6 +475,11 @@ pub trait Probe: Send {
     fn act(&mut self, _target: Target, _action: Action) -> Result<()> {
         Err(ProbeError::Unsupported)
     }
+    /// Whether the system stops if this process ends (`act` refuses to end or suspend it).
+    /// Asked before ending a whole tree, whose members go first.
+    fn is_critical(&mut self, _target: Target) -> bool {
+        false
+    }
 }
 
 /// A process as the user saw it. An action applies only if the PID still belongs to the process

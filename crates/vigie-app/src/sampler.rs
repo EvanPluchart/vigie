@@ -410,6 +410,10 @@ fn execute(
             Err(error) => failure(error),
         },
         UserAction::EndTree => {
+            // Refused before any child goes: a critical root would only be refused last.
+            if probe.is_critical(target) {
+                return notice(Notice::CRITICAL, 0);
+            }
             // Children first, so none is orphaned and restarted by its parent meanwhile.
             let tree = core.subtree(target);
             let mut first_error = None;

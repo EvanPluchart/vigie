@@ -125,7 +125,7 @@ fn open_verified(target: Target, access: PROCESS_ACCESS_RIGHTS) -> Result<OwnedH
 /// Refuses a process Windows marks critical (csrss, wininit, smss…): ending one stops the
 /// machine with a blue screen, suspending one freezes the session. Reading the mark needs full
 /// query rights; a process Vigie cannot query that far it cannot end or suspend either.
-fn refuse_critical(target: Target) -> Result<()> {
+pub(crate) fn refuse_critical(target: Target) -> Result<()> {
     // SAFETY: plain call; null means failure and owns nothing.
     let raw = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, 0, target.pid) };
     if raw.is_null() {

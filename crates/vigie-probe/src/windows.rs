@@ -799,6 +799,10 @@ impl Probe for WindowsProbe {
         crate::windows_actions::act(target, action)
     }
 
+    fn is_critical(&mut self, target: crate::Target) -> bool {
+        crate::windows_actions::refuse_critical(target).is_err()
+    }
+
     fn system(&mut self, out: &mut crate::SystemSample) -> Result<()> {
         out.at_ns = self.now_ns();
         self.cores.read(&mut out.cores)?;

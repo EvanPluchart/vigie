@@ -112,14 +112,14 @@ pub struct Instance {
 /// shown: a launch that gets no answer starts a Vigie of its own, in case this one hangs.
 #[derive(Debug)]
 pub struct ShowRequest {
-    #[cfg_attr(not(windows), allow(dead_code))]
-    from: u32,
+    #[cfg(windows)]
+    answer: std::sync::mpsc::Sender<()>,
 }
 
 impl ShowRequest {
     pub fn done(self) {
         #[cfg(windows)]
-        instance_windows::confirm_shown(self.from);
+        instance_windows::confirm_shown(self.answer);
     }
 }
 
@@ -130,7 +130,8 @@ impl ShowRequest {
 pub fn single_instance(on_show: impl Fn(ShowRequest) + Send + Sync + 'static) -> Option<Instance> {
     #[cfg(windows)]
     {
-        instance_windows::acquire(Arc::new(on_show)).map(|inner| Instance { _inner: inner })
+        instance_windows::acquire(instance_windows::VIGIE, Arc::new(on_show))
+            .map(|inner| Instance { _inner: inner })
     }
     #[cfg(not(windows))]
     {

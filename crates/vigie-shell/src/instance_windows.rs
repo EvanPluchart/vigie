@@ -1,54 +1,54 @@
 //! One Vigie per user session (decision 0009): a named mutex says whether Vigie already runs,
 //! and a hidden window of the first instance receives "show yourself" from later ones.
 //!
-//! The first instance confirms from its UI thread, once its window is shown. A later launch
-//! that gets no confirmation (the first one hangs, or something else holds the mutex) starts
-//! anyway: two Vigies are better than none, above all when Ctrl+Shift+Esc opens Vigie.
+//! A later launch sends the request and waits for the answer, which the first instance gives
+//! from its UI thread once its window is shown. A launch that gets no answer (the first one
+//! hangs, or something else holds the mutex) starts anyway: two Vigies are better than none,
+//! above all when Ctrl+Shift+Esc opens Vigie. The answer travels back with the message itself,
+//! not through a named object: Ctrl+Shift+Esc starts Vigie elevated, and an object an elevated
+//! process creates is out of reach of the user's ordinary Vigie.
 
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, WAIT_OBJECT_0,
-    WPARAM,
+    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, WPARAM,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Threading::{
-    CreateEventW, CreateMutexW, EVENT_MODIFY_STATE, GetCurrentProcessId, OpenEventW, SetEvent,
-    WaitForSingleObject,
-};
+use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowW,
     GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, GetWindowThreadProcessId, HWND_MESSAGE, MSG,
-    PostMessageW, RegisterClassW, SetWindowLongPtrW, TranslateMessage, WM_APP, WNDCLASSW,
+    RegisterClassW, SMTO_ABORTIFHUNG, SendMessageTimeoutW, SetWindowLongPtrW, TranslateMessage,
+    WM_APP, WNDCLASSW,
 };
 
 use crate::ShowRequest;
 
-const MUTEX: &str = "Local\\Vigie.SingleInstance";
-const CLASS: &str = "VigieInstanceWindow";
 const WM_SHOW: u32 = WM_APP + 10;
 /// How long a later launch waits for the running Vigie to show itself.
 const ANSWER_WITHIN: Duration = Duration::from_millis(2500);
+/// How long the listener waits for the UI thread, within `ANSWER_WITHIN`.
+const UI_ANSWER_WITHIN: Duration = Duration::from_secs(2);
 
 type Callback = Arc<dyn Fn(ShowRequest) + Send + Sync>;
 
-/// The event a later launch waits on, named after its process.
-fn event_name(pid: u32) -> Vec<u16> {
-    wide(&format!("Local\\Vigie.Shown.{pid}"))
+/// The names that make one instance: the mutex and the listener's window class.
+#[derive(Clone, Copy)]
+pub(crate) struct Names {
+    pub(crate) mutex: &'static str,
+    pub(crate) class: &'static str,
 }
 
-/// Tells the launch that asked (process `pid`) that the window is shown.
-pub(crate) fn confirm_shown(pid: u32) {
-    let name = event_name(pid);
-    // SAFETY: opens an event that launch created; the handle is closed right after.
-    unsafe {
-        let event = OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr());
-        if !event.is_null() {
-            SetEvent(event);
-            CloseHandle(event);
-        }
-    }
+pub(crate) const VIGIE: Names = Names {
+    mutex: "Local\\Vigie.SingleInstance",
+    class: "VigieInstanceWindow",
+};
+
+/// Tells the waiting launch that the window is shown.
+pub(crate) fn confirm_shown(answer: Sender<()>) {
+    let _ = answer.send(());
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -65,25 +65,28 @@ unsafe impl Send for Instance {}
 
 impl Drop for Instance {
     fn drop(&mut self) {
-        // SAFETY: our own mutex handle, closed once.
-        unsafe { CloseHandle(self._mutex) };
+        if !self._mutex.is_null() {
+            // SAFETY: our own mutex handle, closed once.
+            unsafe { CloseHandle(self._mutex) };
+        }
     }
 }
 
-/// `Some` for the first instance, which then gets `on_show` when another launch asks;
-/// `None` when Vigie already runs: the running one has been asked to show itself.
-pub(crate) fn acquire(on_show: Callback) -> Option<Instance> {
-    let name = wide(MUTEX);
+/// `Some` for the first instance, which then gets `on_show` when another launch asks, and for
+/// a launch the running instance did not answer; `None` when the running Vigie showed itself.
+pub(crate) fn acquire(names: Names, on_show: Callback) -> Option<Instance> {
+    let name = wide(names.mutex);
     // SAFETY: a named mutex owned by nobody; the handle lives as long as the instance.
     let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
     // SAFETY: no arguments.
     let exists = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
     if mutex.is_null() {
-        // No mutex at all: run rather than refuse to start.
+        // No mutex at all (one an elevated Vigie made is out of reach): run rather than
+        // refuse to start.
         return Some(Instance { _mutex: mutex });
     }
     if exists {
-        if signal_running() {
+        if signal_running(names) {
             // SAFETY: our handle to the existing mutex.
             unsafe { CloseHandle(mutex) };
             return None;
@@ -93,48 +96,51 @@ pub(crate) fn acquire(on_show: Callback) -> Option<Instance> {
     }
     std::thread::Builder::new()
         .name("vigie-instance".into())
-        .spawn(move || listen(on_show))
+        .spawn(move || listen(names, on_show))
         .ok()?;
     Some(Instance { _mutex: mutex })
 }
 
-/// Asks the running instance to show its window, lets it come to the front, and waits for it
-/// to confirm. `false`: it did not answer in time.
-fn signal_running() -> bool {
-    let class = wide(CLASS);
-    // SAFETY: plain calls; this process owns the event and closes it before returning.
+/// Asks the running instance to show its window, lets it come to the front, and waits for its
+/// answer. `false`: it did not answer in time.
+fn signal_running(names: Names) -> bool {
+    let class = wide(names.class);
+    let deadline = Instant::now() + ANSWER_WITHIN;
+    // SAFETY: plain lookups, and a message sent with a timeout.
     unsafe {
-        let pid = GetCurrentProcessId();
-        let event = CreateEventW(std::ptr::null(), 1, 0, event_name(pid).as_ptr());
-        if event.is_null() {
-            return false;
-        }
-        let deadline = Instant::now() + ANSWER_WITHIN;
         // The running instance may still be creating its window: look again for a while.
         let mut hwnd = FindWindowW(class.as_ptr(), std::ptr::null());
         while hwnd.is_null() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(100));
             hwnd = FindWindowW(class.as_ptr(), std::ptr::null());
         }
-        let mut shown = false;
-        if !hwnd.is_null() {
-            // Only that process may take the foreground, not any.
-            let mut owner = 0u32;
-            GetWindowThreadProcessId(hwnd, &mut owner);
-            AllowSetForegroundWindow(owner);
-            if PostMessageW(hwnd, WM_SHOW, pid as WPARAM, 0) != 0 {
-                let left = deadline.saturating_duration_since(Instant::now());
-                let wait = u32::try_from(left.as_millis()).unwrap_or(u32::MAX).max(500);
-                shown = WaitForSingleObject(event, wait) == WAIT_OBJECT_0;
-            }
+        if hwnd.is_null() {
+            return false;
         }
-        CloseHandle(event);
-        shown
+        // Only that process may take the foreground, not any.
+        let mut owner = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut owner);
+        AllowSetForegroundWindow(owner);
+        let left = deadline.saturating_duration_since(Instant::now());
+        let wait = u32::try_from(left.as_millis())
+            .unwrap_or(u32::MAX)
+            .max(500);
+        let mut shown = 0usize;
+        SendMessageTimeoutW(
+            hwnd,
+            WM_SHOW,
+            0,
+            0,
+            SMTO_ABORTIFHUNG,
+            wait,
+            &mut shown,
+        ) != 0
+            && shown == 1
     }
 }
 
-fn listen(on_show: Callback) {
-    let class = wide(CLASS);
+fn listen(names: Names, on_show: Callback) {
+    let class = wide(names.class);
     // SAFETY: a message-only window with a static procedure; the callback box lives until
     // the thread ends with the process.
     unsafe {
@@ -182,16 +188,51 @@ unsafe extern "system" fn window_proc(
     if msg == WM_SHOW {
         // SAFETY: set right after the window was created, never freed while it lives.
         let callback = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Callback;
-        if !callback.is_null() {
-            // SAFETY: as above.
-            unsafe {
-                (*callback)(ShowRequest {
-                    from: wparam as u32,
-                })
-            };
+        if callback.is_null() {
+            return 0;
         }
-        return 0;
+        // The UI thread answers once the window is shown; a hung one never does. This thread
+        // only listens, so waiting here blocks nothing else.
+        let (answer, answered) = std::sync::mpsc::channel();
+        // SAFETY: as above.
+        unsafe { (*callback)(ShowRequest { answer }) };
+        return LRESULT::from(answered.recv_timeout(UI_ANSWER_WITHIN).is_ok());
     }
     // SAFETY: default handling.
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A second launch whose running instance answers exits; one whose instance never answers
+    /// (it hangs) starts. Names of their own, so the user's Vigie is never involved.
+    #[test]
+    fn a_launch_starts_when_the_running_instance_does_not_answer() {
+        let answering = Names {
+            mutex: "Local\\Vigie.Test.Answering",
+            class: "VigieTestAnswering",
+        };
+        let first = acquire(answering, Arc::new(|request: ShowRequest| request.done()));
+        assert!(first.is_some(), "the first launch runs");
+        assert!(
+            acquire(answering, Arc::new(|_| {})).is_none(),
+            "shown by the running instance: this launch exits"
+        );
+
+        let hung = Names {
+            mutex: "Local\\Vigie.Test.Hung",
+            class: "VigieTestHung",
+        };
+        // Never answers, as a Vigie whose UI thread hangs.
+        let first = acquire(hung, Arc::new(|request: ShowRequest| std::mem::forget(request)));
+        assert!(first.is_some());
+        let started = Instant::now();
+        assert!(
+            acquire(hung, Arc::new(|_| {})).is_some(),
+            "no answer: this launch runs"
+        );
+        assert!(started.elapsed() < Duration::from_secs(4), "within the wait");
+    }
 }
