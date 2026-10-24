@@ -14,6 +14,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only token by default; a job that needs more says so.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -24,27 +28,33 @@ jobs:
       # Secrets cannot appear in step conditions: their presence goes through the environment.
       HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install Inno Setup (pinned; 6.7.1 is the newest on Chocolatey)
         run: choco install innosetup --version=6.7.1 -y --no-progress
-      - name: Build the installer and the portable zip
-        run: cargo xtask dist
-      - name: Sign (only when a certificate is configured)
+      - name: Write the signing script (only when a certificate is configured)
         if: env.HAS_WINDOWS_CERT == 'true'
         env:
           WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         shell: pwsh
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
-          Get-ChildItem dist\*.exe | ForEach-Object {
-            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 $_.FullName
-          }
-      - uses: actions/upload-artifact@v4
+          $script = Join-Path $env:RUNNER_TEMP "sign.ps1"
+          # The password comes from the environment at run time, never written to disk.
+          Set-Content $script "param([string]`$File)`n& '$($signtool.FullName)' sign /f '$pfx' /p `$env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 `$File`nexit `$LASTEXITCODE"
+          "VIGIE_SIGN_SCRIPT=$script" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build the installer and the portable zip
+        # With a certificate, xtask signs vigie.exe before packaging it (the file the
+        # installer, the zip and the Task Manager replacement run), then the installer.
+        env:
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: cargo xtask dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: vigie-windows
           path: |
@@ -54,9 +64,11 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Build the .dmg (signed and notarised when the secrets exist, ad hoc otherwise)
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
@@ -66,7 +78,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: bash packaging/macos/build-dmg.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: vigie-macos
           path: dist/*.dmg
@@ -75,18 +87,20 @@ jobs:
     # The oldest supported distribution: the AppImage runs on newer ones, not the reverse.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Slint's Linux dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libudev-dev libinput-dev libgbm-dev \
             libfontconfig-dev libseat-dev libsystemd-dev libwayland-dev file desktop-file-utils
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Build the AppImage
         run: bash packaging/linux/build-appimage.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: vigie-linux
           path: dist/*.AppImage
@@ -99,10 +113,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: packages
           merge-multiple: true
+      - name: Checksums
+        run: cd packages && sha256sum * > SHA256SUMS && cat SHA256SUMS
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}

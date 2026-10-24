@@ -17,8 +17,8 @@ rm -rf "$work"
 mkdir -p "$out" "$work"
 
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
-cargo build --release -p vigie --target aarch64-apple-darwin
-cargo build --release -p vigie --target x86_64-apple-darwin
+cargo build --release --locked -p vigie --target aarch64-apple-darwin
+cargo build --release --locked -p vigie --target x86_64-apple-darwin
 
 app="$work/Vigie.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

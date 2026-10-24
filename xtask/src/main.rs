@@ -59,6 +59,25 @@ fn version(root: &Path) -> Result<String> {
         .context("no version in Cargo.toml")
 }
 
+/// Signs `file` with the script `VIGIE_SIGN_SCRIPT` names (the release workflow writes it when
+/// a certificate is configured); nothing to do without one.
+fn sign(file: &Path) -> Result<()> {
+    let Some(script) = std::env::var_os("VIGIE_SIGN_SCRIPT") else {
+        return Ok(());
+    };
+    let status = Command::new("pwsh")
+        .arg("-NoProfile")
+        .arg("-File")
+        .arg(script)
+        .arg(file)
+        .status()
+        .context("running the signing script")?;
+    if !status.success() {
+        bail!("signing {} failed", file.display());
+    }
+    Ok(())
+}
+
 /// Builds the release binary and the packages for this system into `dist/` (decision 0009):
 /// on Windows, the Inno Setup installer and a portable zip.
 fn dist() -> Result<()> {
@@ -67,7 +86,7 @@ fn dist() -> Result<()> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let status = Command::new(cargo)
         .current_dir(&root)
-        .args(["build", "--release", "-p", "vigie"])
+        .args(["build", "--release", "--locked", "-p", "vigie"])
         .status()
         .context("running cargo build")?;
     if !status.success() {
@@ -82,6 +101,7 @@ fn dist() -> Result<()> {
         return Ok(());
     }
     let exe = root.join("target/release/vigie.exe");
+    sign(&exe)?;
     // Inno Setup 6, as winget or Chocolatey install it.
     let iscc = std::env::var_os("ISCC")
         .map(PathBuf::from)
@@ -122,10 +142,9 @@ fn dist() -> Result<()> {
     if !status.success() {
         bail!("the portable zip did not build");
     }
-    println!(
-        "dist: {}",
-        out.join(format!("Vigie-{version}-setup.exe")).display()
-    );
+    let setup = out.join(format!("Vigie-{version}-setup.exe"));
+    sign(&setup)?;
+    println!("dist: {}", setup.display());
     println!("dist: {}", zip.display());
     Ok(())
 }
@@ -140,7 +159,7 @@ fn bench_overhead(duration: Duration, check: bool, tab: &str) -> Result<()> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let status = Command::new(cargo)
         .current_dir(&root)
-        .args(["build", "--release", "-p", "vigie"])
+        .args(["build", "--release", "--locked", "-p", "vigie"])
         .status()
         .context("running cargo build")?;
     if !status.success() {
