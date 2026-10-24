@@ -90,6 +90,11 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 
 **Status (2026-10-24):** in 0.1.2, Windows only. 0.1.3 adds "Vigie X is installed · See what's new" after an update, and is the first version installed through the button.
 
+## Hardening (0.1.2 to 0.1.5)
+
+* Security, bug-fix and performance audit (0.1.2): see the commits of PR #3.
+* Ctrl+Shift+Esc opens a copy of Vigie in Program Files, which only administrators can change (decision 0011, 0.1.5).
+
 ## Later, maybe
 
 Network traffic per process on all systems, energy impact on laptops, remote monitoring of another machine, a CLI (`vigie top`).

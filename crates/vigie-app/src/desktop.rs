@@ -54,7 +54,9 @@ pub fn show_replace_state(app: &AppWindow) {
         ReplaceState::On(p) => (1, p.display().to_string()),
         ReplaceState::Stale(p) => (2, p.display().to_string()),
         ReplaceState::Other(p) => (3, p.display().to_string()),
+        ReplaceState::Exposed(p) => (5, p.display().to_string()),
     };
+    app.set_taskmgr_outdated(state == 1 && vigie_shell::taskmgr::copy_outdated());
     app.set_taskmgr_state(if cfg!(windows) { state } else { 4 });
     app.set_taskmgr_path(path.into());
     app.set_taskmgr_installed(vigie_shell::taskmgr::installed().is_some());

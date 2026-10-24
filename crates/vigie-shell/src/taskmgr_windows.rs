@@ -1,6 +1,10 @@
-//! Replacing Task Manager (decision 0009): the `Debugger` value of taskmgr.exe under Image File
-//! Execution Options. Reading needs no rights; writing runs in an elevated copy of Vigie,
-//! started with `runas`.
+//! Replacing Task Manager (decisions 0009 and 0011): the `Debugger` value of taskmgr.exe under
+//! Image File Execution Options. Reading needs no rights; writing runs in an elevated copy of
+//! Vigie, started with `runas`.
+//!
+//! The value points at a copy of Vigie in Program Files, which only administrators can change:
+//! Windows starts it with administrator rights and without a prompt, so it must not be a file
+//! any program of the user could replace (the per-user install is).
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -14,7 +18,11 @@ use windows_sys::Win32::System::Registry::{
     RegQueryValueExW, RegSetValueExW,
 };
 use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
-use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+use windows_sys::Win32::System::Com::CoTaskMemFree;
+use windows_sys::Win32::UI::Shell::{
+    FOLDERID_ProgramFiles, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, SHGetKnownFolderPath,
+    ShellExecuteExW,
+};
 
 use crate::{ReplaceError, ReplaceState};
 
@@ -167,7 +175,160 @@ pub(crate) fn run_elevated(exe: &Path, args: &str) -> Result<(), ReplaceError> {
     }
 }
 
+/// The copy Ctrl+Shift+Esc starts: `Program Files\Vigie\vigie.exe`. The folder comes from
+/// Windows itself, not from `%ProgramFiles%`, which a user can redefine for their account.
+pub(crate) fn machine_path() -> Option<PathBuf> {
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: a known folder id; the string Windows allocates is freed below.
+    let found = unsafe {
+        SHGetKnownFolderPath(&FOLDERID_ProgramFiles, 0, std::ptr::null_mut(), &mut raw)
+    } == 0;
+    let folder = if found && !raw.is_null() {
+        // SAFETY: a NUL-terminated string from Windows.
+        let len = (0..).take_while(|&i| unsafe { *raw.add(i) } != 0).count();
+        // SAFETY: `len` units are readable at `raw`.
+        let units = unsafe { std::slice::from_raw_parts(raw, len) };
+        Some(PathBuf::from(String::from_utf16_lossy(units)))
+    } else {
+        None
+    };
+    // SAFETY: freeing what SHGetKnownFolderPath allocated (null is allowed).
+    unsafe { CoTaskMemFree(raw.cast()) };
+    Some(folder?.join(r"Vigie\vigie.exe"))
+}
+
+/// In the elevated helper: puts `source` at `target`. A copy that is running (a Vigie opened
+/// with Ctrl+Shift+Esc) cannot be overwritten but can be renamed: it is moved aside, and
+/// deleted on a later run.
+pub(crate) fn install_copy(source: &Path, target: &Path) -> Result<(), ReplaceError> {
+    let failed = |e: std::io::Error| ReplaceError::Failed(e.raw_os_error().unwrap_or(0) as u32);
+    let folder = target.parent().ok_or(ReplaceError::Failed(0))?;
+    std::fs::create_dir_all(folder).map_err(failed)?;
+    remove_set_aside(folder);
+    let fresh = folder.join("vigie.exe.new");
+    std::fs::copy(source, &fresh).map_err(failed)?;
+    let mut aside = None;
+    if target.exists() && std::fs::remove_file(target).is_err() {
+        let path = folder.join(format!("vigie.old-{}.exe", std::process::id()));
+        std::fs::rename(target, &path).map_err(failed)?;
+        aside = Some(path);
+    }
+    std::fs::rename(&fresh, target).map_err(|e| {
+        // The value may already name `target`: put the previous copy back rather than leave
+        // Ctrl+Shift+Esc pointing at nothing.
+        if let Some(aside) = &aside {
+            let _ = std::fs::rename(aside, target);
+        }
+        let _ = std::fs::remove_file(&fresh);
+        failed(e)
+    })
+}
+
+/// In the elevated helper: removes the copy, and its folder once empty. A running copy is
+/// moved aside and goes on a later run, or stays harmless: nothing points at it.
+pub(crate) fn remove_copy(target: &Path) {
+    let Some(folder) = target.parent() else {
+        return;
+    };
+    if std::fs::remove_file(target).is_err() && target.exists() {
+        let _ = std::fs::rename(target, folder.join(format!("vigie.old-{}.exe", std::process::id())));
+    }
+    remove_set_aside(folder);
+    let _ = std::fs::remove_dir(folder);
+}
+
+/// Deletes copies set aside earlier, those no longer running.
+fn remove_set_aside(folder: &Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if (name.starts_with("vigie.old-") && name.ends_with(".exe")) || name == "vigie.exe.new" {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Where the installer puts Vigie: `%LOCALAPPDATA%\Programs\Vigie\vigie.exe`.
 pub(crate) fn installed_path() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(r"Programs\Vigie\vigie.exe"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_copy_lives_in_program_files() {
+        let copy = machine_path().expect("Program Files is known");
+        let text = copy.to_string_lossy().to_lowercase();
+        assert!(text.ends_with(r"\vigie\vigie.exe"), "{text}");
+        assert!(!text.contains("appdata"), "{text}");
+    }
+
+    /// In a temporary folder, not Program Files: the copy is made, replaced while "running"
+    /// (open), and removed with its folder.
+    #[test]
+    fn copies_are_made_replaced_and_removed() {
+        let base = std::env::temp_dir().join(format!("vigie-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let source = base.join("source.exe");
+        std::fs::write(&source, b"first").unwrap();
+        let target = base.join(r"Vigie\vigie.exe");
+        install_copy(&source, &target).expect("copied");
+        assert_eq!(std::fs::read(&target).unwrap(), b"first");
+        std::fs::write(&source, b"second").unwrap();
+        install_copy(&source, &target).expect("replaced");
+        assert_eq!(std::fs::read(&target).unwrap(), b"second");
+        remove_copy(&target);
+        assert!(!target.exists());
+        assert!(!target.parent().unwrap().exists(), "empty folder removed");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The copy keeps its source's size and modification time: `copy_outdated` relies on it.
+    #[test]
+    fn a_copy_keeps_size_and_time() {
+        let base = std::env::temp_dir().join(format!("vigie-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let source = base.join("source.exe");
+        std::fs::write(&source, vec![7u8; 4096]).unwrap();
+        let target = base.join(r"Vigie\vigie.exe");
+        install_copy(&source, &target).expect("copied");
+        let stamp = |p: &Path| {
+            let m = std::fs::metadata(p).unwrap();
+            (m.len(), m.modified().unwrap())
+        };
+        assert_eq!(stamp(&source), stamp(&target));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A copy that is running (a Vigie opened with Ctrl+Shift+Esc) is replaced all the same.
+    /// The running program is a copy of ping this test starts and ends itself.
+    #[test]
+    fn a_running_copy_is_replaced() {
+        let base = std::env::temp_dir().join(format!("vigie-running-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let target = base.join(r"Vigie\vigie.exe");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let windows = std::env::var_os("SystemRoot").unwrap();
+        std::fs::copy(Path::new(&windows).join(r"System32\PING.EXE"), &target).unwrap();
+        let mut running = std::process::Command::new(&target)
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("the copy runs");
+        let source = base.join("new.exe");
+        std::fs::write(&source, b"new version").unwrap();
+        install_copy(&source, &target).expect("replaced while running");
+        assert_eq!(std::fs::read(&target).unwrap(), b"new version");
+        let _ = running.kill();
+        let _ = running.wait();
+        remove_copy(&target);
+        assert!(!target.exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

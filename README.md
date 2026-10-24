@@ -6,11 +6,11 @@ A fast, good-looking task manager for Windows, macOS and Linux, written in Rust 
 
 *Vigie* is the lookout post at the top of a ship's mast (*vigía* in Spanish, *vigia* in Portuguese): the one who watches everything. Vigie watches your machine and tells you what is going on, while using as little of it as possible.
 
-> **Status:** version 0.1.4. Windows has every feature (processes, performance with history, diagnostics, ports, file locks, startup and services, tray, French); macOS and Linux build and show processes, with the rest to come. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** version 0.1.5. Windows has every feature (processes, performance with history, diagnostics, ports, file locks, startup and services, tray, French); macOS and Linux build and show processes, with the rest to come. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Installing
 
-* **Windows:** run `Vigie-0.1.4-setup.exe`: it installs for your account only, without administrator rights, and uninstalls from Settings > Apps. From 0.1.2 on, Vigie offers new versions itself (Settings > Updates). A portable zip is also built. The files are not signed yet, so SmartScreen warns on first launch.
+* **Windows:** run `Vigie-0.1.5-setup.exe`: it installs for your account only, without administrator rights, and uninstalls from Settings > Apps. From 0.1.2 on, Vigie offers new versions itself (Settings > Updates). A portable zip is also built. The files are not signed yet, so SmartScreen warns on first launch.
 * **macOS and Linux:** a `.dmg` and an AppImage are built by the release workflow (unsigned for now).
 
 ## Goals

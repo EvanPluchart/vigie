@@ -109,6 +109,10 @@ begin
       Waited := Waited + 250;
     end;
     Result := not CheckForMutexes(VigieMutex);
+    { Giving up: the Vigie that asked has already quit, so start it again rather than leave
+      the user with none (it says nothing changed: its version is the same). }
+    if not Result then
+      Exec(ExpandConstant('{userpf}\Vigie\vigie.exe'), '', '', SW_SHOWNORMAL, ewNoWait, Waited);
   end;
 end;
 

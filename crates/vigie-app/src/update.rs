@@ -77,10 +77,11 @@ pub fn release_instance() {
 fn mode() -> i32 {
     if !vigie_shell::update::supported() {
         UNSUPPORTED
+    } else if vigie_shell::update::is_elevated() {
+        // Ctrl+Shift+Esc's copy in Program Files, say: never runs a download.
+        ELEVATED
     } else if vigie_shell::taskmgr::installed().is_none() {
         RELEASE_PAGE
-    } else if vigie_shell::update::is_elevated() {
-        ELEVATED
     } else {
         INSTALL
     }
