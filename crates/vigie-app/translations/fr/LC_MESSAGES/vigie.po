@@ -709,6 +709,69 @@ msgstr "Rouvrez-le depuis son icône ; quittez depuis le menu de l’icône."
 msgid "Not available: there is no notification area icon."
 msgstr "Indisponible : il n’y a pas d’icône dans la zone de notification."
 
+msgid "Updates"
+msgstr "Mises à jour"
+
+msgid "Check for updates"
+msgstr "Rechercher les mises à jour"
+
+msgid "At launch and every 6 hours, Vigie asks GitHub which version is the newest. Nothing else is sent."
+msgstr "Au lancement puis toutes les 6 heures, Vigie demande à GitHub quelle est la version la plus récente. Rien d’autre n’est envoyé."
+
+msgid "Checking for updates…"
+msgstr "Recherche de mises à jour…"
+
+msgid "Vigie {} is up to date."
+msgstr "Vigie {} est à jour."
+
+msgid "Vigie {} is available. You have {}."
+msgstr "Vigie {} est disponible. Vous avez la {}."
+
+msgid "Downloading Vigie {}…"
+msgstr "Téléchargement de Vigie {}…"
+
+msgid "The update did not go through."
+msgstr "La mise à jour n’a pas abouti."
+
+msgid "Installing Vigie {}: Vigie will close and open again."
+msgstr "Installation de Vigie {} : Vigie va se fermer puis se rouvrir."
+
+msgid "Vigie {}"
+msgstr "Vigie {}"
+
+msgid "Could not reach GitHub. Check the connection and try again."
+msgstr "Impossible de joindre GitHub. Vérifiez la connexion, puis réessayez."
+
+msgid "This release publishes no checksum for its installer, so Vigie will not run it. Download it from the release page instead."
+msgstr "Cette version ne publie pas d’empreinte pour son installeur : Vigie ne le lancera pas. Téléchargez-le plutôt depuis la page de publication."
+
+msgid "The download does not match its checksum: it was deleted, not run."
+msgstr "Le téléchargement ne correspond pas à son empreinte : il a été supprimé sans être lancé."
+
+msgid "The download failed."
+msgstr "Le téléchargement a échoué."
+
+msgid "The installer did not start."
+msgstr "L’installeur ne s’est pas lancé."
+
+msgid "Test run: the installer was checked but not started."
+msgstr "Essai : l’installeur a été vérifié mais pas lancé."
+
+msgid "This copy of Vigie is not the installed one: download the new version from its release page."
+msgstr "Cette copie de Vigie n’est pas celle qui est installée : téléchargez la nouvelle version depuis sa page de publication."
+
+msgid "This Vigie runs as administrator (opened with Ctrl+Shift+Esc). Open Vigie normally to update it."
+msgstr "Ce Vigie tourne en administrateur (ouvert avec Ctrl+Maj+Échap). Ouvrez Vigie normalement pour le mettre à jour."
+
+msgid "Open the release page"
+msgstr "Ouvrir la page de publication"
+
+msgid "Update"
+msgstr "Mettre à jour"
+
+msgid "Check now"
+msgstr "Vérifier maintenant"
+
 msgid "Task Manager"
 msgstr "Gestionnaire des tâches"
 

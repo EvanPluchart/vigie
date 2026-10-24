@@ -75,6 +75,15 @@ export component SettingsView inherits Rectangle {
     in-out property <int> cpu-minutes;
     in-out property <int> memory-alert;
     in-out property <bool> close-to-tray;
+    in-out property <bool> check-updates;
+    in property <int> update-state;
+    in property <string> update-version;
+    in property <int> update-error-kind;
+    in property <string> update-error;
+    in property <int> update-mode;
+    in property <string> app-version;
+    callback update-clicked();
+    callback update-check();
     in property <bool> tray-available;
     // Where the settings are saved; empty with --no-settings.
     in property <string> path;
@@ -105,6 +114,69 @@ export component SettingsView inherits Rectangle {
                 padding: Theme.space-4;
                 spacing: Theme.space-4;
                 alignment: start;
+
+                if root.update-mode != 3: Section {
+                    title: @tr("Updates");
+                    SwitchLine {
+                        label: @tr("Check for updates");
+                        hint: @tr("At launch and every 6 hours, Vigie asks GitHub which version is the newest. Nothing else is sent.");
+                        checked <=> root.check-updates;
+                        toggled => { root.edited(); }
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.space-3;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 2px;
+                            Text {
+                                text: root.update-state == 1 ? @tr("Checking for updates…")
+                                    : root.update-state == 2 ? @tr("Vigie {} is up to date.", root.app-version)
+                                    : root.update-state == 3 ? @tr("Vigie {} is available. You have {}.", root.update-version, root.app-version)
+                                    : root.update-state == 4 ? @tr("Downloading Vigie {}…", root.update-version)
+                                    : root.update-state == 5 ? @tr("The update did not go through.")
+                                    : root.update-state == 6 ? @tr("Installing Vigie {}: Vigie will close and open again.", root.update-version)
+                                    : @tr("Vigie {}", root.app-version);
+                                color: root.update-state == 5 ? Theme.danger : Theme.text;
+                                font-size: Theme.font-body;
+                                wrap: word-wrap;
+                            }
+                            if root.update-state == 5: Text {
+                                text: (root.update-error-kind == 1 ? @tr("Could not reach GitHub. Check the connection and try again.")
+                                    : root.update-error-kind == 2 ? @tr("This release publishes no checksum for its installer, so Vigie will not run it. Download it from the release page instead.")
+                                    : root.update-error-kind == 3 ? @tr("The download does not match its checksum: it was deleted, not run.")
+                                    : root.update-error-kind == 4 ? @tr("The download failed.")
+                                    : root.update-error-kind == 5 ? @tr("The installer did not start.")
+                                    : root.update-error-kind == 6 ? @tr("Test run: the installer was checked but not started.")
+                                    : "") + (root.update-error == "" ? "" : " (" + root.update-error + ")");
+                                color: Theme.text-muted;
+                                font-size: Theme.font-caption;
+                                wrap: word-wrap;
+                            }
+                            if root.update-state == 3 && root.update-mode == 1: Text {
+                                text: @tr("This copy of Vigie is not the installed one: download the new version from its release page.");
+                                color: Theme.text-muted;
+                                font-size: Theme.font-caption;
+                                wrap: word-wrap;
+                            }
+                            if root.update-state == 3 && root.update-mode == 2: Text {
+                                text: @tr("This Vigie runs as administrator (opened with Ctrl+Shift+Esc). Open Vigie normally to update it.");
+                                color: Theme.text-muted;
+                                font-size: Theme.font-caption;
+                                wrap: word-wrap;
+                            }
+                        }
+                        if root.update-state == 3 && root.update-mode != 2: VButton {
+                            text: root.update-mode == 1 ? @tr("Open the release page") : @tr("Update");
+                            kind: 1;
+                            clicked => { root.update-clicked(); }
+                        }
+                        if root.update-state == 0 || root.update-state == 2 || root.update-state == 5: VButton {
+                            text: @tr("Check now");
+                            clicked => { root.update-check(); }
+                        }
+                    }
+                }
 
                 Section {
                     title: @tr("General");

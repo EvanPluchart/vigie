@@ -372,7 +372,7 @@ component RailItem inherits Rectangle {
     in property <string> icon;
     in property <string> label;
     in property <bool> active;
-    // A dot in the corner: something needs a look (0 none, 1 warning, 2 critical).
+    // A dot in the corner: something needs a look (0 none, 1 warning, 2 critical, 3 news).
     in property <int> badge;
     callback clicked();
     width: 36px;
@@ -397,7 +397,7 @@ component RailItem inherits Rectangle {
         width: 7px;
         height: 7px;
         border-radius: 3.5px;
-        background: root.badge == 2 ? Theme.danger : Theme.warning;
+        background: root.badge == 3 ? Theme.accent : root.badge == 2 ? Theme.danger : Theme.warning;
     }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -425,6 +425,8 @@ component RailItem inherits Rectangle {
 component Rail inherits Rectangle {
     in property <int> tab;
     in property <int> badge;
+    // A newer version is out: a dot on Settings.
+    in property <bool> update-available;
     callback selected(int);
     width: 52px;
     background: Theme.surface;
@@ -524,6 +526,7 @@ component Rail inherits Rectangle {
                 // Two sliders.
                 icon: "M 4 8 L 20 8 M 4 16 L 20 16 M 9 5 L 9 11 M 15 13 L 15 19";
                 active: root.tab == 6;
+                badge: root.update-available ? 3 : 0;
                 clicked => { root.selected(6); }
             }
         }
@@ -696,6 +699,21 @@ export component AppWindow inherits Window {
     in-out property <int> setting-cpu-minutes: 1;
     in-out property <int> setting-memory-alert: 2;
     in-out property <bool> setting-close-to-tray;
+    in-out property <bool> setting-check-updates: true;
+    // Updates (decision 0012): 0 not checked yet, 1 checking, 2 up to date, 3 a newer version,
+    // 4 downloading, 5 failed, 6 starting the installer.
+    in property <int> update-state;
+    in property <string> update-version;
+    // Why the last check or update failed: 1 the check, 2 no checksum for the installer,
+    // 3 a download that does not match it, 4 the download, 5 the installer did not start,
+    // 6 a test run stopped before installing. `update-error` holds the technical detail.
+    in property <int> update-error-kind;
+    in property <string> update-error;
+    // What the button does: 0 install, 1 open the release page (a portable copy),
+    // 2 nothing (an elevated Vigie must not run the installer), 3 not on this system.
+    in property <int> update-mode: 3;
+    callback update-clicked();
+    callback update-check();
     in property <bool> tray-available;
     in property <string> settings-path;
     callback settings-edited();
@@ -1180,6 +1198,7 @@ export component AppWindow inherits Window {
             Rail {
                 tab: root.tab;
                 badge: root.diagnostics-badge;
+                update-available: root.update-state == 3;
                 selected(index) => { root.show-tab(index); }
             }
             Rectangle {
@@ -1667,6 +1686,15 @@ export component AppWindow inherits Window {
                 cpu-minutes <=> root.setting-cpu-minutes;
                 memory-alert <=> root.setting-memory-alert;
                 close-to-tray <=> root.setting-close-to-tray;
+                check-updates <=> root.setting-check-updates;
+                update-state: root.update-state;
+                update-version: root.update-version;
+                update-error-kind: root.update-error-kind;
+                update-error: root.update-error;
+                update-mode: root.update-mode;
+                app-version: root.app-version;
+                update-clicked => { root.update-clicked(); }
+                update-check => { root.update-check(); }
                 tray-available: root.tray-available;
                 path: root.settings-path;
                 edited => { root.settings-edited(); }

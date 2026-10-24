@@ -75,6 +75,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\vigie.exe"; Description: "{cm:LaunchVigie}"; Flags: nowait postinstall skipifsilent
+; An update from the app (decision 0012) runs silently and asks for Vigie to start again.
+Filename: "{app}\vigie.exe"; Flags: nowait; Check: RelaunchAsked
 
 [UninstallDelete]
 Type: dirifempty; Name: "{app}"
@@ -82,6 +84,33 @@ Type: dirifempty; Name: "{app}"
 [Code]
 const
   IfeoKey = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\taskmgr.exe';
+  VigieMutex = 'Local\Vigie.SingleInstance';
+
+{ Started by Vigie's "Update" button (decision 0012). }
+function RelaunchAsked(): Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;
+
+{ An update from the app: Vigie quits right after starting this installer, so give it a few
+  seconds. Another Vigie still running (one opened as administrator, say) cannot be closed
+  from here: stop, and that Vigie stays as it is. }
+function InitializeSetup(): Boolean;
+var
+  Waited: Integer;
+begin
+  Result := True;
+  if RelaunchAsked() then
+  begin
+    Waited := 0;
+    while CheckForMutexes(VigieMutex) and (Waited < 10000) do
+    begin
+      Sleep(250);
+      Waited := Waited + 250;
+    end;
+    Result := not CheckForMutexes(VigieMutex);
+  end;
+end;
 
 { True when Ctrl+Shift+Esc is mapped to a Vigie (decision 0009). }
 function TaskmgrReplaced(): Boolean;

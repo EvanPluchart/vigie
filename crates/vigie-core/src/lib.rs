@@ -8,6 +8,7 @@ pub mod perf;
 pub mod settings;
 pub mod tools;
 pub mod tracker;
+pub mod update;
 mod tree;
 pub mod users;
 

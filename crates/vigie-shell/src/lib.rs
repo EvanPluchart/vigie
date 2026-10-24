@@ -11,6 +11,8 @@ pub mod settings_file;
 mod taskmgr_windows;
 #[cfg(windows)]
 mod tray_windows;
+#[cfg(windows)]
+mod update_windows;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -70,6 +72,21 @@ pub mod desktop {
         #[cfg(not(windows))]
         {
             let _ = url;
+            false
+        }
+    }
+
+    /// Opens an https page in the default browser.
+    pub fn open_url(url: &str) -> bool {
+        if !url.starts_with("https://") {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            crate::desktop_windows::open_url(url)
+        }
+        #[cfg(not(windows))]
+        {
             false
         }
     }
@@ -194,6 +211,99 @@ fn state_of(value: &str) -> ReplaceState {
         ReplaceState::On(path)
     } else {
         ReplaceState::Stale(path)
+    }
+}
+
+/// Updates from the app (decision 0012): the network and file steps, Windows only for now.
+/// Which version is newer and which checksum to expect is `vigie-core::update`'s part.
+pub mod update {
+    use std::path::{Path, PathBuf};
+
+    /// Whether this system can check for and install updates.
+    pub fn supported() -> bool {
+        cfg!(windows)
+    }
+
+    /// Where `url` redirects to, without following it.
+    pub fn redirect_of(url: &str) -> Result<String, String> {
+        #[cfg(windows)]
+        {
+            crate::update_windows::redirect_of(url)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = url;
+            Err("not supported on this system".into())
+        }
+    }
+
+    /// The text at `url` (a checksum list).
+    pub fn text(url: &str) -> Result<String, String> {
+        #[cfg(windows)]
+        {
+            crate::update_windows::text(url)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = url;
+            Err("not supported on this system".into())
+        }
+    }
+
+    /// Saves the file at `url` to `path`.
+    pub fn download(url: &str, path: &Path) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            crate::update_windows::download(url, path)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (url, path);
+            Err("not supported on this system".into())
+        }
+    }
+
+    /// The SHA-256 of the file at `path`.
+    pub fn sha256_file(path: &Path) -> Option<[u8; 32]> {
+        #[cfg(windows)]
+        {
+            crate::update_windows::sha256_file(path)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            None
+        }
+    }
+
+    /// This process runs with administrator rights: it must not run a downloaded installer.
+    pub fn is_elevated() -> bool {
+        #[cfg(windows)]
+        {
+            crate::update_windows::is_elevated()
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+
+    /// A new, empty folder for one download, under the temporary folder.
+    pub fn fresh_folder() -> Option<PathBuf> {
+        let base = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_nanos();
+        let dir = base.join(format!("vigie-update-{}-{stamp}", std::process::id()));
+        // `create_dir` fails if it exists: the folder is ours alone.
+        std::fs::create_dir(&dir).ok()?;
+        Some(dir)
+    }
+
+    /// Starts the installer at `path` with `args`, detached; this process should then quit.
+    pub fn start_installer(path: &Path, args: &[&str]) -> bool {
+        std::process::Command::new(path).args(args).spawn().is_ok()
     }
 }
 
