@@ -96,7 +96,7 @@ fn main() -> anyhow::Result<()> {
             &app,
             session.check_updates,
             env!("CARGO_PKG_VERSION").into(),
-            std::time::Duration::from_secs(45),
+            std::time::Duration::from_secs(3),
         ),
         None => None,
     });

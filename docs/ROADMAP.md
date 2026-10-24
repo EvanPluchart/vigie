@@ -85,7 +85,7 @@ Vigie should look as good as it is light. Design work has its own deliverables, 
 
 ## M8 — Updates from the app
 
-* Check GitHub for a newer release at launch and every 6 hours; can be turned off (decision 0012).
+* Check GitHub for a newer release at launch (after 3 s) and every 6 hours; can be turned off (decision 0012).
 * An "Update" button: download the installer, check its SHA-256, install and relaunch.
 
 **Status (2026-10-24):** in 0.1.2, Windows only. 0.1.3 adds "Vigie X is installed · See what's new" after an update, and is the first version installed through the button.
