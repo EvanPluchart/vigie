@@ -284,4 +284,14 @@ mod tests {
         let version = Version::parse("0.1.1").unwrap();
         assert!(matches!(fetch(version), Err((NO_CHECKSUM, _))));
     }
+
+    /// What "Update" does before running anything: 0.1.2's installer downloads and matches its
+    /// published checksum. Online, so by hand: `cargo test -p vigie -- --ignored published`.
+    #[test]
+    #[ignore = "network"]
+    fn a_published_release_downloads_and_checks() {
+        let path = fetch(Version::parse("0.1.2").unwrap()).expect("downloaded and checked");
+        assert!(path.ends_with("Vigie-0.1.2-setup.exe"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 }
