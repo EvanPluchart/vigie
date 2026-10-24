@@ -165,6 +165,8 @@ pub struct Settings {
     pub memory_alert: u8,
     /// Closing the window hides it to the tray instead of quitting.
     pub close_to_tray: bool,
+    /// Ask GitHub for a newer release at launch and every 6 hours (decision 0012).
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -182,6 +184,7 @@ impl Default for Settings {
             cpu_alert_minutes: 2,
             memory_alert: 90,
             close_to_tray: false,
+            check_updates: true,
         }
     }
 }
@@ -260,6 +263,7 @@ impl Settings {
                     }
                 }
                 "close_to_tray" => s.close_to_tray = flag().unwrap_or(s.close_to_tray),
+                "check_updates" => s.check_updates = flag().unwrap_or(s.check_updates),
                 _ => {
                     // column_NAME, detail_column_NAME and width_NAME.
                     let set_flag = |columns: &mut Columns, name: &str| {
@@ -322,6 +326,7 @@ impl Settings {
         let _ = writeln!(out, "cpu_alert_minutes = {}", self.cpu_alert_minutes);
         let _ = writeln!(out, "memory_alert = {}", self.memory_alert);
         let _ = writeln!(out, "close_to_tray = {}", self.close_to_tray);
+        let _ = writeln!(out, "check_updates = {}", self.check_updates);
         out
     }
 }
@@ -361,6 +366,7 @@ mod tests {
             cpu_alert_minutes: 5,
             memory_alert: 0,
             close_to_tray: true,
+            check_updates: false,
         };
         assert_eq!(Settings::parse(&custom.to_text()), custom);
         assert_eq!(

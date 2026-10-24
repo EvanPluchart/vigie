@@ -6,7 +6,7 @@ use vigie_core::{Sort, SortKey};
 
 pub const USAGE: &str = "usage: vigie [--tab=processes|performance|diagnostics] [--sort=cpu|memory|name|pid[:asc]] \
 [--filter=TEXT] [--interval=MS] [--dark|--light] [--about] [--expand=PID]... [--ask=ACTION:PID] [--columns=status,publisher,user,description,pid,threads,handles,cpu,memory,io] [--select=PID] [--menu=1|2|3] [--no-adaptive] \
-[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=details|users|ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--notify-test] [--mini] [--palette[=TEXT]] [--lang=en|fr]";
+[--range=1m|10m|1h|6h|24h|7d] [--history] [--tab=details|users|ports|files|startup|services|settings] [--locks=PATH] [--no-settings] [--no-tray] [--pretend-version=X.Y.Z] [--notify-test] [--mini] [--palette[=TEXT]] [--lang=en|fr]";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
@@ -59,6 +59,9 @@ pub struct Options {
     pub menu: Option<i32>,
     /// Keep the chosen interval in the background too (benchmarks measure the focused cost).
     pub no_adaptive: bool,
+    /// Tests updates (decision 0012): behaves as this older version and checks after 2 s,
+    /// even with --no-settings; "Update" stops once the installer is checked.
+    pub pretend_version: Option<String>,
 }
 
 /// Parses the arguments after the program name. `Err` carries the message to print.
@@ -115,6 +118,12 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
             ("--light", None) => options.dark = Some(false),
             ("--about", None) => options.about = true,
             ("--no-adaptive", None) => options.no_adaptive = true,
+            ("--pretend-version", Some(version)) => {
+                if vigie_core::update::Version::parse(version).is_none() {
+                    return Err(format!("invalid version `{version}`"));
+                }
+                options.pretend_version = Some(version.to_owned());
+            }
             ("--no-settings", None) => options.no_settings = true,
             ("--no-tray", None) => options.no_tray = true,
             ("--notify-test", None) => options.notify_test = true,
@@ -172,11 +181,12 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
     Ok(options)
 }
 
-/// An argument naming taskmgr.exe, quoted or not, with any folder in front.
+/// An argument naming taskmgr.exe, quoted or not, with or without `.exe` (a console passes
+/// `taskmgr` as typed), with any folder in front.
 fn names_taskmgr(arg: &str) -> bool {
     let arg = arg.trim().trim_matches('"');
     let name = arg.rsplit(['\\', '/']).next().unwrap_or(arg);
-    name.eq_ignore_ascii_case("taskmgr.exe")
+    name.eq_ignore_ascii_case("taskmgr.exe") || name.eq_ignore_ascii_case("taskmgr")
 }
 
 fn parse_sort(value: &str) -> Result<Sort, String> {
@@ -242,6 +252,8 @@ mod tests {
         // Started in place of Task Manager: its path and flags are not errors.
         let taskmgr = parse(args(&[r"C:\WINDOWS\system32\taskmgr.exe", "/4"])).unwrap();
         assert!(taskmgr.from_taskmgr);
+        assert!(parse(args(&["taskmgr"])).unwrap().from_taskmgr);
+        assert!(parse(args(&["TASKMGR", "/7"])).unwrap().from_taskmgr);
         assert!(
             parse(args(&[r#""C:\Windows\System32\Taskmgr.exe""#]))
                 .unwrap()

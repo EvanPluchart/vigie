@@ -24,7 +24,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     MSG, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXICON,
     SM_CXSMICON, SetForegroundWindow, SetWindowLongPtrW, TPM_BOTTOMALIGN, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CLOSE, WM_CONTEXTMENU,
-    WM_DESTROY, WM_LBUTTONDBLCLK, WM_NULL, WNDCLASSW, WS_OVERLAPPED,
+    WM_DESTROY, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_NULL, WNDCLASSW, WS_OVERLAPPED,
 };
 
 use crate::{Rect, TrayEvent, TrayMenu};
@@ -33,6 +33,9 @@ use crate::{Rect, TrayEvent, TrayMenu};
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_UPDATE: u32 = WM_APP + 2;
 const WM_NOTIFY_USER: u32 = WM_APP + 3;
+/// Vigie removes its icon. Not WM_CLOSE: other programs send that one (`taskkill` without
+/// `/F` does), and the icon must not vanish while Vigie runs hidden behind it.
+const WM_SHUTDOWN: u32 = WM_APP + 4;
 const ICON_ID: u32 = 1;
 /// The application icon in the executable's resources: `winresource` gives it ID 1.
 const ICON_RESOURCE: u16 = 1;
@@ -46,6 +49,8 @@ struct Shared {
     tooltip: String,
     menu: TrayMenu,
     notification: Option<(String, String)>,
+    /// The icon is in the notification area (adding it fails while Explorer is down).
+    shown: bool,
 }
 
 /// Lives on the tray thread, pointed to by the window's user data.
@@ -81,6 +86,7 @@ impl Tray {
             tooltip: tooltip.to_owned(),
             menu,
             notification: None,
+            shown: false,
         }));
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<isize>();
         let thread_shared = shared.clone();
@@ -125,9 +131,16 @@ impl Tray {
     }
 }
 
+impl Tray {
+    /// Whether the icon is on screen: hiding Vigie behind a missing icon would lose it.
+    pub(crate) fn is_shown(&self) -> bool {
+        self.shared.lock().is_ok_and(|s| s.shown)
+    }
+}
+
 impl Drop for Tray {
     fn drop(&mut self) {
-        self.post(WM_CLOSE);
+        self.post(WM_SHUTDOWN);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -175,10 +188,14 @@ fn icon_data(hwnd: HWND, state: &State) -> NOTIFYICONDATAW {
 fn add_icon(hwnd: HWND, state: &State) {
     let mut data = icon_data(hwnd, state);
     // SAFETY: a fully initialised structure for our own window.
-    unsafe {
-        Shell_NotifyIconW(NIM_ADD, &data);
+    let shown = unsafe {
+        let shown = Shell_NotifyIconW(NIM_ADD, &data) != 0;
         data.Anonymous.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIconW(NIM_SETVERSION, &data);
+        shown
+    };
+    if let Ok(mut shared) = state.shared.lock() {
+        shared.shown = shown;
     }
 }
 
@@ -298,7 +315,17 @@ unsafe extern "system" fn window_proc(
             }
             0
         }
-        WM_CLOSE => {
+        // Someone else's request to close this hidden window: Vigie decides when its icon goes.
+        WM_CLOSE => 0,
+        // Windows is signing out, or an installer asks Vigie to close (Restart Manager).
+        WM_ENDSESSION if wparam != 0 => {
+            (state.callback)(TrayEvent::Quit);
+            0
+        }
+        WM_SHUTDOWN => {
+            if let Ok(mut shared) = state.shared.lock() {
+                shared.shown = false;
+            }
             let data = icon_data(hwnd, state);
             // SAFETY: removing our icon, then destroying our window.
             unsafe {

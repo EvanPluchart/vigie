@@ -393,33 +393,49 @@ fn execute(
     let failure = |error: ProbeError| match error {
         ProbeError::Gone => notice(Notice::GONE, 0),
         ProbeError::Denied => notice(Notice::DENIED, 0),
+        ProbeError::Critical => notice(Notice::CRITICAL, 0),
         _ => notice(Notice::FAILED, 0),
     };
     // The PID must still name the process the user saw.
     let Some(target) = core.identify(pid, start_low_bits) else {
         return notice(Notice::GONE, 0);
     };
+    // Suspending Vigie would freeze this thread too, with nothing left to resume it.
+    if target.pid == sample.self_pid && matches!(action, UserAction::Probe(Action::Suspend)) {
+        return notice(Notice::SELF_SUSPEND, 0);
+    }
     match action {
         UserAction::End => match probe.act(target, Action::End) {
             Ok(()) => notice(Notice::ENDED, 0),
             Err(error) => failure(error),
         },
         UserAction::EndTree => {
+            // Refused before any child goes: a critical root would only be refused last.
+            if probe.is_critical(target) {
+                return notice(Notice::CRITICAL, 0);
+            }
             // Children first, so none is orphaned and restarted by its parent meanwhile.
             let tree = core.subtree(target);
             let mut first_error = None;
-            for member in &tree {
+            let mut children_ended = 0;
+            let mut target_gone = false;
+            for member in tree.iter().filter(|m| m.pid != sample.self_pid) {
                 match probe.act(*member, Action::End) {
+                    Ok(()) if *member != target => children_ended += 1,
+                    Ok(()) => {}
                     // A child may exit on its own while its siblings are ended.
-                    Ok(()) | Err(ProbeError::Gone) => {}
+                    // Neither do critical children (left running) stop the rest.
+                    Err(ProbeError::Gone | ProbeError::Critical) if *member != target => {}
+                    Err(ProbeError::Gone) => target_gone = true,
                     Err(error) => {
                         first_error.get_or_insert(error);
                     }
                 }
             }
             match first_error {
-                None => notice(Notice::ENDED_TREE, tree.len().saturating_sub(1)),
                 Some(error) => failure(error),
+                None if target_gone && children_ended == 0 => notice(Notice::GONE, 0),
+                None => notice(Notice::ENDED_TREE, children_ended),
             }
         }
         UserAction::Probe(action) => match probe.act(target, action) {
@@ -666,7 +682,7 @@ fn send(
 #[derive(Default)]
 struct ExeCache {
     by_path: HashMap<PathBuf, Details>,
-    next_icon: u32,
+    icon_ids: IconIds,
     icon_size: u32,
     details: Vec<ProcDetails>,
 }
@@ -702,7 +718,7 @@ impl ExeCache {
             let mut details = match &found.exe {
                 Some(exe) => Self::lookup(
                     &mut self.by_path,
-                    &mut self.next_icon,
+                    &mut self.icon_ids,
                     self.icon_size,
                     probe,
                     exe,
@@ -723,11 +739,34 @@ impl ExeCache {
     }
 }
 
+/// Icon ids, one per distinct image: the many executables sharing one icon (build outputs,
+/// versioned copies of an app) share one image in the UI's model, which never shrinks.
+#[derive(Default)]
+struct IconIds {
+    next: u32,
+    by_pixels: HashMap<u64, u32>,
+}
+
+impl IconIds {
+    /// The id of `icon`, pushed to `icons` (new to the UI) when no earlier image matches.
+    fn id_of(&mut self, icon: Icon, icons: &mut Vec<(u32, Icon)>) -> u32 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (icon.width, icon.height, &icon.rgba).hash(&mut hasher);
+        *self.by_pixels.entry(hasher.finish()).or_insert_with(|| {
+            let id = self.next;
+            self.next += 1;
+            icons.push((id, icon));
+            id
+        })
+    }
+}
+
 impl ExeCache {
     /// What `exe` says about itself, read once; a new icon is added to `icons`.
     fn lookup(
         by_path: &mut HashMap<PathBuf, Details>,
-        next_icon: &mut u32,
+        icon_ids: &mut IconIds,
         icon_size: u32,
         probe: &mut impl Probe,
         exe: &std::path::Path,
@@ -737,12 +776,7 @@ impl ExeCache {
             return details.clone();
         }
         let info = probe.exe_info(exe, icon_size);
-        let icon = info.icon.map(|icon| {
-            let id = *next_icon;
-            *next_icon += 1;
-            icons.push((id, icon));
-            id
-        });
+        let icon = info.icon.map(|icon| icon_ids.id_of(icon, icons));
         let details = Details {
             icon,
             publisher: info.publisher.map(Into::into),
@@ -762,7 +796,7 @@ impl ExeCache {
     ) -> Details {
         Self::lookup(
             &mut self.by_path,
-            &mut self.next_icon,
+            &mut self.icon_ids,
             self.icon_size,
             probe,
             exe,

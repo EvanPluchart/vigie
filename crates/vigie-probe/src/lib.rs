@@ -55,6 +55,9 @@ pub enum ProbeError {
     /// A service cannot stop while services that depend on it run.
     #[error("other services depend on it")]
     DependentsRunning,
+    /// Windows stops (blue screen) if this process ends: Vigie will not end or suspend it.
+    #[error("a critical system process")]
+    Critical,
     #[error("{0}")]
     Failed(String),
 }
@@ -471,6 +474,11 @@ pub trait Probe: Send {
     /// Acts on one process, after checking it is still the process `target` names.
     fn act(&mut self, _target: Target, _action: Action) -> Result<()> {
         Err(ProbeError::Unsupported)
+    }
+    /// Whether the system stops if this process ends (`act` refuses to end or suspend it).
+    /// Asked before ending a whole tree, whose members go first.
+    fn is_critical(&mut self, _target: Target) -> bool {
+        false
     }
 }
 

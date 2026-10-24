@@ -16,7 +16,7 @@ work="$root/target/appimage"
 rm -rf "$work"
 mkdir -p "$out" "$work"
 
-cargo build --release -p vigie
+cargo build --release --locked -p vigie
 
 appdir="$work/Vigie.AppDir"
 id=fr.evanpluchart.Vigie

@@ -75,6 +75,9 @@ export global NotifyText {
         return cpu == "" ? "Vigie" : @tr("Vigie · CPU {} · Memory {}", cpu, memory);
     }
 
+    pure public function update-title(version: string) -> string { return @tr("Vigie {} is available", version); }
+    pure public function update-body() -> string { return @tr("Click to install it in one click from Vigie."); }
+
     pure public function menu-open() -> string { return @tr("Open Vigie"); }
     pure public function menu-quit() -> string { return @tr("Quit"); }
 }
@@ -372,7 +375,7 @@ component RailItem inherits Rectangle {
     in property <string> icon;
     in property <string> label;
     in property <bool> active;
-    // A dot in the corner: something needs a look (0 none, 1 warning, 2 critical).
+    // A dot in the corner: something needs a look (0 none, 1 warning, 2 critical, 3 news).
     in property <int> badge;
     callback clicked();
     width: 36px;
@@ -397,7 +400,7 @@ component RailItem inherits Rectangle {
         width: 7px;
         height: 7px;
         border-radius: 3.5px;
-        background: root.badge == 2 ? Theme.danger : Theme.warning;
+        background: root.badge == 3 ? Theme.accent : root.badge == 2 ? Theme.danger : Theme.warning;
     }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -425,6 +428,8 @@ component RailItem inherits Rectangle {
 component Rail inherits Rectangle {
     in property <int> tab;
     in property <int> badge;
+    // A newer version is out: a dot on Settings.
+    in property <bool> update-available;
     callback selected(int);
     width: 52px;
     background: Theme.surface;
@@ -524,6 +529,7 @@ component Rail inherits Rectangle {
                 // Two sliders.
                 icon: "M 4 8 L 20 8 M 4 16 L 20 16 M 9 5 L 9 11 M 15 13 L 15 19";
                 active: root.tab == 6;
+                badge: root.update-available ? 3 : 0;
                 clicked => { root.selected(6); }
             }
         }
@@ -644,9 +650,12 @@ export component AppWindow inherits Window {
     // Height of the history panel; dragged from its top edge.
     in-out property <length> history-height: 280px;
     callback layout-edited();
-    // A smaller window shrinks the panel, so the table keeps a few rows.
+    // Tallest the panel may be, so the table keeps a few rows. Set on resize (not bound to the
+    // window height, which the layout itself depends on); `history-height`, the user's
+    // choice, stays saved for when the window grows again.
+    private property <length> history-cap: 2000px;
     changed height => {
-        root.history-height = min(root.history-height, max(150px, root.height - 300px));
+        root.history-cap = max(150px, root.height - 300px);
     }
     in property <GraphData> process-cpu-graph;
     in property <GraphData> process-memory-graph;
@@ -693,6 +702,21 @@ export component AppWindow inherits Window {
     in-out property <int> setting-cpu-minutes: 1;
     in-out property <int> setting-memory-alert: 2;
     in-out property <bool> setting-close-to-tray;
+    in-out property <bool> setting-check-updates: true;
+    // Updates (decision 0012): 0 not checked yet, 1 checking, 2 up to date, 3 a newer version,
+    // 4 downloading, 5 failed, 6 starting the installer.
+    in property <int> update-state;
+    in property <string> update-version;
+    // Why the last check or update failed: 1 the check, 2 no checksum for the installer,
+    // 3 a download that does not match it, 4 the download, 5 the installer did not start,
+    // 6 a test run stopped before installing. `update-error` holds the technical detail.
+    in property <int> update-error-kind;
+    in property <string> update-error;
+    // What the button does: 0 install, 1 open the release page (a portable copy),
+    // 2 nothing (an elevated Vigie must not run the installer), 3 not on this system.
+    in property <int> update-mode: 3;
+    callback update-clicked();
+    callback update-check();
     in property <bool> tray-available;
     in property <string> settings-path;
     callback settings-edited();
@@ -1102,13 +1126,15 @@ export component AppWindow inherits Window {
             : root.notice-kind == 20 ? @tr("Could not change what Ctrl+Shift+Esc opens")
             : root.notice-kind == 21 ? @tr("Copied “{}”", root.notice-name)
             : root.notice-kind == 22 ? @tr("Could not copy: the clipboard is busy")
+            : root.notice-kind == 23 ? @tr("Windows needs {} (PID {}) to keep running: Vigie will not end or suspend it.", root.notice-name, root.notice-pid)
+            : root.notice-kind == 24 ? @tr("Vigie cannot suspend itself: nothing would be left to resume it.")
             : "";
     }
 
     // Notices that report a failure (see src/model.rs for the codes).
     function notice-failed() -> bool {
         return (root.notice-kind >= 7 && root.notice-kind <= 9) || (root.notice-kind >= 14 && root.notice-kind <= 16)
-            || (root.notice-kind >= 19 && root.notice-kind <= 20) || root.notice-kind == 22;
+            || (root.notice-kind >= 19 && root.notice-kind <= 20) || root.notice-kind >= 22;
     }
 
     function clear-search() {
@@ -1175,6 +1201,7 @@ export component AppWindow inherits Window {
             Rail {
                 tab: root.tab;
                 badge: root.diagnostics-badge;
+                update-available: root.update-state == 3;
                 selected(index) => { root.show-tab(index); }
             }
             Rectangle {
@@ -1432,8 +1459,10 @@ export component AppWindow inherits Window {
                                     if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
                                         root.select(row);
                                     }
+                                    // A tick may reorder rows between press and release: act on
+                                    // the process selected on press, which follows its key.
                                     if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
-                                        root.menu-row = row;
+                                        root.menu-row = root.has-selection ? root.selected : row;
                                         root.open-menu(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                                     }
                                 }
@@ -1473,7 +1502,7 @@ export component AppWindow inherits Window {
             // History of the selected process: CPU and memory over the chosen range.
             if root.history-open: history-panel := Rectangle {
                 // The table keeps at least a few rows above the panel.
-                height: max(150px, root.history-height);
+                height: clamp(root.history-height, 150px, root.history-cap);
                 background: Theme.surface;
                 clip: true;
                 Rectangle { y: 0; height: 1px; background: Theme.border; }
@@ -1577,7 +1606,7 @@ export component AppWindow inherits Window {
                 total-memory: root.total-memory;
                 toggle(session) => { root.user-toggled(session); }
                 menu(row, x, y) => {
-                    root.menu-row = { key: row.pid * 2, kind: 1, name: row.name, pid: row.pid, start: row.start, file: row.file, path: row.path };
+                    root.menu-row = { key: row.pid * 2, kind: 1, name: row.name, pid: row.pid, start: row.start, file: row.file, path: row.path, tree-size: row.tree-size, own: row.own };
                     root.open-menu(1, x, y);
                 }
             }
@@ -1660,6 +1689,15 @@ export component AppWindow inherits Window {
                 cpu-minutes <=> root.setting-cpu-minutes;
                 memory-alert <=> root.setting-memory-alert;
                 close-to-tray <=> root.setting-close-to-tray;
+                check-updates <=> root.setting-check-updates;
+                update-state: root.update-state;
+                update-version: root.update-version;
+                update-error-kind: root.update-error-kind;
+                update-error: root.update-error;
+                update-mode: root.update-mode;
+                app-version: root.app-version;
+                update-clicked => { root.update-clicked(); }
+                update-check => { root.update-check(); }
                 tray-available: root.tray-available;
                 path: root.settings-path;
                 edited => { root.settings-edited(); }
@@ -1738,6 +1776,34 @@ export component AppWindow inherits Window {
                         font-size: Theme.font-caption;
                         horizontal-stretch: 1;
                     }
+                    // A newer version, from every view: one click installs it (decision 0012).
+                    if root.update-state == 3 || root.update-state == 4 || root.update-state == 6: HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: Theme.space-2;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: Theme.accent;
+                        }
+                        update-link := Cell {
+                            text: root.update-state == 4 ? @tr("Downloading Vigie {}…", root.update-version)
+                                : root.update-state == 6 ? @tr("Installing Vigie {}…", root.update-version)
+                                : root.update-mode == 0 ? @tr("Vigie {} is available · Update", root.update-version)
+                                : @tr("Vigie {} is available", root.update-version);
+                            color: Theme.accent;
+                            font-size: Theme.font-caption;
+                            TouchArea {
+                                mouse-cursor: root.update-state == 3 ? pointer : default;
+                                clicked => {
+                                    if (root.update-state != 3) { return; }
+                                    // Installs at once when it can; otherwise Settings says why.
+                                    if (root.update-mode == 0) { root.update-clicked(); } else { root.show-tab(6); }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1785,7 +1851,8 @@ export component AppWindow inherits Window {
                     root.menu-sub-index = MenuNav.next(root.submenu-items(root.menu-sub), -1, 1);
                     return accept;
                 }
-                if ((event.text == Key.Return || event.text == " ") && index >= 0 && index < items.length) {
+                if ((event.text == Key.Return || event.text == " ") && index >= 0 && index < items.length
+                    && !items[index].disabled && !items[index].hidden) {
                     root.run-menu(items[index].id);
                     return accept;
                 }

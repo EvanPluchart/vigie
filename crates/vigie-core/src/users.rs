@@ -26,6 +26,10 @@ pub struct Member {
     pub icon: Option<u32>,
     pub cpu_percent: Option<f32>,
     pub memory_bytes: u64,
+    /// Processes "End process tree" would end besides this one.
+    pub tree_size: u32,
+    /// Vigie itself.
+    pub own: bool,
 }
 
 impl Core {
@@ -58,6 +62,8 @@ impl Core {
                 icon: label.icon,
                 cpu_percent: cpu,
                 memory_bytes: p.memory_bytes,
+                tree_size: self.tree_size(p.pid),
+                own: p.pid == sample.self_pid,
             });
         }
         let mut groups: Vec<UserGroup> = by_session.into_values().collect();

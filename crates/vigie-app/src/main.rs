@@ -9,6 +9,7 @@ mod model;
 mod prefs;
 mod sampler;
 mod translations;
+mod update;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -42,11 +43,16 @@ fn main() -> anyhow::Result<()> {
     }
     // One Vigie per session: a second launch (Ctrl+Shift+Esc, say) shows the first and exits.
     // Test runs (--no-settings) may run next to the user's Vigie.
-    let _instance = if options.no_settings {
+    let instance = if options.no_settings {
         None
     } else {
-        match vigie_shell::single_instance(|| {
-            let _ = slint::invoke_from_event_loop(desktop::show_main_window);
+        match vigie_shell::single_instance(|request| {
+            // Confirmed from the UI thread: a hung Vigie never confirms, and the new launch
+            // then starts instead of exiting.
+            let _ = slint::invoke_from_event_loop(move || {
+                desktop::show_main_window();
+                request.done();
+            });
         }) {
             Some(instance) => Some(instance),
             None => return Ok(()),
@@ -64,7 +70,41 @@ fn main() -> anyhow::Result<()> {
     }
     prefs::show(&app, &session);
     app.set_settings_path(prefs.path().into());
-    app.set_app_version(env!("CARGO_PKG_VERSION").into());
+    app.set_app_version(
+        options
+            .pretend_version
+            .as_deref()
+            .unwrap_or(env!("CARGO_PKG_VERSION"))
+            .into(),
+    );
+    update::hold_instance(instance);
+    // Updates (decision 0012): never from a test run, unless it pretends an older version.
+    let updater = Rc::new(match &options.pretend_version {
+        Some(version) => update::start(&app, true, version.clone(), std::time::Duration::from_secs(2)),
+        None if !options.no_settings => update::start(
+            &app,
+            session.check_updates,
+            env!("CARGO_PKG_VERSION").into(),
+            std::time::Duration::from_secs(45),
+        ),
+        None => None,
+    });
+    let check = updater.clone();
+    app.on_update_check(move || {
+        if let Some(updater) = check.as_ref() {
+            updater.check_now();
+        }
+    });
+    let (install, weak, test) = (
+        updater.clone(),
+        app.as_weak(),
+        options.pretend_version.is_some(),
+    );
+    app.on_update_clicked(move || {
+        if let (Some(updater), Some(app)) = (install.as_ref(), weak.upgrade()) {
+            updater.update(&app, test);
+        }
+    });
     desktop::show_replace_state(&app);
     let weak = app.as_weak();
     app.on_taskmgr_toggled(move |on| desktop::request_replace(weak.clone(), on));
@@ -108,11 +148,16 @@ fn main() -> anyhow::Result<()> {
         app.invoke_show_about();
     }
 
-    // The sampler stops once every sender is dropped.
+    // The sampler stops on Command::Quit, sent once the event loop ends.
     let (commands, receiver) = flume::unbounded::<Command>();
 
     // Processes and Details each keep their own sort: [processes, details].
-    let sorts = Rc::new(Cell::new([options.sort, Sort::default()]));
+    // The sort asked on the command line applies to the table it opens on.
+    let sorts = Rc::new(Cell::new(if options.tab == 7 {
+        [Sort::default(), options.sort]
+    } else {
+        [options.sort, Sort::default()]
+    }));
     let table = |tab: i32| usize::from(tab == 7);
     let (weak, tx, sorts_clicked) = (app.as_weak(), commands.clone(), sorts.clone());
     app.on_sort_clicked(move |column| {
@@ -404,6 +449,9 @@ fn main() -> anyhow::Result<()> {
             )));
         }
         desktop::set_close_to_tray(now.close_to_tray);
+        if let Some(updater) = updater.as_ref() {
+            updater.set_enabled(now.check_updates);
+        }
         let _ = tx.send(Command::IoShown(io_shown(&app, app.get_tab())));
     });
     // Closing hides to the tray when the user asked for it; otherwise it quits.
@@ -527,15 +575,18 @@ fn main() -> anyhow::Result<()> {
 
     // Runs until "Quit" (tray menu) or closing the window when it does not hide to the tray.
     slint::run_event_loop_until_quit().context("running the event loop")?;
-    let _ = app.hide();
-    desktop::uninstall();
-    let _ = commands.send(Command::Quit);
-    // Last resort: whatever happens to the sampler, the process ends, releasing the single
-    // instance (a Vigie that never exits blocks every later launch, Ctrl+Shift+Esc included).
+    // Last resort, armed first: whatever happens to the sampler or the tray, the process ends
+    // (a Vigie that never exits holds the single instance and blocks every later launch,
+    // Ctrl+Shift+Esc included).
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(3));
         std::process::exit(0);
     });
+    let _ = commands.send(Command::Quit);
+    // A launch from now on starts a new Vigie instead of signalling this one.
+    update::release_instance();
+    let _ = app.hide();
+    desktop::uninstall();
     // The callbacks hold senders too: replace them so the sampler sees the channel close.
     drop(commands);
     app.on_sort_clicked(|_| {});

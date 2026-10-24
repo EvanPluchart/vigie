@@ -11,6 +11,8 @@ pub mod settings_file;
 mod taskmgr_windows;
 #[cfg(windows)]
 mod tray_windows;
+#[cfg(windows)]
+mod update_windows;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -74,6 +76,21 @@ pub mod desktop {
         }
     }
 
+    /// Opens an https page in the default browser.
+    pub fn open_url(url: &str) -> bool {
+        if !url.starts_with("https://") {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            crate::desktop_windows::open_url(url)
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+
     /// Opens the system's storage settings (Storage Sense on Windows).
     pub fn open_storage_settings() -> bool {
         #[cfg(windows)]
@@ -108,13 +125,30 @@ pub struct Instance {
     _inner: instance_windows::Instance,
 }
 
+/// A later launch asking for the window. Call `done` from the UI thread once the window is
+/// shown: a launch that gets no answer starts a Vigie of its own, in case this one hangs.
+#[derive(Debug)]
+pub struct ShowRequest {
+    #[cfg(windows)]
+    answer: std::sync::mpsc::Sender<()>,
+}
+
+impl ShowRequest {
+    pub fn done(self) {
+        #[cfg(windows)]
+        instance_windows::confirm_shown(self.answer);
+    }
+}
+
 /// Makes this process the single running Vigie: `Some` when it is the first, and `on_show` then
 /// runs (on another thread) whenever a later launch wants the window shown. `None` when Vigie
-/// already runs; it has been asked to show itself, and this process should exit.
-pub fn single_instance(on_show: impl Fn() + Send + Sync + 'static) -> Option<Instance> {
+/// already runs and showed itself: this process should exit. `Some` too when the running Vigie
+/// did not answer.
+pub fn single_instance(on_show: impl Fn(ShowRequest) + Send + Sync + 'static) -> Option<Instance> {
     #[cfg(windows)]
     {
-        instance_windows::acquire(Arc::new(on_show)).map(|inner| Instance { _inner: inner })
+        instance_windows::acquire(instance_windows::VIGIE, Arc::new(on_show))
+            .map(|inner| Instance { _inner: inner })
     }
     #[cfg(not(windows))]
     {
@@ -177,6 +211,99 @@ fn state_of(value: &str) -> ReplaceState {
         ReplaceState::On(path)
     } else {
         ReplaceState::Stale(path)
+    }
+}
+
+/// Updates from the app (decision 0012): the network and file steps, Windows only for now.
+/// Which version is newer and which checksum to expect is `vigie-core::update`'s part.
+pub mod update {
+    use std::path::{Path, PathBuf};
+
+    /// Whether this system can check for and install updates.
+    pub fn supported() -> bool {
+        cfg!(windows)
+    }
+
+    /// Where `url` redirects to, without following it.
+    pub fn redirect_of(url: &str) -> Result<String, String> {
+        #[cfg(windows)]
+        {
+            crate::update_windows::redirect_of(url)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = url;
+            Err("not supported on this system".into())
+        }
+    }
+
+    /// The text at `url` (a checksum list).
+    pub fn text(url: &str) -> Result<String, String> {
+        #[cfg(windows)]
+        {
+            crate::update_windows::text(url)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = url;
+            Err("not supported on this system".into())
+        }
+    }
+
+    /// Saves the file at `url` to `path`.
+    pub fn download(url: &str, path: &Path) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            crate::update_windows::download(url, path)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (url, path);
+            Err("not supported on this system".into())
+        }
+    }
+
+    /// The SHA-256 of the file at `path`.
+    pub fn sha256_file(path: &Path) -> Option<[u8; 32]> {
+        #[cfg(windows)]
+        {
+            crate::update_windows::sha256_file(path)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            None
+        }
+    }
+
+    /// This process runs with administrator rights: it must not run a downloaded installer.
+    pub fn is_elevated() -> bool {
+        #[cfg(windows)]
+        {
+            crate::update_windows::is_elevated()
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+
+    /// A new, empty folder for one download, under the temporary folder.
+    pub fn fresh_folder() -> Option<PathBuf> {
+        let base = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_nanos();
+        let dir = base.join(format!("vigie-update-{}-{stamp}", std::process::id()));
+        // `create_dir` fails if it exists: the folder is ours alone.
+        std::fs::create_dir(&dir).ok()?;
+        Some(dir)
+    }
+
+    /// Starts the installer at `path` with `args`, detached; this process should then quit.
+    pub fn start_installer(path: &Path, args: &[&str]) -> bool {
+        std::process::Command::new(path).args(args).spawn().is_ok()
     }
 }
 
@@ -313,6 +440,14 @@ impl Tray {
         }
     }
 
+    /// Whether the icon is on screen now (not while Explorer is down or restarting).
+    pub fn is_shown(&self) -> bool {
+        #[cfg(windows)]
+        return self.inner.is_shown();
+        #[cfg(not(windows))]
+        false
+    }
+
     /// Updates the hover text (truncated to what the system shows).
     pub fn set_tooltip(&self, tooltip: &str) {
         #[cfg(windows)]
@@ -371,11 +506,11 @@ fn clamp_into(area: Rect, x: i32, y: i32, width: i32, height: i32) -> (i32, i32)
     let margin = 8;
     let x = x.clamp(
         area.x + margin,
-        (area.x + area.width - width - margin).max(area.x),
+        (area.x + area.width - width - margin).max(area.x + margin),
     );
     let y = y.clamp(
         area.y + margin,
-        (area.y + area.height - height - margin).max(area.y),
+        (area.y + area.height - height - margin).max(area.y + margin),
     );
     (x, y)
 }
@@ -410,6 +545,8 @@ mod tests {
             (1592, 644)
         );
         assert_eq!(clamp_into(area, -50, -50, 320, 380), (8, 8));
+        // Larger than the area (a high-DPI panel on a small screen): pinned, never a panic.
+        assert_eq!(clamp_into(area, 500, 500, 4000, 3000), (8, 8));
     }
 
     /// Windows paths: only meaningful where the value is read.

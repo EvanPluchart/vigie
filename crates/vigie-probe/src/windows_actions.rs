@@ -4,7 +4,7 @@
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
 use windows_sys::Wdk::System::Threading::{
-    NtQueryInformationProcess, ProcessCommandLineInformation,
+    NtQueryInformationProcess, ProcessBreakOnTermination, ProcessCommandLineInformation,
 };
 use windows_sys::Win32::Foundation::{
     ERROR_INVALID_PARAMETER, FILETIME, GetLastError, GlobalFree, HANDLE,
@@ -17,7 +17,7 @@ use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 use windows_sys::Win32::System::Threading::{
     ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, GetProcessTimes, HIGH_PRIORITY_CLASS,
     IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS, OpenProcess, PROCESS_ACCESS_RIGHTS,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, PROCESS_SUSPEND_RESUME,
+    PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION, PROCESS_SUSPEND_RESUME,
     PROCESS_TERMINATE, SetPriorityClass, TerminateProcess,
 };
 
@@ -38,11 +38,13 @@ pub(crate) fn act(target: Target, action: Action) -> Result<()> {
     match action {
         Action::End => {
             let handle = open_verified(target, PROCESS_TERMINATE)?;
+            refuse_critical(target)?;
             // SAFETY: live handle with terminate rights.
             check(unsafe { TerminateProcess(handle.as_raw_handle(), 1) } != 0)
         }
         Action::Suspend => {
             let handle = open_verified(target, PROCESS_SUSPEND_RESUME)?;
+            refuse_critical(target)?;
             // SAFETY: live handle with suspend rights.
             nt(unsafe { NtSuspendProcess(handle.as_raw_handle()) })
         }
@@ -67,7 +69,7 @@ pub(crate) fn act(target: Target, action: Action) -> Result<()> {
             let handle = open_verified(target, 0)?;
             let exe = windows_exe::image_path(&handle).ok_or(ProbeError::Denied)?;
             // `/select,` opens the folder with the file highlighted.
-            std::process::Command::new("explorer.exe")
+            std::process::Command::new(crate::windows_exe::explorer())
                 .arg(format!("/select,{}", exe.display()))
                 .spawn()
                 .map(drop)
@@ -118,6 +120,35 @@ fn open_verified(target: Target, access: PROCESS_ACCESS_RIGHTS) -> Result<OwnedH
         return Err(ProbeError::Gone);
     }
     Ok(handle)
+}
+
+/// Refuses a process Windows marks critical (csrss, wininit, smss…): ending one stops the
+/// machine with a blue screen, suspending one freezes the session. Reading the mark needs full
+/// query rights; a process Vigie cannot query that far it cannot end or suspend either.
+pub(crate) fn refuse_critical(target: Target) -> Result<()> {
+    // SAFETY: plain call; null means failure and owns nothing.
+    let raw = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION, 0, target.pid) };
+    if raw.is_null() {
+        return Ok(());
+    }
+    // SAFETY: a fresh handle nothing else owns.
+    let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+    let mut critical = 0u32;
+    // SAFETY: live handle with query rights; a u32 out value of the size passed.
+    let status = unsafe {
+        NtQueryInformationProcess(
+            handle.as_raw_handle(),
+            ProcessBreakOnTermination,
+            (&raw mut critical).cast(),
+            4,
+            std::ptr::null_mut(),
+        )
+    };
+    if status == 0 && critical != 0 {
+        Err(ProbeError::Critical)
+    } else {
+        Ok(())
+    }
 }
 
 fn check(ok: bool) -> Result<()> {
@@ -197,6 +228,11 @@ fn set_clipboard(text: &str) -> Result<()> {
             return Err(ProbeError::Failed("out of memory".into()));
         }
         let target = GlobalLock(memory).cast::<u16>();
+        if target.is_null() {
+            GlobalFree(memory);
+            CloseClipboard();
+            return Err(ProbeError::Failed("out of memory".into()));
+        }
         std::ptr::copy_nonoverlapping(units.as_ptr(), target, units.len());
         GlobalUnlock(memory);
         let placed = !SetClipboardData(u32::from(CF_UNICODETEXT), memory).is_null();

@@ -704,8 +704,22 @@ impl Probe for WindowsProbe {
 
     fn details(&mut self, pids: &[Pid], out: &mut Vec<ProcDetails>) -> Result<()> {
         out.clear();
-        // Accounts of every process at once, services included, without opening them.
-        let owners = crate::windows_accounts::process_owners(&mut self.accounts);
+        // Accounts of every process at once, services included, without opening them: costly,
+        // so listed only once a process's own token cannot tell.
+        let mut owners: Option<std::collections::HashMap<Pid, Option<String>>> = None;
+        let accounts = &mut self.accounts;
+        let mut owner_of = |pid: Pid, handle: Option<&OwnedHandle>| {
+            if let Some(owner) =
+                handle.and_then(|h| crate::windows_accounts::token_owner(h, accounts))
+            {
+                return owner;
+            }
+            owners
+                .get_or_insert_with(|| crate::windows_accounts::process_owners(accounts))
+                .get(&pid)
+                .cloned()
+                .flatten()
+        };
         for &pid in pids {
             // The handle kept for sampling, or a short-lived one (fallback mode keeps none).
             let entry = self.entries.get(&pid);
@@ -723,7 +737,7 @@ impl Probe for WindowsProbe {
                                 start_time: entry.map_or(0, |e| e.start_time),
                                 exe: None,
                                 command_line: Vec::new(),
-                                user: owners.get(&pid).cloned().flatten(),
+                                user: owner_of(pid, None),
                             });
                             continue;
                         }
@@ -736,7 +750,7 @@ impl Probe for WindowsProbe {
                 exe: windows_exe::image_path(handle),
                 // Read on demand (it means reading the other process's memory), not here.
                 command_line: Vec::new(),
-                user: owners.get(&pid).cloned().flatten(),
+                user: owner_of(pid, Some(handle)),
             });
         }
         Ok(())
@@ -783,6 +797,10 @@ impl Probe for WindowsProbe {
 
     fn act(&mut self, target: crate::Target, action: crate::Action) -> Result<()> {
         crate::windows_actions::act(target, action)
+    }
+
+    fn is_critical(&mut self, target: crate::Target) -> bool {
+        crate::windows_actions::refuse_critical(target).is_err()
     }
 
     fn system(&mut self, out: &mut crate::SystemSample) -> Result<()> {

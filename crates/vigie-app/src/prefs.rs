@@ -124,6 +124,9 @@ impl Prefs {
         if now.close_to_tray != before.close_to_tray {
             saved.close_to_tray = now.close_to_tray;
         }
+        if now.check_updates != before.check_updates {
+            saved.check_updates = now.check_updates;
+        }
         self.shown = now;
         if saved != self.saved {
             self.saved = saved;
@@ -166,6 +169,7 @@ pub fn show(app: &AppWindow, s: &Settings) {
     app.set_setting_cpu_minutes(index_of(&CPU_ALERT_MINUTES, s.cpu_alert_minutes, 1) as i32);
     app.set_setting_memory_alert(index_of(&MEMORY_ALERTS, s.memory_alert, 2) as i32);
     app.set_setting_close_to_tray(s.close_to_tray);
+    app.set_setting_check_updates(s.check_updates);
 }
 
 fn column_set(c: &Columns) -> ColumnSet {
@@ -256,6 +260,7 @@ pub fn read(app: &AppWindow, session: &Settings) -> Settings {
             session.memory_alert,
         ),
         close_to_tray: app.get_setting_close_to_tray(),
+        check_updates: app.get_setting_check_updates(),
     }
 }
 

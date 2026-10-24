@@ -1,7 +1,7 @@
 //! Small desktop actions on Windows: the clipboard, the file manager, a file's Properties dialog
 //! and the default browser.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Foundation::{GlobalFree, HWND};
 use windows_sys::Win32::System::DataExchange::{
@@ -16,6 +16,13 @@ use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
+}
+
+/// explorer.exe in the Windows folder. A bare `explorer.exe` would be looked up in Vigie's own
+/// folder first, where anything named so would run instead.
+fn explorer() -> PathBuf {
+    let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    PathBuf::from(windows).join("explorer.exe")
 }
 
 pub(crate) fn copy_text(text: &str) -> bool {
@@ -33,6 +40,11 @@ pub(crate) fn copy_text(text: &str) -> bool {
             return false;
         }
         let target = GlobalLock(memory).cast::<u16>();
+        if target.is_null() {
+            GlobalFree(memory);
+            CloseClipboard();
+            return false;
+        }
         std::ptr::copy_nonoverlapping(units.as_ptr(), target, units.len());
         GlobalUnlock(memory);
         let placed = !SetClipboardData(u32::from(CF_UNICODETEXT), memory).is_null();
@@ -46,7 +58,7 @@ pub(crate) fn copy_text(text: &str) -> bool {
 
 pub(crate) fn reveal(path: &Path) -> bool {
     // `/select,` opens the folder with the file highlighted.
-    std::process::Command::new("explorer.exe")
+    std::process::Command::new(explorer())
         .arg(format!("/select,{}", path.display()))
         .spawn()
         .is_ok()

@@ -4773,7 +4773,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vigie"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "flume",
@@ -4787,14 +4787,14 @@ dependencies = [
 
 [[package]]
 name = "vigie-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "vigie-probe",
 ]
 
 [[package]]
 name = "vigie-probe"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "criterion",
  "sysinfo",
@@ -4804,7 +4804,7 @@ dependencies = [
 
 [[package]]
 name = "vigie-shell"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -5708,7 +5708,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "sysinfo",

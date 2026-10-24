@@ -166,6 +166,9 @@ impl Notice {
     pub const TASKMGR_OFF: i32 = 18;
     pub const TASKMGR_CANCELLED: i32 = 19;
     pub const TASKMGR_FAILED: i32 = 20;
+    /// 21 and 22 are the clipboard notices of `desktop.rs`.
+    pub const CRITICAL: i32 = 23;
+    pub const SELF_SUSPEND: i32 = 24;
 }
 fn proc_row(row: &Row) -> ProcRow {
     let pid = i32::try_from(row.pid).unwrap_or(i32::MAX);
@@ -1249,8 +1252,12 @@ fn refresh_selection(app: &AppWindow, model: &VecModel<ProcRow>) {
     if !app.get_has_selection() {
         return;
     }
-    let key = app.get_selected().key;
-    match model.iter().find(|r| r.kind != KIND_GROUP && r.key == key) {
+    let selected = app.get_selected();
+    // Same key and same start: a new process reusing the PID is not the one selected.
+    match model
+        .iter()
+        .find(|r| r.kind != KIND_GROUP && r.key == selected.key && r.start == selected.start)
+    {
         Some(row) => app.set_selected(row),
         None => app.set_has_selection(false),
     }
@@ -1391,6 +1398,8 @@ pub fn user_rows_ui(
                 file: member.file.as_str().into(),
                 path: member.path.as_deref().unwrap_or_default().into(),
                 icon: icon_index(member.icon),
+                tree_size: i32::try_from(member.tree_size).unwrap_or(i32::MAX),
+                own: member.own,
                 ..UserRowUi::default()
             });
         }

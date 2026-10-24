@@ -12,7 +12,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     DeleteObject, GetDIBits, GetObjectW, HBITMAP,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    GetDriveTypeW, GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
 };
 use windows_sys::Win32::System::LibraryLoader::{
     EnumResourceNamesW, FindResourceW, LOAD_LIBRARY_AS_DATAFILE, LOAD_LIBRARY_AS_IMAGE_RESOURCE,
@@ -29,6 +29,13 @@ use crate::{ExeInfo, Icon};
 
 fn wide(path: &Path) -> Vec<u16> {
     path.as_os_str().encode_wide().chain(Some(0)).collect()
+}
+
+/// explorer.exe in the Windows folder. A bare `explorer.exe` would be looked up in Vigie's own
+/// folder first, where anything named so would run instead.
+pub(crate) fn explorer() -> PathBuf {
+    let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    PathBuf::from(windows).join("explorer.exe")
 }
 
 /// Full path of a process's executable, from a handle with query rights.
@@ -49,12 +56,36 @@ pub(crate) fn image_path(handle: &OwnedHandle) -> Option<PathBuf> {
 
 /// `size` is the icon's side in physical pixels; the closest size the file offers is used.
 pub(crate) fn exe_info(exe: &Path, size: u32) -> ExeInfo {
+    // A file on a network share (a startup entry can name one) is not read: opening it would
+    // connect to that machine and send it the user's Windows credentials.
+    if is_remote(exe) {
+        return ExeInfo::default();
+    }
     let path = wide(exe);
     let (publisher, description) = version_strings(&path);
     ExeInfo {
         icon: icon(&path, size),
         publisher,
         description,
+    }
+}
+
+/// A UNC path (`\\server\share\…`, not `\\?\C:\…`) or a mapped network drive.
+fn is_remote(exe: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    // GetDriveTypeW's answer for a network drive (in a windows-sys module not enabled here).
+    const DRIVE_REMOTE: u32 = 4;
+    match exe.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::UNC(..) | Prefix::VerbatimUNC(..) => true,
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                let root = [u16::from(letter), u16::from(b':'), u16::from(b'\\'), 0];
+                // SAFETY: a NUL-terminated drive root.
+                unsafe { GetDriveTypeW(root.as_ptr()) == DRIVE_REMOTE }
+            }
+            _ => false,
+        },
+        _ => false,
     }
 }
 
