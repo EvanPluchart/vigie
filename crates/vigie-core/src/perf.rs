@@ -127,6 +127,8 @@ pub struct Performance {
     pub sent: History,
     /// Active share per disk, by position in the last sample.
     pub disks: Vec<History>,
+    /// The disk number each of `disks` belongs to.
+    disk_ids: Vec<u32>,
     /// Busiest-engine share per GPU, by index.
     pub gpus: Vec<History>,
     prev_gpus: Vec<GpuCounters>,
@@ -146,6 +148,7 @@ impl Default for Performance {
             received: History::new(&SYSTEM_TIERS),
             sent: History::new(&SYSTEM_TIERS),
             disks: Vec::new(),
+            disk_ids: Vec::new(),
             gpus: Vec::new(),
             prev_gpus: Vec::new(),
             prev_gpus_at_ns: 0,
@@ -217,9 +220,23 @@ impl Performance {
             self.sent.record(at, tx as f32);
         }
 
-        // Disks: matched by number, so a disk plugged in mid-run starts without a value.
-        self.disks
-            .resize_with(sample.disks.len(), || History::new(&SYSTEM_TIERS));
+        // Disks: matched by number, so a disk plugged in mid-run starts without a value, and a
+        // disk removed from the middle of the list leaves the others their own history.
+        if !self.disk_ids.iter().copied().eq(sample.disks.iter().map(|d| d.index)) {
+            let mut old: Vec<(u32, History)> = self
+                .disk_ids
+                .drain(..)
+                .zip(self.disks.drain(..))
+                .collect();
+            for disk in &sample.disks {
+                let history = match old.iter().position(|(id, _)| *id == disk.index) {
+                    Some(at) => old.swap_remove(at).1,
+                    None => History::new(&SYSTEM_TIERS),
+                };
+                self.disks.push(history);
+                self.disk_ids.push(disk.index);
+            }
+        }
         for (i, now) in sample.disks.iter().enumerate() {
             let before = self.prev_disks.iter().find(|d| d.index == now.index);
             let mut view = DiskView {
@@ -346,6 +363,34 @@ mod tests {
             uptime_s: 1,
             ..SystemSample::default()
         }
+    }
+
+    /// A disk removed from the middle of the list: the one after it keeps its own history.
+    #[test]
+    fn disk_histories_follow_their_disk() {
+        let disk = |index, active_ns, at| DiskCounters {
+            index,
+            letters: 0,
+            read_bytes: 0,
+            written_bytes: 0,
+            active_ns,
+            clock_ns: at,
+        };
+        let with = |at: u64, disks: Vec<DiskCounters>| SystemSample {
+            disks,
+            ..system(at, [0, 0], (0, 0), (0, 0, 0))
+        };
+        let mut perf = Performance::default();
+        perf.update(&with(SEC, vec![disk(0, 0, SEC), disk(1, 0, SEC)]));
+        // Disk 0 idle, disk 1 fully busy.
+        perf.update(&with(2 * SEC, vec![disk(0, 0, 2 * SEC), disk(1, SEC, 2 * SEC)]));
+        assert_eq!(perf.disks[1].last(), Some(100.0));
+        // Disk 0 unplugged: disk 1 is now first, with its own history.
+        perf.update(&with(3 * SEC, vec![disk(1, 2 * SEC, 3 * SEC)]));
+        assert_eq!(perf.disks.len(), 1);
+        // Busy over both seconds: disk 0's idle second did not end up in its graph.
+        let (mean, _) = perf.disks[0].mean_over(3 * SEC, 5).expect("recorded");
+        assert_eq!(mean, 100.0);
     }
 
     #[test]

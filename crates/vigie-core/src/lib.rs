@@ -486,10 +486,16 @@ impl Core {
 
         let filter = self.filter.as_str();
         let details = &self.details;
+        let file_names = self.file_names;
         let tree = tree::build(
             &nodes,
             sample.shell_pid,
             &|p| matches_filter(p, details.get(&(p.pid, p.start_time)), filter),
+            &|p| {
+                (!file_names)
+                    .then(|| details.get(&(p.pid, p.start_time))?.description.as_deref())
+                    .flatten()
+            },
             self.sort,
             &self.expanded,
             &self.collapsed_groups,
@@ -1106,6 +1112,37 @@ mod tests {
             ("App Deluxe", "app")
         );
         assert_eq!(app.path.as_deref(), Some(r"C:\Apps\app.exe"));
+    }
+
+    #[test]
+    fn name_sort_follows_the_names_shown() {
+        let mut processes = desktop();
+        processes.push(ProcSample {
+            parent: Some(10),
+            session: Some(1),
+            has_window: true,
+            ..proc(50, 100, "zeta", 0, 1)
+        });
+        let mut core = Core::new(
+            Sort {
+                key: SortKey::Name,
+                ascending: true,
+            },
+            "",
+        );
+        let named = |description: &str| Details {
+            description: Some(description.into()),
+            ..Details::default()
+        };
+        // app.exe shows as "Zebra", zeta.exe as "Alpha": Alpha comes first.
+        core.set_details((20, 100), named("Zebra"));
+        core.set_details((50, 100), named("Alpha"));
+        let order = pids(&core.update(&Sample {
+            shell_pid: Some(10),
+            ..sample(SEC, processes)
+        }));
+        let at = |pid| order.iter().position(|&p| p == pid).unwrap();
+        assert!(at(50) < at(20), "{order:?}");
     }
 
     #[test]

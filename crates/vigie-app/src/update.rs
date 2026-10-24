@@ -37,8 +37,9 @@ const TEST_RUN: i32 = 6;
 
 const EVERY: Duration = Duration::from_secs(6 * 3600);
 
-/// Installer flags: no wizard, no prompts, and Vigie started again at the end (`vigie.iss`).
-const INSTALLER_ARGS: [&str; 4] = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/relaunch=1"];
+/// Installer flags: no window at all (not even progress), no prompts, and Vigie started again
+/// at the end (`vigie.iss`).
+const INSTALLER_ARGS: [&str; 4] = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/relaunch=1"];
 
 /// An error to show: its kind (worded by the UI) and a technical detail.
 type Failure = (i32, String);
