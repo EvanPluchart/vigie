@@ -331,6 +331,12 @@ msgstr "« {} » copié"
 msgid "Could not copy: the clipboard is busy"
 msgstr "Copie impossible : le presse-papiers est occupé"
 
+msgid "Windows needs {} (PID {}) to keep running: Vigie will not end or suspend it."
+msgstr "Windows a besoin de {} (PID {}) pour fonctionner : Vigie ne l’arrêtera pas et ne le suspendra pas."
+
+msgid "Vigie cannot suspend itself: nothing would be left to resume it."
+msgstr "Vigie ne peut pas se suspendre lui-même : plus rien ne pourrait le reprendre."
+
 msgid "Search name, PID or publisher (Ctrl+F)"
 msgstr "Nom, PID ou éditeur (Ctrl+F)"
 

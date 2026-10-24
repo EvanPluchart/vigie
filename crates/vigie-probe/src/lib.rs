@@ -55,6 +55,9 @@ pub enum ProbeError {
     /// A service cannot stop while services that depend on it run.
     #[error("other services depend on it")]
     DependentsRunning,
+    /// Windows stops (blue screen) if this process ends: Vigie will not end or suspend it.
+    #[error("a critical system process")]
+    Critical,
     #[error("{0}")]
     Failed(String),
 }

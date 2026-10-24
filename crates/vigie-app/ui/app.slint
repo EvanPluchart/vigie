@@ -1102,13 +1102,15 @@ export component AppWindow inherits Window {
             : root.notice-kind == 20 ? @tr("Could not change what Ctrl+Shift+Esc opens")
             : root.notice-kind == 21 ? @tr("Copied “{}”", root.notice-name)
             : root.notice-kind == 22 ? @tr("Could not copy: the clipboard is busy")
+            : root.notice-kind == 23 ? @tr("Windows needs {} (PID {}) to keep running: Vigie will not end or suspend it.", root.notice-name, root.notice-pid)
+            : root.notice-kind == 24 ? @tr("Vigie cannot suspend itself: nothing would be left to resume it.")
             : "";
     }
 
     // Notices that report a failure (see src/model.rs for the codes).
     function notice-failed() -> bool {
         return (root.notice-kind >= 7 && root.notice-kind <= 9) || (root.notice-kind >= 14 && root.notice-kind <= 16)
-            || (root.notice-kind >= 19 && root.notice-kind <= 20) || root.notice-kind == 22;
+            || (root.notice-kind >= 19 && root.notice-kind <= 20) || root.notice-kind >= 22;
     }
 
     function clear-search() {
@@ -1432,8 +1434,10 @@ export component AppWindow inherits Window {
                                     if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
                                         root.select(row);
                                     }
+                                    // A tick may reorder rows between press and release: act on
+                                    // the process selected on press, which follows its key.
                                     if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
-                                        root.menu-row = row;
+                                        root.menu-row = root.has-selection ? root.selected : row;
                                         root.open-menu(1, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                                     }
                                 }
@@ -1577,7 +1581,7 @@ export component AppWindow inherits Window {
                 total-memory: root.total-memory;
                 toggle(session) => { root.user-toggled(session); }
                 menu(row, x, y) => {
-                    root.menu-row = { key: row.pid * 2, kind: 1, name: row.name, pid: row.pid, start: row.start, file: row.file, path: row.path };
+                    root.menu-row = { key: row.pid * 2, kind: 1, name: row.name, pid: row.pid, start: row.start, file: row.file, path: row.path, tree-size: row.tree-size, own: row.own };
                     root.open-menu(1, x, y);
                 }
             }
@@ -1785,7 +1789,8 @@ export component AppWindow inherits Window {
                     root.menu-sub-index = MenuNav.next(root.submenu-items(root.menu-sub), -1, 1);
                     return accept;
                 }
-                if ((event.text == Key.Return || event.text == " ") && index >= 0 && index < items.length) {
+                if ((event.text == Key.Return || event.text == " ") && index >= 0 && index < items.length
+                    && !items[index].disabled && !items[index].hidden) {
                     root.run-menu(items[index].id);
                     return accept;
                 }

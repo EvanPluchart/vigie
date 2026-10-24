@@ -317,6 +317,8 @@ FR = {
     "Collapse all": "Réduire tout",
     "Copied “{}”": "« {} » copié",
     "Could not copy: the clipboard is busy": "Copie impossible : le presse-papiers est occupé",
+    "Windows needs {} (PID {}) to keep running: Vigie will not end or suspend it.": "Windows a besoin de {} (PID {}) pour fonctionner : Vigie ne l’arrêtera pas et ne le suspendra pas.",
+    "Vigie cannot suspend itself: nothing would be left to resume it.": "Vigie ne peut pas se suspendre lui-même : plus rien ne pourrait le reprendre.",
     "User": "Utilisateur",
     "({} processes)": "({} processus)",
     "Disconnected": "Déconnecté",

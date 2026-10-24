@@ -393,12 +393,17 @@ fn execute(
     let failure = |error: ProbeError| match error {
         ProbeError::Gone => notice(Notice::GONE, 0),
         ProbeError::Denied => notice(Notice::DENIED, 0),
+        ProbeError::Critical => notice(Notice::CRITICAL, 0),
         _ => notice(Notice::FAILED, 0),
     };
     // The PID must still name the process the user saw.
     let Some(target) = core.identify(pid, start_low_bits) else {
         return notice(Notice::GONE, 0);
     };
+    // Suspending Vigie would freeze this thread too, with nothing left to resume it.
+    if target.pid == sample.self_pid && matches!(action, UserAction::Probe(Action::Suspend)) {
+        return notice(Notice::SELF_SUSPEND, 0);
+    }
     match action {
         UserAction::End => match probe.act(target, Action::End) {
             Ok(()) => notice(Notice::ENDED, 0),
@@ -408,18 +413,25 @@ fn execute(
             // Children first, so none is orphaned and restarted by its parent meanwhile.
             let tree = core.subtree(target);
             let mut first_error = None;
+            let mut children_ended = 0;
+            let mut target_gone = false;
             for member in &tree {
                 match probe.act(*member, Action::End) {
+                    Ok(()) if *member != target => children_ended += 1,
+                    Ok(()) => {}
                     // A child may exit on its own while its siblings are ended.
-                    Ok(()) | Err(ProbeError::Gone) => {}
+                    // Neither do critical children (left running) stop the rest.
+                    Err(ProbeError::Gone | ProbeError::Critical) if *member != target => {}
+                    Err(ProbeError::Gone) => target_gone = true,
                     Err(error) => {
                         first_error.get_or_insert(error);
                     }
                 }
             }
             match first_error {
-                None => notice(Notice::ENDED_TREE, tree.len().saturating_sub(1)),
                 Some(error) => failure(error),
+                None if target_gone && children_ended == 0 => notice(Notice::GONE, 0),
+                None => notice(Notice::ENDED_TREE, children_ended),
             }
         }
         UserAction::Probe(action) => match probe.act(target, action) {

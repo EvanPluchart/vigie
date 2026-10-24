@@ -158,6 +158,7 @@ export component Graph inherits Rectangle {
             // NaN is the only value not equal to itself: a gap in the history.
             text: (tip.v == tip.v ? Format.value(tip.v, root.unit) : "—")
                 + (root.data.second-values.length > root.hovered
+                    && root.data.second-values[root.hovered] == root.data.second-values[root.hovered]
                     ? " · " + Format.value(root.data.second-values[root.hovered], root.unit) : "")
                 + " · " + Format.ago(tip.age);
             color: Theme.text;

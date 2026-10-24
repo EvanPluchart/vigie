@@ -108,11 +108,16 @@ fn main() -> anyhow::Result<()> {
         app.invoke_show_about();
     }
 
-    // The sampler stops once every sender is dropped.
+    // The sampler stops on Command::Quit, sent once the event loop ends.
     let (commands, receiver) = flume::unbounded::<Command>();
 
     // Processes and Details each keep their own sort: [processes, details].
-    let sorts = Rc::new(Cell::new([options.sort, Sort::default()]));
+    // The sort asked on the command line applies to the table it opens on.
+    let sorts = Rc::new(Cell::new(if options.tab == 7 {
+        [Sort::default(), options.sort]
+    } else {
+        [options.sort, Sort::default()]
+    }));
     let table = |tab: i32| usize::from(tab == 7);
     let (weak, tx, sorts_clicked) = (app.as_weak(), commands.clone(), sorts.clone());
     app.on_sort_clicked(move |column| {

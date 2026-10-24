@@ -43,7 +43,8 @@ impl Key {
         let mut out = Vec::new();
         let mut name = vec![0u16; 16_384];
         let mut data = vec![0u8; 4096];
-        for index in 0.. {
+        let mut index = 0;
+        loop {
             let mut name_len = name.len() as u32;
             let mut data_len = data.len() as u32;
             let mut kind = 0u32;
@@ -60,11 +61,20 @@ impl Key {
                     &mut data_len,
                 )
             };
-            if code != ERROR_SUCCESS {
-                // ERROR_NO_MORE_ITEMS, or a value too large to be a command: stop or skip.
-                if code == windows_sys::Win32::Foundation::ERROR_MORE_DATA {
+            if code == windows_sys::Win32::Foundation::ERROR_MORE_DATA {
+                // A long value (a command padded past 4 KB would otherwise hide from this
+                // list): read it again with room for it. The name buffer is already the
+                // registry's maximum.
+                let needed = data_len as usize;
+                if needed > data.len() && needed <= 1 << 20 {
+                    data.resize(needed, 0);
                     continue;
                 }
+                index += 1;
+                continue;
+            }
+            if code != ERROR_SUCCESS {
+                // ERROR_NO_MORE_ITEMS.
                 break;
             }
             out.push((
@@ -72,6 +82,7 @@ impl Key {
                 kind,
                 data[..data_len as usize].to_vec(),
             ));
+            index += 1;
         }
         out
     }
