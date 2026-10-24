@@ -121,6 +121,16 @@ fn main() -> anyhow::Result<()> {
     app.on_taskmgr_toggled(move |on| desktop::request_replace(weak.clone(), on));
     let weak = app.as_weak();
     app.on_taskmgr_repair(move || desktop::request_replace(weak.clone(), false));
+    let weak = app.as_weak();
+    app.on_taskmgr_secure(move || desktop::request_replace(weak.clone(), true));
+    // Just updated, with Ctrl+Shift+Esc on: its copy (or 0.1.4's exposed path) catches up now,
+    // with one administrator prompt (decision 0011).
+    if options.updated
+        && app.get_taskmgr_installed()
+        && (app.get_taskmgr_state() == 5 || app.get_taskmgr_outdated())
+    {
+        desktop::request_replace(app.as_weak(), true);
+    }
     desktop::set_close_to_tray(session.close_to_tray);
     app.set_rows(ModelRc::from(Rc::new(VecModel::<ProcRow>::default())));
     app.set_icons(ModelRc::from(Rc::new(VecModel::<slint::Image>::default())));

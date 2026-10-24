@@ -162,8 +162,12 @@ pub fn single_instance(on_show: impl Fn(ShowRequest) + Send + Sync + 'static) ->
 pub enum ReplaceState {
     /// Task Manager itself.
     Off,
-    /// Vigie, at this path.
+    /// Vigie, at this path: the copy in Program Files (decision 0011).
     On(PathBuf),
+    /// Vigie at a path any program of the user can write to (0.1.4 and older pointed at the
+    /// per-user install). Windows starts it with administrator rights without asking: turning
+    /// the option on again moves it to Program Files.
+    Exposed(PathBuf),
     /// A Vigie that no longer exists at this path: Task Manager cannot start at all.
     Stale(PathBuf),
     /// Another program (Process Explorer, say).
@@ -315,11 +319,51 @@ pub mod taskmgr {
     pub fn state() -> ReplaceState {
         #[cfg(windows)]
         {
-            super::taskmgr_windows::state()
+            match super::taskmgr_windows::state() {
+                ReplaceState::On(path) if !is_machine_copy(&path) => ReplaceState::Exposed(path),
+                state => state,
+            }
         }
         #[cfg(not(windows))]
         {
             ReplaceState::Off
+        }
+    }
+
+    /// Whether `path` is the copy in Program Files.
+    #[cfg(windows)]
+    fn is_machine_copy(path: &std::path::Path) -> bool {
+        super::taskmgr_windows::machine_path().is_some_and(|copy| {
+            copy.to_string_lossy()
+                .eq_ignore_ascii_case(&path.to_string_lossy())
+        })
+    }
+
+    /// The copy in Program Files is not the installed Vigie's file (an update came since):
+    /// Ctrl+Shift+Esc still opens the older version until it is refreshed.
+    pub fn copy_outdated() -> bool {
+        #[cfg(windows)]
+        {
+            let (Some(copy), Some(installed)) = (
+                super::taskmgr_windows::machine_path(),
+                super::taskmgr_windows::installed_path(),
+            ) else {
+                return false;
+            };
+            // A copy keeps its source's size and modification time.
+            let stamp = |p: &std::path::Path| {
+                std::fs::metadata(p)
+                    .ok()
+                    .map(|m| (m.len(), m.modified().ok()))
+            };
+            match (stamp(&copy), stamp(&installed)) {
+                (Some(copy), Some(installed)) => copy != installed,
+                _ => false,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            false
         }
     }
 
@@ -367,15 +411,28 @@ pub mod taskmgr {
         }
     }
 
-    /// In the elevated copy: writes or removes the value. On names the installed Vigie only.
+    /// In the elevated helper: on, copies this Vigie (the installed one the user started the
+    /// helper from) to Program Files and points the value there; off, removes both.
     pub fn apply(on: bool) -> Result<(), ReplaceError> {
         #[cfg(windows)]
         {
+            let copy = super::taskmgr_windows::machine_path().ok_or(ReplaceError::Failed(0))?;
             if on {
-                let installed = installed().ok_or(ReplaceError::NotInstalled)?;
-                super::taskmgr_windows::write(Some(&installed))
+                let source = std::env::current_exe().map_err(|_| ReplaceError::Failed(0))?;
+                if !source
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("vigie.exe"))
+                {
+                    return Err(ReplaceError::NotInstalled);
+                }
+                if !is_machine_copy(&source) {
+                    super::taskmgr_windows::install_copy(&source, &copy)?;
+                }
+                super::taskmgr_windows::write(Some(&copy))
             } else {
-                super::taskmgr_windows::write(None)
+                super::taskmgr_windows::write(None)?;
+                super::taskmgr_windows::remove_copy(&copy);
+                Ok(())
             }
         }
         #[cfg(not(windows))]

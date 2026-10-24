@@ -1,6 +1,6 @@
 # 0011 — Replacing Task Manager safely
 
-Status: proposed, 2026-10-24. Awaits the author's choice; amends decision 0009 once accepted.
+Status: accepted, 2026-10-24: option A, in 0.1.5. Amends decision 0009.
 
 ## Context
 
@@ -33,7 +33,19 @@ Decision 0009 points the machine-wide `Debugger` value of `taskmgr.exe` (HKLM, I
 
 * Warn in Settings that the option weakens UAC and affects other accounts. The risks above stay.
 
-## Already done on `dev` for the next release, whatever the choice
+## As built (0.1.5)
+
+* **The copy:** `Program Files\Vigie\vigie.exe`, the folder taken from Windows (`SHGetKnownFolderPath`), not from `%ProgramFiles%`, which a user can redefine for their account. It inherits Program Files' permissions: only administrators can change it.
+* **Turning it on** (the elevated helper): copies the Vigie that started it (the installed one) there, then points the `Debugger` value at it.
+  * A copy that is running (a Vigie opened with Ctrl+Shift+Esc) cannot be overwritten. It is renamed aside and deleted on a later run.
+* **Turning it off:** deletes the value, then the copy and its folder.
+* **0.1.4 and older pointed at the per-user install.** Vigie reports that state as exposed: a warning in Settings, a dot on the rail, and a "Secure" button that turns the option on again, moving it to the copy.
+* **After an update:** the copy keeps its source's size and modification time, so a difference means it is older than the installed Vigie.
+  * Settings then offers to update it.
+  * A Vigie that the installer started again after an update from the app (`--updated`) asks right away, with one administrator prompt. The exposed path of 0.1.4 is secured the same way.
+* **An elevated Vigie** (the copy) never runs a downloaded installer (decision 0012).
+
+## Already done in 0.1.2
 
 * A launch that the running Vigie does not answer within 2.5 s starts its own window. A hung Vigie, or a program holding the single-instance mutex, can no longer swallow Ctrl+Shift+Esc.
 * A bare `taskmgr` typed in a console opens Vigie instead of exiting.

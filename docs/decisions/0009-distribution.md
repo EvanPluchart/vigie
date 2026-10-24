@@ -31,7 +31,7 @@ M6 ships Vigie on three systems. Two things decided with the author shape it:
 
 ### Replacing Task Manager (Windows)
 
-* **Mechanism:** `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\taskmgr.exe`, value `Debugger` = `"<installed vigie.exe>"`. It is the mechanism Process Explorer uses.
+* **Mechanism:** `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\taskmgr.exe`, value `Debugger` = `"<installed vigie.exe>"`. It is the mechanism Process Explorer uses. Since 0.1.5 it names a copy in Program Files instead (decision 0011).
 * **What Windows then does:** starting `taskmgr.exe`, including through Ctrl+Shift+Esc and the taskbar menu, starts Vigie instead, with the path of `taskmgr.exe` and its flags as arguments. Vigie accepts and ignores a leading argument that names `taskmgr.exe`, and what follows it.
 * **Turning it on or off:**
   * needs one UAC prompt: Vigie relaunches itself elevated with `--set-replace-taskmgr=on|off`, which writes or deletes the value and exits;

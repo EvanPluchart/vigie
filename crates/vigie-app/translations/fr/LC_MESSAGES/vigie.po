@@ -799,8 +799,20 @@ msgstr "Un autre programme s’ouvre à la place du Gestionnaire des tâches : {
 msgid "Available once Vigie is installed."
 msgstr "Disponible une fois Vigie installé."
 
-msgid "Replaces Task Manager for every account on this computer. Asks for administrator rights; turn it off here at any time. Uninstalling Vigie turns it off."
-msgstr "Remplace le Gestionnaire des tâches pour tous les comptes de cet ordinateur. Demande les droits administrateur ; désactivez-le ici à tout moment. Désinstaller Vigie le désactive."
+msgid "Replaces Task Manager for every account on this computer, with a copy of Vigie in Program Files that only administrators can change. Asks for administrator rights; turn it off here at any time. Uninstalling Vigie turns it off."
+msgstr "Remplace le Gestionnaire des tâches pour tous les comptes de cet ordinateur, avec une copie de Vigie dans Program Files que seuls les administrateurs peuvent modifier. Demande les droits d’administrateur ; désactivable ici à tout moment. Désinstaller Vigie le désactive."
+
+msgid "Ctrl+Shift+Esc opens Vigie with administrator rights from a folder any program can write to. Secure it: Vigie moves it to Program Files (one administrator prompt)."
+msgstr "Ctrl+Maj+Échap ouvre Vigie avec les droits d’administrateur depuis un dossier que n’importe quel programme peut modifier. Sécurisez-le : Vigie le déplace dans Program Files (une demande administrateur)."
+
+msgid "Ctrl+Shift+Esc still opens the previous version of Vigie."
+msgstr "Ctrl+Maj+Échap ouvre encore la version précédente de Vigie."
+
+msgid "Secure"
+msgstr "Sécuriser"
+
+msgid "Update it"
+msgstr "Mettre à jour"
 
 msgid "Ctrl+Shift+Esc points to a Vigie that no longer exists ({}): Task Manager cannot open. Repair it to give Ctrl+Shift+Esc back to Task Manager."
 msgstr "Ctrl+Maj+Échap pointe vers un Vigie qui n’existe plus ({}) : le Gestionnaire des tâches ne peut pas s’ouvrir. Réparez pour rendre Ctrl+Maj+Échap au Gestionnaire des tâches."

@@ -430,6 +430,8 @@ component Rail inherits Rectangle {
     in property <int> badge;
     // A newer version is out: a dot on Settings.
     in property <bool> update-available;
+    // Something in Settings needs a look (Ctrl+Shift+Esc to secure or refresh): a warning dot.
+    in property <bool> settings-attention;
     callback selected(int);
     width: 52px;
     background: Theme.surface;
@@ -529,7 +531,7 @@ component Rail inherits Rectangle {
                 // Two sliders.
                 icon: "M 4 8 L 20 8 M 4 16 L 20 16 M 9 5 L 9 11 M 15 13 L 15 19";
                 active: root.tab == 6;
-                badge: root.update-available ? 3 : 0;
+                badge: root.update-available ? 3 : root.settings-attention ? 1 : 0;
                 clicked => { root.selected(6); }
             }
         }
@@ -724,9 +726,13 @@ export component AppWindow inherits Window {
     in property <string> settings-path;
     callback settings-edited();
     in property <string> app-version;
-    // Replacing Task Manager (decision 0009): 0 off, 1 Vigie, 2 a Vigie that no longer exists,
-    // 3 another program, 4 not on this system.
+    // Replacing Task Manager (decisions 0009, 0011): 0 off, 1 Vigie (the copy in Program Files),
+    // 2 a Vigie that no longer exists, 3 another program, 4 not on this system, 5 Vigie at a
+    // path any program can write to (0.1.4 and older).
     in property <int> taskmgr-state;
+    // The copy in Program Files is older than the installed Vigie.
+    in property <bool> taskmgr-outdated;
+    callback taskmgr-secure();
     in property <string> taskmgr-path;
     in property <bool> taskmgr-installed;
     callback taskmgr-toggled(bool);
@@ -1205,6 +1211,7 @@ export component AppWindow inherits Window {
                 tab: root.tab;
                 badge: root.diagnostics-badge;
                 update-available: root.update-state == 3;
+                settings-attention: root.taskmgr-state == 5 || root.taskmgr-outdated;
                 selected(index) => { root.show-tab(index); }
             }
             Rectangle {
@@ -1709,6 +1716,8 @@ export component AppWindow inherits Window {
                 taskmgr-installed: root.taskmgr-installed;
                 taskmgr-toggled(on) => { root.taskmgr-toggled(on); }
                 taskmgr-repair => { root.taskmgr-repair(); }
+                taskmgr-outdated: root.taskmgr-outdated;
+                taskmgr-secure => { root.taskmgr-secure(); }
             }
 
             if root.tab == 5: StartupView {
