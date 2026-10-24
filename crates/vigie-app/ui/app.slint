@@ -715,6 +715,9 @@ export component AppWindow inherits Window {
     // What the button does: 0 install, 1 open the release page (a portable copy),
     // 2 nothing (an elevated Vigie must not run the installer), 3 not on this system.
     in property <int> update-mode: 3;
+    // Started again after an update from the app: the status bar links to what is new.
+    in-out property <bool> just-updated;
+    callback release-notes-clicked();
     callback update-clicked();
     callback update-check();
     in property <bool> tray-available;
@@ -1775,6 +1778,27 @@ export component AppWindow inherits Window {
                         color: root.tab != 0 && root.notice-failed() ? Theme.danger : Theme.text-muted;
                         font-size: Theme.font-caption;
                         horizontal-stretch: 1;
+                    }
+                    // Just updated: what the new version brings, one click away.
+                    if root.just-updated && root.update-state != 3 && root.update-state != 4 && root.update-state != 6: HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: Theme.space-2;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: Theme.accent;
+                        }
+                        Cell {
+                            text: @tr("Vigie {} is installed · See what's new", root.app-version);
+                            color: Theme.accent;
+                            font-size: Theme.font-caption;
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.release-notes-clicked(); }
+                            }
+                        }
                     }
                     // A newer version, from every view: one click installs it (decision 0012).
                     if root.update-state == 3 || root.update-state == 4 || root.update-state == 6: HorizontalLayout {

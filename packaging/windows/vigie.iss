@@ -76,7 +76,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\vigie.exe"; Description: "{cm:LaunchVigie}"; Flags: nowait postinstall skipifsilent
 ; An update from the app (decision 0012) runs silently and asks for Vigie to start again.
-Filename: "{app}\vigie.exe"; Flags: nowait; Check: RelaunchAsked
+Filename: "{app}\vigie.exe"; Parameters: "--updated"; Flags: nowait; Check: RelaunchAsked
 
 [UninstallDelete]
 Type: dirifempty; Name: "{app}"

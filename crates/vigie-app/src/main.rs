@@ -78,6 +78,17 @@ fn main() -> anyhow::Result<()> {
             .into(),
     );
     update::hold_instance(instance);
+    // After an update from the app: "Vigie X is installed · See what's new" until clicked.
+    app.set_just_updated(options.updated);
+    let weak = app.as_weak();
+    app.on_release_notes_clicked(move || {
+        if let Some(app) = weak.upgrade() {
+            app.set_just_updated(false);
+            if let Some(version) = vigie_core::update::Version::parse(&app.get_app_version()) {
+                vigie_shell::desktop::open_url(&vigie_core::update::release_page(version));
+            }
+        }
+    });
     // Updates (decision 0012): never from a test run, unless it pretends an older version.
     let updater = Rc::new(match &options.pretend_version {
         Some(version) => update::start(&app, true, version.clone(), std::time::Duration::from_secs(2)),
