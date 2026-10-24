@@ -678,7 +678,7 @@ fn send(
 #[derive(Default)]
 struct ExeCache {
     by_path: HashMap<PathBuf, Details>,
-    next_icon: u32,
+    icon_ids: IconIds,
     icon_size: u32,
     details: Vec<ProcDetails>,
 }
@@ -714,7 +714,7 @@ impl ExeCache {
             let mut details = match &found.exe {
                 Some(exe) => Self::lookup(
                     &mut self.by_path,
-                    &mut self.next_icon,
+                    &mut self.icon_ids,
                     self.icon_size,
                     probe,
                     exe,
@@ -735,11 +735,34 @@ impl ExeCache {
     }
 }
 
+/// Icon ids, one per distinct image: the many executables sharing one icon (build outputs,
+/// versioned copies of an app) share one image in the UI's model, which never shrinks.
+#[derive(Default)]
+struct IconIds {
+    next: u32,
+    by_pixels: HashMap<u64, u32>,
+}
+
+impl IconIds {
+    /// The id of `icon`, pushed to `icons` (new to the UI) when no earlier image matches.
+    fn id_of(&mut self, icon: Icon, icons: &mut Vec<(u32, Icon)>) -> u32 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (icon.width, icon.height, &icon.rgba).hash(&mut hasher);
+        *self.by_pixels.entry(hasher.finish()).or_insert_with(|| {
+            let id = self.next;
+            self.next += 1;
+            icons.push((id, icon));
+            id
+        })
+    }
+}
+
 impl ExeCache {
     /// What `exe` says about itself, read once; a new icon is added to `icons`.
     fn lookup(
         by_path: &mut HashMap<PathBuf, Details>,
-        next_icon: &mut u32,
+        icon_ids: &mut IconIds,
         icon_size: u32,
         probe: &mut impl Probe,
         exe: &std::path::Path,
@@ -749,12 +772,7 @@ impl ExeCache {
             return details.clone();
         }
         let info = probe.exe_info(exe, icon_size);
-        let icon = info.icon.map(|icon| {
-            let id = *next_icon;
-            *next_icon += 1;
-            icons.push((id, icon));
-            id
-        });
+        let icon = info.icon.map(|icon| icon_ids.id_of(icon, icons));
         let details = Details {
             icon,
             publisher: info.publisher.map(Into::into),
@@ -774,7 +792,7 @@ impl ExeCache {
     ) -> Details {
         Self::lookup(
             &mut self.by_path,
-            &mut self.next_icon,
+            &mut self.icon_ids,
             self.icon_size,
             probe,
             exe,

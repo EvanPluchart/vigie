@@ -644,9 +644,12 @@ export component AppWindow inherits Window {
     // Height of the history panel; dragged from its top edge.
     in-out property <length> history-height: 280px;
     callback layout-edited();
-    // A smaller window shrinks the panel, so the table keeps a few rows.
+    // Tallest the panel may be, so the table keeps a few rows. Set on resize (not bound to the
+    // window height, which the layout itself depends on); `history-height`, the user's
+    // choice, stays saved for when the window grows again.
+    private property <length> history-cap: 2000px;
     changed height => {
-        root.history-height = min(root.history-height, max(150px, root.height - 300px));
+        root.history-cap = max(150px, root.height - 300px);
     }
     in property <GraphData> process-cpu-graph;
     in property <GraphData> process-memory-graph;
@@ -1477,7 +1480,7 @@ export component AppWindow inherits Window {
             // History of the selected process: CPU and memory over the chosen range.
             if root.history-open: history-panel := Rectangle {
                 // The table keeps at least a few rows above the panel.
-                height: max(150px, root.history-height);
+                height: clamp(root.history-height, 150px, root.history-cap);
                 background: Theme.surface;
                 clip: true;
                 Rectangle { y: 0; height: 1px; background: Theme.border; }
