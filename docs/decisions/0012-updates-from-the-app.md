@@ -27,7 +27,7 @@ Until now Vigie went online only when the user asked (decision 0010, "Search onl
   1. Download `Vigie-X.Y.Z-setup.exe` and `SHA256SUMS` from the release into a new folder under `%TEMP%`.
   2. Check the installer's SHA-256 against its line in `SHA256SUMS`. A missing line or a mismatch refuses the update; releases from 0.1.2 on publish `SHA256SUMS`.
   3. Release the single instance.
-  4. Start the installer with `/SILENT /SUPPRESSMSGBOXES /NORESTART /relaunch=1`, then quit.
+  4. Start the installer with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /relaunch=1` (no window at all: Vigie disappears and comes back), then quit.
   5. The installer replaces the file and starts Vigie again with `--updated` (its `[Run]` entry for `/relaunch=1`). The status bar then says "Vigie X is installed · See what's new", which opens the release notes.
 * **A failure is never silent:** the reason shows in Settings, and the release page stays one click away.
 * **Integrity:** HTTPS to GitHub, plus the checksum from the same release. The checksum catches a truncated or corrupted download, not a compromised release. Signing the binaries (decision 0009) remains the real answer.
