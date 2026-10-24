@@ -108,10 +108,26 @@ pub struct Instance {
     _inner: instance_windows::Instance,
 }
 
+/// A later launch asking for the window. Call `done` from the UI thread once the window is
+/// shown: a launch that gets no answer starts a Vigie of its own, in case this one hangs.
+#[derive(Debug)]
+pub struct ShowRequest {
+    #[cfg_attr(not(windows), allow(dead_code))]
+    from: u32,
+}
+
+impl ShowRequest {
+    pub fn done(self) {
+        #[cfg(windows)]
+        instance_windows::confirm_shown(self.from);
+    }
+}
+
 /// Makes this process the single running Vigie: `Some` when it is the first, and `on_show` then
 /// runs (on another thread) whenever a later launch wants the window shown. `None` when Vigie
-/// already runs; it has been asked to show itself, and this process should exit.
-pub fn single_instance(on_show: impl Fn() + Send + Sync + 'static) -> Option<Instance> {
+/// already runs and showed itself: this process should exit. `Some` too when the running Vigie
+/// did not answer.
+pub fn single_instance(on_show: impl Fn(ShowRequest) + Send + Sync + 'static) -> Option<Instance> {
     #[cfg(windows)]
     {
         instance_windows::acquire(Arc::new(on_show)).map(|inner| Instance { _inner: inner })
@@ -313,6 +329,14 @@ impl Tray {
         }
     }
 
+    /// Whether the icon is on screen now (not while Explorer is down or restarting).
+    pub fn is_shown(&self) -> bool {
+        #[cfg(windows)]
+        return self.inner.is_shown();
+        #[cfg(not(windows))]
+        false
+    }
+
     /// Updates the hover text (truncated to what the system shows).
     pub fn set_tooltip(&self, tooltip: &str) {
         #[cfg(windows)]
@@ -371,11 +395,11 @@ fn clamp_into(area: Rect, x: i32, y: i32, width: i32, height: i32) -> (i32, i32)
     let margin = 8;
     let x = x.clamp(
         area.x + margin,
-        (area.x + area.width - width - margin).max(area.x),
+        (area.x + area.width - width - margin).max(area.x + margin),
     );
     let y = y.clamp(
         area.y + margin,
-        (area.y + area.height - height - margin).max(area.y),
+        (area.y + area.height - height - margin).max(area.y + margin),
     );
     (x, y)
 }
@@ -410,6 +434,8 @@ mod tests {
             (1592, 644)
         );
         assert_eq!(clamp_into(area, -50, -50, 320, 380), (8, 8));
+        // Larger than the area (a high-DPI panel on a small screen): pinned, never a panic.
+        assert_eq!(clamp_into(area, 500, 500, 4000, 3000), (8, 8));
     }
 
     /// Windows paths: only meaningful where the value is read.

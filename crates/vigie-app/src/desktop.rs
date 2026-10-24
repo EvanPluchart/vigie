@@ -136,7 +136,8 @@ pub fn set_close_to_tray(on: bool) {
 
 /// Whether closing the window should hide it to the tray rather than quit.
 pub fn closes_to_tray() -> bool {
-    DESKTOP.with_borrow(|d| d.close_to_tray && d.tray.is_some())
+    // Only behind an icon actually shown, or the window would hide out of reach.
+    DESKTOP.with_borrow(|d| d.close_to_tray && d.tray.as_ref().is_some_and(|t| t.is_shown()))
 }
 
 /// The theme the user chose changed. Slint follows the system only while the palette was never

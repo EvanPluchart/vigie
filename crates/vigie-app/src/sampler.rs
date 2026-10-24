@@ -415,7 +415,7 @@ fn execute(
             let mut first_error = None;
             let mut children_ended = 0;
             let mut target_gone = false;
-            for member in &tree {
+            for member in tree.iter().filter(|m| m.pid != sample.self_pid) {
                 match probe.act(*member, Action::End) {
                     Ok(()) if *member != target => children_ended += 1,
                     Ok(()) => {}

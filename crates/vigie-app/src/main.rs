@@ -45,8 +45,13 @@ fn main() -> anyhow::Result<()> {
     let _instance = if options.no_settings {
         None
     } else {
-        match vigie_shell::single_instance(|| {
-            let _ = slint::invoke_from_event_loop(desktop::show_main_window);
+        match vigie_shell::single_instance(|request| {
+            // Confirmed from the UI thread: a hung Vigie never confirms, and the new launch
+            // then starts instead of exiting.
+            let _ = slint::invoke_from_event_loop(move || {
+                desktop::show_main_window();
+                request.done();
+            });
         }) {
             Some(instance) => Some(instance),
             None => return Ok(()),
@@ -532,15 +537,18 @@ fn main() -> anyhow::Result<()> {
 
     // Runs until "Quit" (tray menu) or closing the window when it does not hide to the tray.
     slint::run_event_loop_until_quit().context("running the event loop")?;
-    let _ = app.hide();
-    desktop::uninstall();
-    let _ = commands.send(Command::Quit);
-    // Last resort: whatever happens to the sampler, the process ends, releasing the single
-    // instance (a Vigie that never exits blocks every later launch, Ctrl+Shift+Esc included).
+    // Last resort, armed first: whatever happens to the sampler or the tray, the process ends
+    // (a Vigie that never exits holds the single instance and blocks every later launch,
+    // Ctrl+Shift+Esc included).
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(3));
         std::process::exit(0);
     });
+    let _ = commands.send(Command::Quit);
+    // A launch from now on starts a new Vigie instead of signalling this one.
+    drop(_instance);
+    let _ = app.hide();
+    desktop::uninstall();
     // The callbacks hold senders too: replace them so the sampler sees the channel close.
     drop(commands);
     app.on_sort_clicked(|_| {});

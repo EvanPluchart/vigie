@@ -172,11 +172,12 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> 
     Ok(options)
 }
 
-/// An argument naming taskmgr.exe, quoted or not, with any folder in front.
+/// An argument naming taskmgr.exe, quoted or not, with or without `.exe` (a console passes
+/// `taskmgr` as typed), with any folder in front.
 fn names_taskmgr(arg: &str) -> bool {
     let arg = arg.trim().trim_matches('"');
     let name = arg.rsplit(['\\', '/']).next().unwrap_or(arg);
-    name.eq_ignore_ascii_case("taskmgr.exe")
+    name.eq_ignore_ascii_case("taskmgr.exe") || name.eq_ignore_ascii_case("taskmgr")
 }
 
 fn parse_sort(value: &str) -> Result<Sort, String> {
@@ -242,6 +243,8 @@ mod tests {
         // Started in place of Task Manager: its path and flags are not errors.
         let taskmgr = parse(args(&[r"C:\WINDOWS\system32\taskmgr.exe", "/4"])).unwrap();
         assert!(taskmgr.from_taskmgr);
+        assert!(parse(args(&["taskmgr"])).unwrap().from_taskmgr);
+        assert!(parse(args(&["TASKMGR", "/7"])).unwrap().from_taskmgr);
         assert!(
             parse(args(&[r#""C:\Windows\System32\Taskmgr.exe""#]))
                 .unwrap()

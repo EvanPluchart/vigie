@@ -62,7 +62,7 @@ impl Core {
                 icon: label.icon,
                 cpu_percent: cpu,
                 memory_bytes: p.memory_bytes,
-                tree_size: (self.subtree(label.target).len() as u32).saturating_sub(1),
+                tree_size: self.tree_size(p.pid),
                 own: p.pid == sample.self_pid,
             });
         }

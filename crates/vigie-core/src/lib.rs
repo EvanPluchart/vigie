@@ -196,6 +196,8 @@ pub struct Core {
     file_names: bool,
     /// Real parent links of the last sample (start times checked), for ending a whole tree.
     children: HashMap<Pid, Vec<Pid>>,
+    /// Descendants of each parent in `children` (absent: none), counted once per sample.
+    descendants: HashMap<Pid, u32>,
     /// History of the top consumers and of the selected process.
     tracker: Tracker,
     /// Section of each process of the last sample, in sample order.
@@ -310,6 +312,39 @@ impl Core {
             }
         }
         order
+    }
+
+    /// Fills `descendants` bottom-up in one pass over `children`, instead of walking each
+    /// process's subtree.
+    fn count_descendants(&mut self) {
+        self.descendants.clear();
+        // Iterative post-order; `open` guards against parent loops.
+        let mut open = HashSet::new();
+        let mut stack = Vec::new();
+        for &root in self.children.keys() {
+            if self.descendants.contains_key(&root) {
+                continue;
+            }
+            stack.push((root, false));
+            while let Some((pid, visited)) = stack.pop() {
+                let kids = self.children.get(&pid).map(Vec::as_slice).unwrap_or_default();
+                if visited {
+                    let count = kids
+                        .iter()
+                        .map(|k| 1 + self.descendants.get(k).copied().unwrap_or(0))
+                        .sum();
+                    self.descendants.insert(pid, count);
+                } else if !self.descendants.contains_key(&pid) && open.insert(pid) {
+                    stack.push((pid, true));
+                    stack.extend(kids.iter().map(|&k| (k, false)));
+                }
+            }
+        }
+    }
+
+    /// Processes "End process tree" on `pid` would end besides it.
+    pub fn tree_size(&self, pid: Pid) -> u32 {
+        self.descendants.get(&pid).copied().unwrap_or(0)
     }
 
     /// The processes of `sample` (the last one given to `update`), named as the table names
@@ -438,6 +473,7 @@ impl Core {
                 self.children.entry(parent).or_default().push(p.pid);
             }
         }
+        self.count_descendants();
         // Forget what belongs to processes that exited.
         let starts = &self.starts;
         self.expanded
@@ -494,13 +530,7 @@ impl Core {
             let p = nodes[node].p;
             Row {
                 icon: details.get(&(p.pid, p.start_time)).and_then(|d| d.icon),
-                tree_size: (self
-                    .subtree(Target {
-                        pid: p.pid,
-                        start_time: p.start_time,
-                    })
-                    .len() as u32)
-                    .saturating_sub(1),
+                tree_size: self.tree_size(p.pid),
                 own: p.pid == sample.self_pid,
                 publisher: details
                     .get(&(p.pid, p.start_time))
