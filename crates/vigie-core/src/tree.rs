@@ -99,10 +99,14 @@ pub(crate) struct Tree {
 /// Deepest ancestor walk; real trees are shallow, this only guards against corrupt parent loops.
 const MAX_DEPTH: usize = 64;
 
-pub(crate) fn build(
-    nodes: &[Node],
+/// `product_name` gives the name an app shows instead of its file name ("Brave Browser" for
+/// brave.exe), if any: sorting by name follows what the table shows.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build<'a>(
+    nodes: &[Node<'a>],
     shell: Option<Pid>,
     filter: &dyn Fn(&ProcSample) -> bool,
+    product_name: &dyn Fn(&ProcSample) -> Option<&'a str>,
     sort: Sort,
     expanded: &HashSet<ProcKey>,
     collapsed: &HashSet<Group>,
@@ -127,6 +131,13 @@ pub(crate) fn build(
         .any(|n| n.p.session.is_some() || n.p.has_window);
     let group: Vec<Group> = (0..nodes.len())
         .map(|i| group_of(i, nodes, &parent, shell, has_sessions))
+        .collect();
+    // The names rows show: product names for apps, file names for the rest.
+    let names: Vec<&str> = (0..nodes.len())
+        .map(|i| match group[i] {
+            Group::Apps => product_name(nodes[i].p).unwrap_or(&nodes[i].p.name),
+            _ => &nodes[i].p.name,
+        })
         .collect();
 
     // Nest a process under its parent when both are in the same section, except under the shell
@@ -187,9 +198,7 @@ pub(crate) fn build(
         let primary = match sort.key {
             SortKey::Cpu => fa.cpu.unwrap_or(-1.0).total_cmp(&fb.cpu.unwrap_or(-1.0)),
             SortKey::Memory => fa.memory.cmp(&fb.memory),
-            SortKey::Name => {
-                crate::lowercase(&nodes[a].p.name).cmp(crate::lowercase(&nodes[b].p.name))
-            }
+            SortKey::Name => crate::lowercase(names[a]).cmp(crate::lowercase(names[b])),
             SortKey::Pid => nodes[a].p.pid.cmp(&nodes[b].p.pid),
             SortKey::Io => fa.io.unwrap_or(-1.0).total_cmp(&fb.io.unwrap_or(-1.0)),
             SortKey::Threads => fa.threads.cmp(&fb.threads),

@@ -221,6 +221,11 @@ fn main() -> anyhow::Result<()> {
     app.on_open_storage_settings(|| {
         vigie_shell::desktop::open_storage_settings();
     });
+    app.global::<PortNav>().on_index_of(|rows, key| {
+        rows.iter()
+            .position(|r| r.key == key)
+            .map_or(-1, |i| i32::try_from(i).unwrap_or(-1))
+    });
     let nav = app.global::<MenuNav>();
     nav.on_next(|items, start, step| {
         let entries: Vec<MenuEntry> = items.iter().collect();

@@ -130,6 +130,12 @@ component Unavailable inherits Text {
 
 // ---------------------------------------------------------------- Ports
 
+// Where a row is now: the table re-sorts and filters between key presses.
+export global PortNav {
+    // Index of the row with `key`, -1 if none.
+    pure callback index-of([PortRowUi], string) -> int;
+}
+
 export component PortsView inherits Rectangle {
     in property <[PortRowUi]> rows;
     in property <[image]> icons;
@@ -217,7 +223,9 @@ if root.available && root.rows.length > 0: ports-keys := FocusScope {
             key-pressed(event) => {
                 if (root.rows.length == 0) { return reject; }
                 if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
-                    root.cursor = clamp(root.cursor + (event.text == Key.DownArrow ? 1 : -1), 0, root.rows.length - 1);
+                    // From where the selected socket is now, not where it was: rows move.
+                    let at = PortNav.index-of(root.rows, root.selected.key);
+                    root.cursor = at < 0 ? 0 : clamp(at + (event.text == Key.DownArrow ? 1 : -1), 0, root.rows.length - 1);
                     root.selected = root.rows[root.cursor];
                     return accept;
                 }
