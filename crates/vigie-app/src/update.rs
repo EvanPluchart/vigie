@@ -69,7 +69,7 @@ pub fn hold_instance(instance: Option<vigie_shell::Instance>) {
 
 /// Releases the single instance: a launch from now on starts a new Vigie.
 pub fn release_instance() {
-    INSTANCE.with_borrow_mut(|held| drop(held.take()));
+    INSTANCE.with_borrow_mut(|held| *held = None);
 }
 
 /// What the button can do in this process.
@@ -111,11 +111,13 @@ pub fn start(app: &AppWindow, enabled: bool, current: String, first: Duration) -
 
 fn run(weak: &Weak<AppWindow>, shared: &Shared, current: &str, first: Duration) {
     let mut next = Instant::now() + first;
+    // The version a notification already announced: once per version.
+    let mut announced = None;
     loop {
         let asked = shared.asked.swap(false, Ordering::Relaxed);
         let due = shared.enabled.load(Ordering::Relaxed) && Instant::now() >= next;
         if (asked || due) && !shared.busy.load(Ordering::Relaxed) {
-            check(weak, current, asked);
+            check(weak, current, asked, &mut announced);
             next = Instant::now() + EVERY;
         }
         // Woken early by "Check now" or by the setting turned on.
@@ -126,7 +128,7 @@ fn run(weak: &Weak<AppWindow>, shared: &Shared, current: &str, first: Duration) 
 
 /// One check. A background check that fails stays quiet (being offline is normal); one the
 /// user asked for says why.
-fn check(weak: &Weak<AppWindow>, current: &str, asked: bool) {
+fn check(weak: &Weak<AppWindow>, current: &str, asked: bool, announced: &mut Option<Version>) {
     if asked {
         set_state(weak, CHECKING, String::new(), (0, String::new()));
     }
@@ -135,7 +137,16 @@ fn check(weak: &Weak<AppWindow>, current: &str, asked: bool) {
     });
     match latest {
         Ok(latest) => match update::newer(current, latest) {
-            Some(newer) => set_state(weak, AVAILABLE, newer.to_string(), (0, String::new())),
+            Some(newer) => {
+                set_state(weak, AVAILABLE, newer.to_string(), (0, String::new()));
+                // A system notification, once per version, unless the user is checking.
+                if !asked && *announced != Some(newer) {
+                    *announced = Some(newer);
+                    let _ = weak.upgrade_in_event_loop(move |app| {
+                        crate::desktop::notify_update(&app, &newer.to_string());
+                    });
+                }
+            }
             None => set_state(weak, UP_TO_DATE, String::new(), (0, String::new())),
         },
         Err(error) if asked => set_state(weak, FAILED, String::new(), (CHECK_FAILED, error)),

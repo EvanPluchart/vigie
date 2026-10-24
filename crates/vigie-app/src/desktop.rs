@@ -28,6 +28,9 @@ struct Desktop {
     /// When the mini view last closed because it lost focus: a click on the tray icon makes it
     /// lose focus first, and that same click must close it, not open it again.
     focus_closed_at: Option<std::time::Instant>,
+    /// The view a click on the last notification opens: Diagnostics for alerts, Settings for
+    /// a new version.
+    notification_tab: i32,
 }
 
 thread_local! {
@@ -175,6 +178,20 @@ fn system_scheme(app: &AppWindow) -> i32 {
     }
 }
 
+/// Says once that `version` is out; a click on it opens Settings.
+pub fn notify_update(app: &AppWindow, version: &str) {
+    let text = app.global::<NotifyText>();
+    DESKTOP.with_borrow_mut(|d| {
+        if let Some(tray) = &d.tray {
+            d.notification_tab = 6;
+            tray.notify(
+                &text.invoke_update_title(version.into()),
+                &text.invoke_update_body(),
+            );
+        }
+    });
+}
+
 /// Sends one notification (the `--notify-test` flag).
 pub fn notify_test(app: &AppWindow) {
     let alert = AlertUi {
@@ -194,6 +211,9 @@ pub fn on_frame(
     mini: Option<MiniUi>,
 ) {
     let text = app.global::<NotifyText>();
+    if !alerts.is_empty() {
+        DESKTOP.with_borrow_mut(|d| d.notification_tab = 2);
+    }
     DESKTOP.with_borrow(|d| {
         if let Some(tray) = &d.tray {
             for alert in &alerts {
@@ -227,7 +247,8 @@ fn on_tray_event(app: &AppWindow, event: TrayEvent) {
         TrayEvent::Open => show_main(app),
         TrayEvent::NotificationClicked => {
             show_main(app);
-            app.invoke_show_tab(2);
+            let tab = DESKTOP.with_borrow(|d| d.notification_tab);
+            app.invoke_show_tab(if tab == 0 { 2 } else { tab });
         }
         TrayEvent::Quit => {
             let _ = slint::quit_event_loop();

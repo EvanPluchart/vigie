@@ -75,6 +75,9 @@ export global NotifyText {
         return cpu == "" ? "Vigie" : @tr("Vigie · CPU {} · Memory {}", cpu, memory);
     }
 
+    pure public function update-title(version: string) -> string { return @tr("Vigie {} is available", version); }
+    pure public function update-body() -> string { return @tr("Click to install it in one click from Vigie."); }
+
     pure public function menu-open() -> string { return @tr("Open Vigie"); }
     pure public function menu-quit() -> string { return @tr("Quit"); }
 }
@@ -1772,6 +1775,34 @@ export component AppWindow inherits Window {
                         color: root.tab != 0 && root.notice-failed() ? Theme.danger : Theme.text-muted;
                         font-size: Theme.font-caption;
                         horizontal-stretch: 1;
+                    }
+                    // A newer version, from every view: one click installs it (decision 0012).
+                    if root.update-state == 3 || root.update-state == 4 || root.update-state == 6: HorizontalLayout {
+                        horizontal-stretch: 0;
+                        spacing: Theme.space-2;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: Theme.accent;
+                        }
+                        update-link := Cell {
+                            text: root.update-state == 4 ? @tr("Downloading Vigie {}…", root.update-version)
+                                : root.update-state == 6 ? @tr("Installing Vigie {}…", root.update-version)
+                                : root.update-mode == 0 ? @tr("Vigie {} is available · Update", root.update-version)
+                                : @tr("Vigie {} is available", root.update-version);
+                            color: Theme.accent;
+                            font-size: Theme.font-caption;
+                            TouchArea {
+                                mouse-cursor: root.update-state == 3 ? pointer : default;
+                                clicked => {
+                                    if (root.update-state != 3) { return; }
+                                    // Installs at once when it can; otherwise Settings says why.
+                                    if (root.update-mode == 0) { root.update-clicked(); } else { root.show-tab(6); }
+                                }
+                            }
+                        }
                     }
                 }
             }
